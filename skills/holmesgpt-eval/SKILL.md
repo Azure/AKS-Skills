@@ -25,10 +25,7 @@ Agent-native flow (what the agent should do)
          - after:  bash --noprofile --norc -eo pipefail ./.after.sh
        - Always set cwd to the case directory so relative paths resolve.
        - Capture stdout, stderr, and exit code for both before and after.
-     - Ask the agent itself the user_prompt:
-       - Preferred isolation: spawn an isolated sub-agent (sessions_spawn) per case to avoid cross-case state.
-       - Send the user_prompt to that sub-agent (sessions_send) and collect the assistant’s textual reply (sessions_history).
-       - Alternatively, answer inline in the current session if isolation isn’t needed.
+     - Ask the agent itself the user_prompt (inline in the current session) and capture the raw textual reply.
      - Score the agent’s answer against expected_output.
      - Always run after_test (as above) to clean up, even if before/ask/score failed.
 3) Write results under skills/holmesgpt-eval/results/<timestamp>:
@@ -77,15 +74,20 @@ Shell execution hygiene (avoid interactive prompts)
 - Do not use login shells (-l) which may source profile files and trigger interactive prompts.
 - Capture stdout/stderr/exit code for both before and after scripts, and record them in case results.
 
-External runners
-- External shell/HTTP runners have been removed. This skill focuses exclusively on the agent-native flow described above.
+Gold-blind answering (prevent peeking at expected_output)
+- Fixtures are preprocessed during fetch: expected_output is split into a separate gold.json under skills/holmesgpt-eval/_gold, and a solver YAML (test_case.solver.yaml) is generated without expected_output.
+- The runner loads user_prompt and before/after from test_case.solver.yaml, answers, then reads expected_output from gold.json for scoring.
+- Record audit details per case: timestamps (answered_at < scored_at) and working directory used during answer.
 
 Report format
 - Keep it concise and consistent:
   - Title, date, summary: X passed, Y failed, Z skipped
-  - Per-case: status (PASSED/FAILED/SKIPPED), prompt, expected elements, agent output, missing elements (if any)
+  - Per-case: status (PASSED/FAILED/SKIPPED), prompt, expected elements, Agent output (verbatim), missing elements (if any), mode
+  - Agent output requirements:
+    - Always include the agent’s raw textual answer in the report for each case
+    - Truncate to ~2000 characters if very long; add “(truncated)” marker
+    - Redact common secrets (bearer tokens, AKV/ARN/AK/SK patterns) if detected
   - Record the evaluation mode used per case (strict or loose)
 
 Notes
-- Sub-agents are recommended per case (sessions_spawn) to keep reasoning isolated, but before_test/after_test must run in the shared environment to properly mutate/clean whatever state the fixture requires.
 - Avoid leaking prior-case context into the next case; clear or isolate as needed.
