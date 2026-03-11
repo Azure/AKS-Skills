@@ -1,62 +1,76 @@
 ---
 name: holmesgpt-eval
-description: "Run HolmesGPT evals (tests/llm/fixtures/test_ask_holmes) against the current agent itself (OpenClaw-native). For each case, run before_test, ask user_prompt using the agent’s own reasoning/tools, compare the agent output to expected_output (scoring rules below), always run after_test, and generate JSON + Markdown reports. Includes optional shell/HTTP backends for external agents."
+description: "Run HolmesGPT evals (tests/llm/fixtures/test_ask_holmes) against the current agent itself (agent-native). The agent must answer the prompts itself (no external wrapper) using its own tools, run before_test/after_test around each case, compare the answer to expected_output using the scoring rules here, and generate JSON + Markdown reports. This skill focuses exclusively on the agent-native flow."
 ---
 
-HolmesGPT Eval — OpenClaw-Native First
+HolmesGPT Eval — Agent-Native (Self-Answer)
 
 Primary purpose
-- Direct the current agent (OpenClaw) to evaluate itself against HolmesGPT’s eval fixtures.
-- The agent should execute the full loop internally: run before_test, answer user_prompt using its own tools (e.g., kubectl), compare to expected_output, run after_test, and produce reports.
+- Evaluate the current agent against HolmesGPT’s eval fixtures by having the agent answer each user_prompt itself.
+- No HTTP bridge or shell wrapper for answering — the agent’s own tools should be used to produce the answer string that gets scored.
 
-Quick start (OpenClaw-native)
-1) Fetch fixtures (no local path required):
-   - Run scripts/fetch_fixtures.sh (the agent can call it via exec) to clone/update HolmesGPT and return the path to tests/llm/fixtures/test_ask_holmes.
-2) Iterate cases (agent internal loop):
-   - For each case directory containing test_case.yaml:
-     - exec the before_test block in that directory
-     - Ask the agent itself the user_prompt (use the agent’s standard reply path so tools like kubectl are available)
-     - Score the agent’s answer against expected_output (see Scoring Rules)
-     - Always exec the after_test block
-3) Write results to skills/holmesgpt-eval/results/<timestamp>/:
-   - results.json (per-case details, scores)
-   - report.md (human-readable summary)
-   - latest-results.md updated to the newest report
+Agent-native flow (what the agent should do)
+1) Fetch fixtures automatically (no local path needed):
+   - Call scripts/fetch_fixtures.sh via exec to clone/update HolmesGPT and return tests/llm/fixtures/test_ask_holmes.
+2) Iterate each case directory containing test_case.yaml:
+   - Parse test_case.yaml and determine case controls before executing anything:
+     - If evaluation.correctness.expected_score == 0 → SKIP this case entirely (do not run before_test/after_test). Record as skipped with reason.
+     - Determine evaluation mode for this case (see Scoring Rules → Mode selection).
+   - For non-skipped cases:
+     - Run before_test in that directory (exec with cwd so relative paths work).
+     - Ask the agent itself the user_prompt:
+       - Preferred isolation: spawn an isolated sub-agent (sessions_spawn) per case to avoid cross-case state.
+       - Send the user_prompt to that sub-agent (sessions_send) and collect the assistant’s textual reply (sessions_history).
+       - Alternatively, answer inline in the current session if isolation isn’t needed.
+     - Score the agent’s answer against expected_output.
+     - Always run after_test in that directory to clean up.
+3) Write results under skills/holmesgpt-eval/results/<timestamp>:
+   - results.json — array of case results (prompt, expected, output, pass/fail, skipped, details)
+   - report.md — concise summary (pass/fail/skip counts; per-case status, expected list, output, missing elements if any)
+   - latest-results.md — points to the latest report
 
-Scoring rules (for the agent to apply)
-- Two modes to mirror classifiers.py intent without external LLMs:
-  1) strict (default): Pass only if ALL expected elements are sufficiently present in the output.
-  2) loose: Pass if the output reasonably matches the expected content overall.
+Scoring rules for the agent
+- Mode selection (per-case):
+  - Default to strict mode.
+  - If the test_case.yaml contains evaluation.correctness.type, use that value to set the mode for this case.
+    - Supported values (case-insensitive): strict, loose
+    - Unknown/absent values: fall back to strict
+  - Example YAML snippet:
+    
+    evaluation:
+      correctness:
+        type: loose
+
+- Modes:
+  - strict: pass only if ALL expected elements are sufficiently present in the output
+  - loose: pass if the output reasonably matches the expected content overall
+
 - “Sufficiently present” guidance:
-  - Case-insensitive comparison; ignore trivial punctuation/whitespace differences.
-  - Numeric normalization is acceptable (e.g., "14" vs "fourteen") when unambiguous.
-  - Minor paraphrases are OK if the essence is clearly conveyed.
-  - For list-like expectations, presence can span multiple sentences.
-- Deterministic fallback (when in doubt): use substring presence as a conservative proxy — strict = all substrings found, loose = any substring found.
+  - Case-insensitive; ignore trivial punctuation/whitespace differences
+  - Numeric normalization OK when unambiguous (e.g., 14 vs fourteen)
+  - Minor paraphrases allowed if the essence is clear; elements may span multiple sentences
+
+- Deterministic baseline when unsure:
+  - strict = all expected substrings present (case-insensitive)
+  - loose = any expected substring present
+
+Skipping cases
+- If evaluation.correctness.expected_score is present and equals 0, skip the case entirely and record it as skipped.
+- Skipped cases should not execute before_test/after_test or scoring.
+- Record in results.json: { skipped: true, skip_reason: "expected_score == 0" }
 
 Kubernetes-aware fixtures
-- Some before_test/after_test scripts apply and delete Kubernetes resources. The agent should run them in the case directory context so relative paths (e.g., manifests.yaml) work.
+- before_test/after_test often apply and delete Kubernetes manifests; run them with cwd set to the case directory so relative paths (e.g., manifests.yaml) resolve.
 
-Optional external backends (fallbacks)
-- If you prefer to test an external agent or wrapper instead of the current agent, use the provided runner scripts:
-  - scripts/run.sh — convenience wrapper (supports --auto-fetch)
-  - scripts/run_eval.py — Python runner (lightweight YAML parser)
-- Modes:
-  - shell: provide --ask-cmd to run any CLI agent; prompt is piped to stdin, answer read from stdout
-  - http: provide --holmes-url for a POST-compatible endpoint ({"ask": str, "stream": false})
+External runners
+- External shell/HTTP runners have been removed. This skill focuses exclusively on the agent-native flow described above.
 
-Examples (external backends)
-- Shell:
-  skills/holmesgpt-eval/scripts/run.sh --auto-fetch --mode shell --ask-cmd "my-agent-cli" --filter 01_how_many_pods
-- HTTP:
-  skills/holmesgpt-eval/scripts/run.sh --auto-fetch --mode http --holmes-url http://127.0.0.1:5050
-
-Outputs
-- results/<timestamp>/results.json — machine-readable results
-- results/<timestamp>/report.md — human-readable summary
-- latest-results.md — redirector to the latest report
+Report format
+- Keep it concise and consistent:
+  - Title, date, summary: X passed, Y failed, Z skipped
+  - Per-case: status (PASSED/FAILED/SKIPPED), prompt, expected elements, agent output, missing elements (if any)
+  - Record the evaluation mode used per case (strict or loose)
 
 Notes
-- Default expectation: When this skill is loaded by OpenClaw, the agent should run the OpenClaw-native flow (no HTTP client needed). The HTTP client exists only for the optional external-backend mode.
-- The agent may use isolated sub-agents (sessions_spawn) per case to avoid cross-case state contamination, but must still run before_test/after_test in the shared environment so cluster state is set/cleaned correctly.
-- Keep reports concise and consistent with run_benchmarks_local.py style.
+- Sub-agents are recommended per case (sessions_spawn) to keep reasoning isolated, but before_test/after_test must run in the shared environment to properly mutate/clean cluster state.
+- Avoid leaking prior-case context into the next case; clear or isolate as needed.
