@@ -44,15 +44,15 @@ Agent-native flow (what the agent should do)
 
 Scoring rules for the agent
 - Mode selection (per-case):
-  - Default to strict mode.
+  - Default to loose mode.
   - If the test_case.yaml contains evaluation.correctness.type, use that value to set the mode for this case.
     - Supported values (case-insensitive): strict, loose
-    - Unknown/absent values: fall back to strict
+    - Unknown/absent values: fall back to loose
   - Example YAML snippet:
     
     evaluation:
       correctness:
-        type: loose
+        type: strict
 
 - Modes:
   - strict: pass only if ALL expected elements are sufficiently present in the output
