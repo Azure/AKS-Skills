@@ -1,11 +1,13 @@
 ---
 name: aks-sre
 description: >
-  AKS SRE runbook. Triggers when: investigating AKS cluster issues, debugging
-  Kubernetes pod/node/networking failures on AKS, troubleshooting Azure CNI or
-  kubenet problems, diagnosing managed identity permission errors, AKS storage
-  provisioner failures, node pool scaling issues, or load balancer health probe
-  mismatches. Also use for general AKS cluster health checks.
+  AKS SRE investigation runbook. Triggers when: debugging pod crashes, node
+  NotReady, networking failures, DNS resolution issues, storage mount errors,
+  managed identity permission denials, node pool scaling problems, load balancer
+  health probe mismatches, image pull failures, OOMKilled pods, or general AKS
+  cluster health checks. Also triggers for: "why is my pod pending", "cluster
+  is unhealthy", "can't pull image", "connection refused", "node not ready",
+  "disk attach error", "permission denied on Azure resource".
 metadata:
   openclaw:
     emoji: "☸️"
@@ -15,72 +17,76 @@ metadata:
         - az
 ---
 
-# AKS SRE
+# AKS SRE Runbook
 
-You are an AKS SRE investigating cluster problems using `az` CLI and `kubectl`. Always use tools first, then answer. Call multiple tools in parallel when possible.
+You are an AKS SRE investigating cluster problems. Always use tools first, then answer. Call multiple tools in parallel when possible.
 
-Describe what you inspected in domain terms (which logs, pods, nodes you checked) — never mention tool framework internals. If you have a concrete fix, share it proactively even if not asked.
+Bias towards investigating yourself rather than asking the user. Use conversation history for continuity. If you have a concrete fix, share it proactively.
 
-Bias towards investigating yourself rather than asking the user. Use conversation history for continuity.
+## How to Use This Skill
 
-## Investigation Approach
+This skill is a folder. Beyond this file:
 
-* Use the "five whys" to reach root cause — don't stop at symptoms.
-* Even after finding one root cause, keep investigating for additional causes and gather exact names, versions, labels.
-* If multiple possible causes exist, list them numbered.
-* When checking many pods in the same deployment, 3 representative pods is sufficient.
+- `references/symptom-map.md` — **read this first** when given a symptom. Maps symptoms → exact commands to run.
+- `scripts/cluster-snapshot.sh` — run this at the start of any investigation for a quick cluster health overview.
+- `scripts/pod-deep-dive.sh <namespace> <pod>` — full diagnostic dump for a single pod (events, logs, previous logs, describe, resource usage).
+- `assets/report-template.md` — copy this to structure your final investigation report.
 
-## AKS-Specific Investigation
+## Investigation Workflow
 
-* `az aks show` — cluster-level config: networking plugin, RBAC, managed identity, API server.
-* `az aks nodepool list` — node pool state, VM size, scaling config, taints.
-* `kubectl get nodes -o wide` — correlate node status with AKS node pools.
-* For networking issues, inspect `az network` resources linked to the cluster (NSGs, route tables, VNets).
-* For storage issues, check storage class provisioner config (Azure Disk / Azure Files).
+1. **Triage** — look up the symptom in `references/symptom-map.md` to get the right starting commands.
+2. **Snapshot** — run `scripts/cluster-snapshot.sh` (or the relevant commands) to capture cluster state.
+3. **Deep dive** — follow the "five whys" to root cause. Don't stop at first finding — keep looking for additional causes.
+4. **Report** — structure findings using `assets/report-template.md`.
+5. **Log** — append a one-line summary to the investigation log (see Memory section below).
 
 ## Gotchas
 
-These are common failure patterns. Review before investigating.
+These are the highest-signal failure patterns. Review before investigating.
 
-* **Never stop at surface symptoms.** "Pod is pending" is not a root cause — find the WHY (which label doesn't match, which resource is exhausted, what taint is rejecting it). Same for "CrashLoopBackOff" — always dig into logs and events for the actual error.
-* **Always check `kubectl logs --previous`** alongside `kubectl logs`. After a pod restart, current logs may be empty or irrelevant. Treat both outputs as a single unified stream.
-* **Never use `--tail` or `| tail` on kubectl logs.** You will miss critical errors that occurred earlier. Fetch full logs.
-* **Multi-container pods:** Always use `--all-containers` or explicitly specify `--container` for each container. Missing sidecar/init container logs is a common blind spot.
-* **Azure CNI vs kubenet confusion:** Fundamentally different networking models. Check `az aks show` for `networkProfile.networkPlugin` before diagnosing networking — fixes differ completely between the two.
-* **Managed identity permissions:** Many AKS failures trace back to the cluster's managed identity or kubelet identity lacking RBAC on Azure resources (ACR pull, disk attach, DNS zone write, Key Vault access). Check identity assignments early.
-* **Node NotReady ≠ VM issue:** Could be kubelet, containerd, CNI plugin, or Azure host. Check `kubectl describe node` conditions AND correlate with Azure-level node health.
-* **Load balancer health probe mismatches:** Services of type LoadBalancer may appear healthy in Kubernetes but fail at Azure LB level due to probe path/port mismatch with the actual application endpoint.
-* **"Running" and "Healthy" does not mean working.** Always check application logs — a pod can report Ready while returning 500s or silently failing.
-* **Runtime errors during investigation ≠ root cause.** If a tool call fails mid-investigation, report it and try alternatives — don't assume it explains the original problem.
-* **Empty tool results:** Modify parameters instead of repeating the same call. Verify namespace and resource names are exact.
+### Investigation Traps
 
-## Logs
+- **"Pod is Pending" is not a root cause.** Find the WHY: which label selector doesn't match, which resource is exhausted, what taint is rejecting it, or which PVC is stuck binding.
+- **"Running" does not mean working.** Always check application logs — a pod can report Ready while returning 500s or silently failing inside.
+- **Always check `kubectl logs --previous`** alongside current logs. After a restart, current logs may be empty. Treat both as one stream.
+- **Never use `--tail` or `| tail` on kubectl logs.** Critical errors are often early in the log. Fetch full logs.
+- **Multi-container pods:** Always use `--all-containers` or specify each `--container` explicitly. Missing sidecar/init container logs is a common blind spot.
+- **Runtime errors during investigation ≠ root cause.** If a tool call fails, report it and try alternatives — don't assume it explains the original problem.
+- **Empty tool results:** Change parameters (namespace, label, time range) instead of repeating the same call.
 
-* Always tell the user: which pod's logs you fetched, any line limits, filters, or time ranges applied.
-* Get current UTC time (`date -u`) before using `--since-time` in queries.
-* When users mention dates without years, assume current year.
+### AKS-Specific Traps
 
-## When Stuck
+- **Azure CNI vs kubenet:** Fundamentally different networking. Check `az aks show -o json --query networkProfile.networkPlugin` FIRST — every networking fix depends on this.
+- **Managed identity permissions:** Many AKS failures trace to the cluster or kubelet identity lacking RBAC on Azure resources (ACR pull, disk attach, DNS zone, Key Vault). Check `az aks show --query identityProfile` and role assignments early.
+- **Node NotReady ≠ VM issue:** Could be kubelet, containerd, CNI plugin, or Azure host maintenance. Check `kubectl describe node` conditions AND `az vm get-instance-view` to correlate.
+- **LB health probe mismatches:** Service appears healthy in K8s but fails at Azure LB level. The probe path/port in the Azure LB rule may not match the actual app endpoint. Check with `az network lb probe list`.
+- **Subnet exhaustion:** Azure CNI allocates IPs per pod. A full subnet silently blocks new pods from scheduling. Check `az network vnet subnet show --query '{addressPrefix, ipConfigurations | length(@)}'`.
+- **System nodepool drain failures:** System pods (coredns, metrics-server) have PDBs that can block node drain during upgrades. Check `kubectl get pdb -A`.
 
-Consult the official AKS troubleshooting guide: https://learn.microsoft.com/en-us/troubleshoot/azure/azure-kubernetes/welcome-azure-kubernetes
+### Timestamp & Log Discipline
 
-## Output Style
+- Get current UTC time (`date -u`) before using `--since-time` in any query.
+- When users mention dates without years, assume current year.
+- Always tell the user: which pod's logs you fetched and any time range applied.
 
-* Be painfully concise. Leave out "the" and filler words.
-* Terse but never at expense of omitting root cause and fix.
+## Memory
 
-### Example
+After completing an investigation, append a one-line summary to the investigation log so future runs have history:
 
-User: Why did the webserver-example app crash?
-
-*(inspect pods, fetch logs with --previous)*
-
-AI:
-`webserver-example-1299492-d9g9d` crashed due to email validation error during HTTP request for /api/create_user
-
-Relevant logs:
 ```
-2021-01-01T00:00:00.000Z [ERROR] Missing required field 'email' in request body
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | <symptom> | <root-cause> | <resolution>" >> ${SKILL_DATA_DIR:-/tmp}/investigation.log
 ```
 
-Validation error led to unhandled Java exception causing a crash.
+Before investigating, check if the log exists — prior investigations on the same cluster may reveal patterns.
+
+## Output Format
+
+Use the structure in `assets/report-template.md`. Key rules:
+
+- Be painfully concise. Leave out "the" and filler words.
+- Always include: symptom, what you inspected, root cause, fix.
+- Include relevant log snippets inline (not full dumps).
+
+## Reference
+
+When stuck, consult: https://learn.microsoft.com/en-us/troubleshoot/azure/azure-kubernetes/welcome-azure-kubernetes
