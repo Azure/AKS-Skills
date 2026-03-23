@@ -1,13 +1,6 @@
 ---
 name: aks-sre
-description: >
-  AKS SRE investigation runbook. Triggers when: debugging pod crashes, node
-  NotReady, networking failures, DNS resolution issues, storage mount errors,
-  managed identity permission denials, node pool scaling problems, load balancer
-  health probe mismatches, image pull failures, OOMKilled pods, or general AKS
-  cluster health checks. Also triggers for: "why is my pod pending", "cluster
-  is unhealthy", "can't pull image", "connection refused", "node not ready",
-  "disk attach error", "permission denied on Azure resource".
+description: AKS related issue
 metadata:
   openclaw:
     emoji: "☸️"
