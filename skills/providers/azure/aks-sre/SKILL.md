@@ -1,13 +1,7 @@
 ---
 name: aks-sre
 description: >
-  AKS SRE investigation runbook. Triggers when: debugging pod crashes, node
-  NotReady, networking failures, DNS resolution issues, storage mount errors,
-  managed identity permission denials, node pool scaling problems, load balancer
-  health probe mismatches, image pull failures, OOMKilled pods, or general AKS
-  cluster health checks. Also triggers for: "why is my pod pending", "cluster
-  is unhealthy", "can't pull image", "connection refused", "node not ready",
-  "disk attach error", "permission denied on Azure resource".
+  AKS SRE investigation runbook. Use when investigating AKS-related problems including both Azure and Kubernetes issues. Provides structured multi-phase investigation using kubectl and Azure CLI tools and AKS-specific troubleshooting tips. The results in a detailed step by step investigation report.
 metadata:
   openclaw:
     emoji: "☸️"
@@ -27,7 +21,7 @@ Bias towards investigating yourself rather than asking the user. Use conversatio
 
 This skill is a folder. Beyond this file:
 
-- `references/symptom-map.md` — **read this first** when given a symptom. Maps symptoms → exact commands to run.
+- `references/symptom-map.md` — maps symptoms → exact commands to run. If you find a new pattern, add it to the symptom map.
 - `scripts/cluster-snapshot.sh` — run this at the start of any investigation for a quick cluster health overview.
 - `scripts/pod-deep-dive.sh <namespace> <pod>` — full diagnostic dump for a single pod (events, logs, previous logs, describe, resource usage).
 - `assets/report-template.md` — copy this to structure your final investigation report.
@@ -36,9 +30,9 @@ This skill is a folder. Beyond this file:
 
 1. **Triage** — look up the symptom in `references/symptom-map.md` to get the right starting commands.
 2. **Snapshot** — run `scripts/cluster-snapshot.sh` (or the relevant commands) to capture cluster state.
-3. **Deep dive** — follow the "five whys" to root cause. Don't stop at first finding — keep looking for additional causes.
+3. **Deep dive** — follow the "five whys" to root cause. Don't stop at first finding — keep looking for additional causes until you can explain the full chain from symptom to root cause.
 4. **Report** — structure findings using `assets/report-template.md`.
-5. **Log** — append a one-line summary to the investigation log (see Memory section below).
+5. **Log** — append a detailed summary to the investigation log (see Memory section below).
 
 ## Gotchas
 
@@ -61,7 +55,14 @@ These are the highest-signal failure patterns. Review before investigating.
 - **Node NotReady ≠ VM issue:** Could be kubelet, containerd, CNI plugin, or Azure host maintenance. Check `kubectl describe node` conditions AND `az vm get-instance-view` to correlate.
 - **LB health probe mismatches:** Service appears healthy in K8s but fails at Azure LB level. The probe path/port in the Azure LB rule may not match the actual app endpoint. Check with `az network lb probe list`.
 - **Subnet exhaustion:** Azure CNI allocates IPs per pod. A full subnet silently blocks new pods from scheduling. Check `az network vnet subnet show --query '{addressPrefix, ipConfigurations | length(@)}'`.
-- **System nodepool drain failures:** System pods (coredns, metrics-server) have PDBs that can block node drain during upgrades. Check `kubectl get pdb -A`.
+- **System nodepool drain failures:** System pods (coredns, metrics-server) have PDBs that can block node drain during upgrades. Check `kubectl get pdb -A`.\* **API server IP changes after stop/start:** When an AKS cluster is stopped and restarted, the API server IP can change. Flush DNS cache and re-run `az aks get-credentials` if kubectl can't connect after a stop/start.
+
+* **Private cluster access:** If the cluster is private, kubectl must run from a VM inside (or peered to) the cluster's VNet. Check `az aks show --query apiServerAccessProfile` for private cluster and authorized IP ranges settings.
+* **NSG/firewall blocking required egress:** AKS nodes need outbound access to specific FQDNs (AKS API, MCR, management.azure.com, etc.). A restrictive NSG or firewall causes VM extension errors (error codes 50, 51, 52) during create/upgrade. Check `az network nsg rule list` and firewall logs.
+* **SNAT port exhaustion (500+ nodes):** Large clusters using Azure Load Balancer for outbound can exhaust SNAT ports, causing intermittent egress failures. Check with `az network lb show --query outboundRules`. Fix: use NAT Gateway (`az aks update --outbound-type managedNATGateway`).
+* **Expired certificates:** Node NotReady can be caused by expired kubelet or API server certificates. Run `az aks show --query "certificateProfile"` or check `openssl s_client -connect <api-fqdn>:443` and `kubectl get csr` for pending CSRs.
+* **Upgrade max-surge default is slow:** Default max-surge of 1 means one node at a time — upgrades of large clusters take hours. Check current setting with `az aks nodepool show --query upgradeSettings` and increase with `--max-surge` if tolerable.
+* **kubectl version skew:** kubectl must be within 2 minor versions of the cluster. A stale kubectl can produce confusing errors. Verify with `kubectl version --client` vs `az aks show --query kubernetesVersion`.
 
 ### Timestamp & Log Discipline
 
@@ -71,7 +72,7 @@ These are the highest-signal failure patterns. Review before investigating.
 
 ## Memory
 
-After completing an investigation, append a one-line summary to the investigation log so future runs have history:
+After completing an investigation, append a new detailed summary to the investigation log so future runs have history:
 
 ```
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) | <symptom> | <root-cause> | <resolution>" >> ${SKILL_DATA_DIR:-/tmp}/investigation.log
