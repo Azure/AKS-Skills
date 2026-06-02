@@ -40,6 +40,10 @@ class SkillProvider {
 
     // Load the SKILL.md content
     const fullSkillPath = path.resolve(SKILLS_BASE, skillPath);
+    const skillsBaseWithSep = SKILLS_BASE.endsWith(path.sep) ? SKILLS_BASE : SKILLS_BASE + path.sep;
+    if (!fullSkillPath.startsWith(skillsBaseWithSep)) {
+      return { error: `Invalid vars.skill_path (must stay under ${SKILLS_BASE}): ${skillPath}` };
+    }
     let skillContent;
     try {
       skillContent = fs.readFileSync(fullSkillPath, 'utf-8');
