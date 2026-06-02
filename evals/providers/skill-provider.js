@@ -10,7 +10,7 @@ const path = require('path');
  *   OPENAI_API_KEY                                → OpenAI direct
  *
  * Test case vars:
- *   skill_path  — relative path from repo root to the SKILL.md file
+ *   skill_path  — relative path from the skills/ directory to the SKILL.md file
  *   prompt      — the user prompt to evaluate
  */
 
