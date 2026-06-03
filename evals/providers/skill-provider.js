@@ -14,7 +14,7 @@ const path = require('path');
  *   prompt      — the user prompt to evaluate
  */
 
-const SKILLS_BASE = path.resolve(__dirname, '../../skills');
+const SKILLS_BASE = process.env.SKILLS_BASE || path.resolve(__dirname, '../../skills');
 
 class SkillProvider {
   constructor(options) {
@@ -75,9 +75,8 @@ class SkillProvider {
 
     if (azureKey && azureEndpoint) {
       // Azure OpenAI
-      const deployment = this.config.deployment || model;
-      const apiVersion = this.config.apiVersion || '2024-08-01-preview';
-      url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+      const apiVersion = '2024-08-01-preview';
+      url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
       headers = {
         'Content-Type': 'application/json',
         'api-key': azureKey,
