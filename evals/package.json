@@ -6,9 +6,7 @@
   "scripts": {
     "lint": "node lint-skills.js",
     "eval": "promptfoo eval",
-    "eval:view": "promptfoo view",
-    "eval:aks-sre": "promptfoo eval -c promptfooconfig.yaml --filter-providers skill-eval-aks-sre",
-    "eval:network": "promptfoo eval -c promptfooconfig.yaml --filter-providers skill-eval-network-troubleshoot"
+    "eval:view": "promptfoo view"
   },
   "dependencies": {
     "promptfoo": "^0.121.13"

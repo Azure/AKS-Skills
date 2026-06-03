@@ -164,7 +164,7 @@ for (const skillDir of skillFolders) {
 
   // Metadata presence (warning, not error — not all skills need it)
   if (!frontMatter.hasMetadata) {
-    addWarning(skillMdPath, 'No metadata.openclaw section (emoji, requires.anyBins)');
+    addWarning(skillMdPath, 'No metadata section (consider adding metadata.openclaw with emoji and requires.anyBins)');
   }
 
   // Scripts

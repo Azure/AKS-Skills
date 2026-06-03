@@ -33,8 +33,9 @@ npm run eval:view
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AZURE_OPENAI_API_KEY` | Yes* | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT` | Yes* | Full endpoint URL (e.g. `https://my-resource.openai.azure.com`) |
+| `AZURE_OPENAI_ENDPOINT` | Yes* | Full endpoint URL (e.g. `https://my-resource.openai.azure.com`) — base URL only, no path suffix |
 | `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set |
+| `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5`). Set if your deployment is named differently. |
 
 *Either Azure OpenAI or OpenAI credentials must be provided.
 
@@ -86,3 +87,12 @@ The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatica
 1. **Lint** — fast-fails if SKILL.md format is invalid
 2. **Eval** — runs all test assertions against the LLM
 3. **PR comment** — posts a pass/fail table on the pull request
+
+## Running evals for a specific skill
+
+```bash
+npx promptfoo eval --filter-pattern "aks-sre"
+npx promptfoo eval --filter-pattern "network"
+```
+
+This filters test cases by their description field (regex match).

@@ -69,7 +69,7 @@ class SkillProvider {
     const azureKey = process.env.AZURE_OPENAI_API_KEY;
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const openaiKey = process.env.OPENAI_API_KEY;
-    const model = this.config.model || process.env.EVAL_MODEL || 'gpt-4o';
+    const model = process.env.EVAL_MODEL || 'gpt-5';
 
     let url, headers, body;
 
@@ -84,7 +84,6 @@ class SkillProvider {
       };
       body = JSON.stringify({
         messages,
-        temperature: this.config.temperature ?? 0.3,
       });
     } else if (openaiKey) {
       // OpenAI direct
@@ -96,7 +95,6 @@ class SkillProvider {
       body = JSON.stringify({
         model,
         messages,
-        temperature: this.config.temperature ?? 0.3,
       });
     } else {
       return {

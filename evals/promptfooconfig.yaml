@@ -15,9 +15,6 @@ description: "AKS Skills Quality Evaluation"
 providers:
   - id: file://providers/skill-provider.js
     label: "AKS Skill Provider"
-    config:
-      model: gpt-4o
-      temperature: 0.3
 
 # Prompt is handled inside the custom provider (injects SKILL.md as system context).
 # This passthrough is required by promptfoo schema.
@@ -31,11 +28,10 @@ tests:
   - file://tests/network-troubleshoot/quality-tests.yaml
 
 # LLM-as-judge for llm-rubric assertions.
-# Custom provider needed because Azure OpenAI gpt-4o rejects 'max_tokens'
-# (requires 'max_completion_tokens') and promptfoo's built-in provider sends 'max_tokens'.
+# Custom provider needed because promptfoo's built-in azureopenai provider sends
+# 'max_tokens' which newer Azure OpenAI deployments reject.
+# See: https://github.com/promptfoo/promptfoo/issues/6153
 defaultTest:
   options:
     provider:
       id: file://providers/judge-provider.js
-      config:
-        model: gpt-4o
