@@ -32,4 +32,4 @@
     prompt: "How do I resize my Azure VM that's not part of any Kubernetes cluster?"
   assert:
     - type: llm-rubric
-      value: "Response either redirects to Azure VM documentation or explicitly states this is outside AKS troubleshooting scope, rather than providing Kubernetes-specific investigation steps"
+      value: "Response does NOT provide Kubernetes-specific investigation steps like kubectl commands, pod diagnostics, or node troubleshooting. It may provide general Azure VM guidance or redirect — either is acceptable."
