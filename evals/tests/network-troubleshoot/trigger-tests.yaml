@@ -5,6 +5,8 @@
 # Each test needs: description, vars (prompt + skill_path), assert
 
 - description: "Egress blocked should trigger network-troubleshoot skill"
+  metadata:
+    skill: network-troubleshoot
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Pods can't reach external services, egress seems blocked"
@@ -13,6 +15,8 @@
       value: "Response provides network-specific troubleshooting including NSG rules, network policies, or firewall investigation"
 
 - description: "DNS resolution failure should trigger network-troubleshoot skill"
+  metadata:
+    skill: network-troubleshoot
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "DNS resolution is failing inside my pods"
@@ -21,6 +25,8 @@
       value: "Response addresses DNS-specific diagnosis including CoreDNS, resolv.conf, or Azure DNS configuration"
 
 - description: "OOMKilled should NOT produce network troubleshooting"
+  metadata:
+    skill: network-troubleshoot
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "My pod keeps getting OOMKilled with exit code 137"

@@ -5,6 +5,8 @@
 # Each test needs: description, vars (prompt + skill_path), assert
 
 - description: "CrashLoopBackOff response includes proper diagnostics"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "A pod named web-frontend in the production namespace is in CrashLoopBackOff. Help me investigate."
@@ -17,6 +19,8 @@
       value: "Response mentions checking container exit codes or restart reasons, not just suggesting to look at logs generically"
 
 - description: "Pending pod response identifies scheduling root causes"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "My pod has been stuck in Pending state for 10 minutes. What should I check?"
@@ -27,6 +31,8 @@
       value: "Response covers multiple scheduling failure causes: resource constraints, node selectors, taints/tolerations, or PVC binding issues"
 
 - description: "OOMKilled response covers memory investigation"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "Container keeps getting OOMKilled. How do I investigate?"
@@ -39,6 +45,8 @@
       value: "Response recommends checking resource limits and actual memory usage, not just increasing limits blindly"
 
 - description: "Node NotReady covers both K8s and Azure diagnostics"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "One of my AKS nodes went NotReady during a cluster upgrade. Investigate."

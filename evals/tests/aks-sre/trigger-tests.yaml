@@ -5,6 +5,8 @@
 # Each test needs: description, vars (prompt + skill_path), assert
 
 - description: "CrashLoopBackOff should trigger aks-sre skill"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "A pod in my cluster is stuck in CrashLoopBackOff"
@@ -13,6 +15,8 @@
       value: "Response provides Kubernetes-specific troubleshooting steps for a CrashLoopBackOff pod, not generic advice"
 
 - description: "Node NotReady should trigger aks-sre skill"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "My nodes are showing NotReady status after an upgrade"
@@ -21,6 +25,8 @@
       value: "Response addresses AKS node health investigation including kubelet, containerd, or Azure VM diagnostics"
 
 - description: "VM resize should NOT produce AKS troubleshooting"
+  metadata:
+    skill: aks-sre
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "How do I resize my Azure VM that's not part of any Kubernetes cluster?"

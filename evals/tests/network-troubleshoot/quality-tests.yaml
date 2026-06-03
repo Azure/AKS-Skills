@@ -5,6 +5,8 @@
 # Each test needs: description, vars (prompt + skill_path), assert
 
 - description: "DNS failure response covers full diagnostic path"
+  metadata:
+    skill: network-troubleshoot
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Pods can't resolve DNS names. Internal service discovery and external DNS both failing."
@@ -15,6 +17,8 @@
       value: "Response covers DNS diagnostic chain: pod resolv.conf, CoreDNS pods, upstream DNS, and potential NSG blocks on UDP 53"
 
 - description: "Cross-namespace traffic blocked covers NetworkPolicy"
+  metadata:
+    skill: network-troubleshoot
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Traffic between pods in different namespaces is being dropped. Pods in the same namespace can communicate fine."
@@ -25,6 +29,8 @@
       value: "Response identifies NetworkPolicy as likely cause and recommends checking policy rules, with packet capture as a verification step"
 
 - description: "Azure NSG investigation for external connectivity"
+  metadata:
+    skill: network-troubleshoot
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "My AKS pods can reach other pods but cannot reach external Azure services like Azure SQL."

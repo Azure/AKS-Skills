@@ -91,8 +91,8 @@ The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatica
 ## Running evals for a specific skill
 
 ```bash
-npx promptfoo eval --filter-pattern "aks-sre"
-npx promptfoo eval --filter-pattern "network"
+npx promptfoo eval --filter-metadata skill=aks-sre
+npx promptfoo eval --filter-metadata skill=network-troubleshoot
 ```
 
-This filters test cases by their description field (regex match).
+Each test case has a `metadata.skill` tag matching its skill name.
