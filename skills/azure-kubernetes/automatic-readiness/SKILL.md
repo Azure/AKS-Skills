@@ -24,7 +24,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 |----------|-------|
 | Best for | AKS Automatic migration readiness and manifest validation |
 | MCP Tools | `mcp_azure_mcp_aks` |
-| Related skills | azure-kubernetes (cluster creation), azure-diagnostics (live troubleshooting), azure-validate (readiness checks) |
+| Related skills | azure-kubernetes (cluster creation), azure-kubernetes-troubleshooting (live troubleshooting) |
 
 ## When to Use This Skill
 - "Can I migrate to AKS Automatic?"
