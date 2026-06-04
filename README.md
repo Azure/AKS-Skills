@@ -1,2 +1,2 @@
-# k8s-sre-skills
-k8s-sre-skills is a collection of agent skills for troubleshooting Kubernetes cluster issues, including Azure Kubernetes Service (AKS). It provides guidance on Kubernetes debugging, cloud provider tools (e.g., Azure CLI), operational runbooks, and structured troubleshooting workflows.
+# AKS-Skills
+AKS-Skills is a public-facing collection of agent skills for helping AKS customers operate their Azure Kubernetes Service (AKS) clusters. The agent skills cover scenarios such as troubleshooting cluster and application issues, assessing clusters for best practices, planning and deploying new AKS clusters, and deep diving into AKS concepts such as upgrades and security. The skills integrate with the AKS MCP server for secure, standardized cluster interactions through cloud provider tools (e.g., Azure CLI), Kubernetes operations (kubectl), operational runbooks, and structured workflows for troubleshooting and beyond.
