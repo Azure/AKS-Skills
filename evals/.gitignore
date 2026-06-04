@@ -1,0 +1,4 @@
+node_modules/
+results.json
+.promptfoo/
+output/

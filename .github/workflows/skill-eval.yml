@@ -1,0 +1,133 @@
+name: Skill Evaluation
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**'
+      - 'evals/**'
+  workflow_dispatch:
+    inputs:
+      skill:
+        description: 'Specific skill to evaluate (leave empty for all)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: evals/package-lock.json
+
+      - name: Install dependencies
+        working-directory: evals
+        run: npm ci
+
+      - name: Lint skill schemas
+        working-directory: evals
+        run: npm run lint
+
+      - name: Cache promptfoo results
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/promptfoo
+          key: ${{ runner.os }}-promptfoo-v1
+          restore-keys: |
+            ${{ runner.os }}-promptfoo-
+
+      - name: Run skill evaluations
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          npx promptfoo eval -o results.json --no-progress-bar
+          echo "## Skill Evaluation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+
+      - name: Check results
+        working-directory: evals
+        run: |
+          # Fail the job if any assertions failed
+          FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' results.json)
+          TOTAL=$(jq '[.results.results[]] | length' results.json)
+          PASSED=$((TOTAL - FAILURES))
+
+          echo "Results: ${PASSED}/${TOTAL} passed"
+
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "::error::${FAILURES} evaluation(s) failed"
+            jq -r '.results.results[] | select(.success == false) | "FAIL: \(.testCase.description // .testCase.vars.prompt)"' results.json
+            exit 1
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const resultsPath = 'evals/results.json';
+
+            if (!fs.existsSync(resultsPath)) {
+              return;
+            }
+
+            const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+            const testResults = results.results?.results || [];
+            const total = testResults.length;
+            const passed = testResults.filter(r => r.success).length;
+            const failed = total - passed;
+
+            let body = `## 🧪 Skill Evaluation Results\n\n`;
+            body += `**${passed}/${total} passed**`;
+            if (failed > 0) body += ` ⚠️ ${failed} failed`;
+            body += `\n\n`;
+
+            body += `| Status | Test | Skill |\n|--------|------|-------|\n`;
+            for (const r of testResults) {
+              const status = r.success ? '✅' : '❌';
+              const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
+              const skill = r.testCase?.vars?.skill_path?.split('/').slice(-2, -1)[0] || 'unknown';
+              body += `| ${status} | ${desc} | ${skill} |\n`;
+            }
+
+            // Find existing comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.body.includes('🧪 Skill Evaluation Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
