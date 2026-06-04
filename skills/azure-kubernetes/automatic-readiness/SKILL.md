@@ -40,7 +40,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 - "Create an AKS cluster" / "What are AKS best practices?" / "How do I deploy to AKS?"
 - General cluster creation, configuration, scaling, or AKS operations
 
-### Route to `azure-diagnostics` instead:
+### Route to `azure-kubernetes-troubleshooting` instead:
 - "My pod is crashing" / "Debug my AKS cluster" / "Why is my deployment failing?"
 - Live troubleshooting, debugging, error diagnosis on a running cluster
 
@@ -49,7 +49,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 1. **Read-only**: NEVER modify cluster state. Assessment is read-only. Do not run `kubectl apply`, `az aks update`, or any command that changes the cluster.
 2. **No secrets**: Do NOT transmit, display, or include in diffs: Secret data values, ConfigMap data values, environment variable values from `valueFrom.secretKeyRef`, service account tokens, or connection strings.
 3. **User approval for file changes**: Present every fix as a diff. The user must explicitly accept before you write to any file.
-4. **Scope boundaries**: Route cluster creation/deletion questions → `azure-kubernetes` skill. Route live troubleshooting → `azure-diagnostics` skill.
+4. **Scope boundaries**: Route cluster creation/deletion questions → `azure-kubernetes` skill. Route live troubleshooting → `azure-kubernetes-troubleshooting` skill.
 
 ## MCP Tools
 | Tool | Purpose | Key Parameters |
