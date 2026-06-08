@@ -13,8 +13,9 @@
   assert:
     - type: icontains
       value: "CoreDNS"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response covers DNS diagnostic chain: pod resolv.conf, CoreDNS pods, upstream DNS, and potential NSG blocks on UDP 53"
+      threshold: 0.7
 
 - description: "Cross-namespace traffic blocked covers NetworkPolicy"
   metadata:
@@ -25,8 +26,9 @@
   assert:
     - type: icontains
       value: "policy"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response identifies NetworkPolicy as likely cause and recommends checking policy rules, with packet capture as a verification step"
+      threshold: 0.7
 
 - description: "Azure NSG investigation for external connectivity"
   metadata:
@@ -35,5 +37,6 @@
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "My AKS pods can reach other pods but cannot reach external Azure services like Azure SQL."
   assert:
-    - type: llm-rubric
+    - type: g-eval
       value: "Response investigates Azure-level networking: NSG rules on subnet, route tables, service endpoints or private endpoints, and Azure Firewall if applicable"
+      threshold: 0.7

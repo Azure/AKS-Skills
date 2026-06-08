@@ -60,8 +60,9 @@ npm run eval:view
     skill_path: "providers/azure/<your-skill-name>/SKILL.md"
     prompt: "A detailed user scenario"
   assert:
-    - type: llm-rubric
+    - type: g-eval
       value: "Description of what a good response looks like"
+      threshold: 0.7
 ```
 
 3. Add your test file paths to `promptfooconfig.yaml` under `tests:`:
@@ -78,15 +79,28 @@ tests:
 |------|--------------|------|
 | `icontains` | Checks if the response contains a keyword (case-insensitive) | Free |
 | `not-icontains` | Checks the response does NOT contain a keyword | Free |
-| `llm-rubric` | Sends response to a judge LLM that grades it against your criteria | 1 LLM call per assertion |
+| `g-eval` | Chain-of-thought LLM judge that scores output 0–1 against criteria (pass if ≥ threshold) | 1 LLM call per assertion |
+| `llm-rubric` | Binary pass/fail LLM judge against your criteria | 1 LLM call per assertion |
+
+## Baseline comparison
+
+To measure how much value a skill adds over the base model, run the baseline comparison config:
+
+```bash
+npx promptfoo eval -c promptfoo-baseline.yaml
+npx promptfoo view
+```
+
+This runs quality tests against both the skill-loaded provider and a bare model baseline (no SKILL.md). Compare g-eval scores side-by-side to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
 
 ## CI/CD
 
 The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:
 
 1. **Lint** — fast-fails if SKILL.md format is invalid
-2. **Eval** — runs all test assertions against the LLM
-3. **PR comment** — posts a pass/fail table on the pull request
+2. **Eval** — runs all test assertions against the LLM (gates on skill provider only)
+3. **Baseline comparison** — runs quality tests with/without skill, reports score delta
+4. **PR comment** — posts results table and baseline delta on the pull request
 
 ## Running evals for a specific skill
 

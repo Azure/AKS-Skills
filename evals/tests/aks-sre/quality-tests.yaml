@@ -15,8 +15,9 @@
       value: "logs"
     - type: icontains
       value: "previous"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response mentions checking container exit codes or restart reasons, not just suggesting to look at logs generically"
+      threshold: 0.7
 
 - description: "Pending pod response identifies scheduling root causes"
   metadata:
@@ -27,8 +28,9 @@
   assert:
     - type: icontains
       value: "describe"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response covers multiple scheduling failure causes: resource constraints, node selectors, taints/tolerations, or PVC binding issues"
+      threshold: 0.7
 
 - description: "OOMKilled response covers memory investigation"
   metadata:
@@ -41,8 +43,9 @@
       value: "memory"
     - type: icontains
       value: "limit"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response recommends checking resource limits and actual memory usage, not just increasing limits blindly"
+      threshold: 0.7
 
 - description: "Node NotReady covers both K8s and Azure diagnostics"
   metadata:
@@ -51,5 +54,6 @@
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "One of my AKS nodes went NotReady during a cluster upgrade. Investigate."
   assert:
-    - type: llm-rubric
+    - type: g-eval
       value: "Response includes both Kubernetes-level checks (kubectl describe node, kubelet status) AND Azure-level checks (VM instance view, extension status)"
+      threshold: 0.7
