@@ -79,7 +79,7 @@ tests:
 |------|--------------|------|
 | `icontains` | Checks if the response contains a keyword (case-insensitive) | Free |
 | `not-icontains` | Checks the response does NOT contain a keyword | Free |
-| `g-eval` | Chain-of-thought LLM judge that scores output 0–1 against criteria (pass if ≥ threshold) | 1 LLM call per assertion |
+| `g-eval` | LLM judge that scores output 0–1 against criteria (pass if ≥ threshold) | 1 LLM call per assertion |
 | `llm-rubric` | Binary pass/fail LLM judge against your criteria | 1 LLM call per assertion |
 
 ## Baseline comparison
