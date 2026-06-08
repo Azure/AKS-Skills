@@ -58,6 +58,15 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
 
+      - name: Run baseline comparison
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar
+
       - name: Check results
         working-directory: evals
         run: |
@@ -103,6 +112,40 @@ jobs:
               const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
               const skill = r.testCase?.vars?.skill_path?.split('/').slice(-2, -1)[0] || 'unknown';
               body += `| ${status} | ${desc} | ${skill} |\n`;
+            }
+
+            // Baseline comparison
+            const baselinePath = 'evals/baseline-results.json';
+            if (fs.existsSync(baselinePath)) {
+              const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+              const baselineResults = baseline.results?.results || [];
+
+              body += `\n### 📊 Baseline Comparison (Quality Tests)\n\n`;
+              body += `| Test | With Skill | Baseline | Delta |\n|------|-----------|----------|-------|\n`;
+
+              // Group by test description — each test has two entries (one per provider)
+              const byTest = {};
+              for (const r of baselineResults) {
+                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
+                const provider = r.provider?.label || r.provider?.id || '';
+                const score = r.score != null ? r.score : (r.success ? 1.0 : 0.0);
+                if (!byTest[desc]) byTest[desc] = {};
+                if (provider.includes('Baseline')) {
+                  byTest[desc].baseline = score;
+                } else {
+                  byTest[desc].skill = score;
+                }
+              }
+
+              for (const [desc, scores] of Object.entries(byTest)) {
+                const skill = scores.skill != null ? scores.skill.toFixed(2) : 'N/A';
+                const base = scores.baseline != null ? scores.baseline.toFixed(2) : 'N/A';
+                const delta = (scores.skill != null && scores.baseline != null)
+                  ? (scores.skill - scores.baseline).toFixed(2)
+                  : 'N/A';
+                const sign = delta !== 'N/A' && parseFloat(delta) > 0 ? '+' : '';
+                body += `| ${desc} | ${skill} | ${base} | ${sign}${delta} |\n`;
+              }
             }
 
             // Find existing comment to update
