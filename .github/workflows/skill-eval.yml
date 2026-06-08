@@ -123,16 +123,18 @@ jobs:
               // Get skill scores from the main eval (quality tests only)
               const skillScores = {};
               for (const r of testResults) {
+                const score = Number(r.score);
+                if (!Number.isFinite(score)) continue;
                 const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-                const score = r.score != null ? r.score : (r.success ? 1.0 : 0.0);
                 skillScores[desc] = score;
               }
 
               // Get baseline scores
               const baselineScores = {};
               for (const r of baselineResults) {
+                const score = Number(r.score);
+                if (!Number.isFinite(score)) continue;
                 const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-                const score = r.score != null ? r.score : (r.success ? 1.0 : 0.0);
                 baselineScores[desc] = score;
               }
 
