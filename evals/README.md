@@ -84,14 +84,15 @@ tests:
 
 ## Baseline comparison
 
-To measure how much value a skill adds over the base model, run the baseline comparison config:
+To measure how much value a skill adds over the base model, run the baseline config after the default eval:
 
 ```bash
-npx promptfoo eval -c promptfoo-baseline.yaml
-npx promptfoo view
+npx promptfoo eval                              # 13 tests with skill (default)
+npx promptfoo eval -c promptfoo-baseline.yaml   # quality tests without skill
+npx promptfoo view                              # compare scores side-by-side
 ```
 
-This runs quality tests against both the skill-loaded provider and a bare model baseline (no SKILL.md). Compare g-eval scores side-by-side to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
+This runs quality tests against a bare model (no SKILL.md loaded). Compare g-eval scores against the skill-loaded results from the default eval to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
 
 ## CI/CD
 

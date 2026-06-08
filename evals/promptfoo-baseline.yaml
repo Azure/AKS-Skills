@@ -1,16 +1,15 @@
 # AKS Skills — Baseline Comparison (Quality Tests Only)
-# Runs quality tests against both skill-loaded and bare model.
+# Runs quality tests against the bare model (no SKILL.md loaded).
+# Scores are compared against the skill-loaded results from the default eval.
 # Used in CI to report skill value delta in PR comments — NOT a gate.
 #
 # Usage:
 #   npx promptfoo eval -c promptfoo-baseline.yaml
 #   npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json
 
-description: "AKS Skills — Baseline Comparison"
+description: "AKS Skills — Baseline (No Skill)"
 
 providers:
-  - id: file://providers/skill-provider.js
-    label: "With Skill"
   - id: file://providers/baseline-provider.js
     label: "Baseline (No Skill)"
 

@@ -114,37 +114,42 @@ jobs:
               body += `| ${status} | ${desc} | ${skill} |\n`;
             }
 
-            // Baseline comparison
+            // Baseline comparison — scores come from separate baseline-only run
             const baselinePath = 'evals/baseline-results.json';
             if (fs.existsSync(baselinePath)) {
               const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
               const baselineResults = baseline.results?.results || [];
 
-              body += `\n### 📊 Baseline Comparison (Quality Tests)\n\n`;
-              body += `| Test | With Skill | Baseline | Delta |\n|------|-----------|----------|-------|\n`;
-
-              // Group by test description — each test has two entries (one per provider)
-              const byTest = {};
-              for (const r of baselineResults) {
+              // Get skill scores from the main eval (quality tests only)
+              const skillScores = {};
+              for (const r of testResults) {
                 const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-                const provider = r.provider?.label || r.provider?.id || '';
                 const score = r.score != null ? r.score : (r.success ? 1.0 : 0.0);
-                if (!byTest[desc]) byTest[desc] = {};
-                if (provider.includes('Baseline')) {
-                  byTest[desc].baseline = score;
-                } else {
-                  byTest[desc].skill = score;
-                }
+                skillScores[desc] = score;
               }
 
-              for (const [desc, scores] of Object.entries(byTest)) {
-                const skill = scores.skill != null ? scores.skill.toFixed(2) : 'N/A';
-                const base = scores.baseline != null ? scores.baseline.toFixed(2) : 'N/A';
-                const delta = (scores.skill != null && scores.baseline != null)
-                  ? (scores.skill - scores.baseline).toFixed(2)
-                  : 'N/A';
-                const sign = delta !== 'N/A' && parseFloat(delta) > 0 ? '+' : '';
-                body += `| ${desc} | ${skill} | ${base} | ${sign}${delta} |\n`;
+              // Get baseline scores
+              const baselineScores = {};
+              for (const r of baselineResults) {
+                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
+                const score = r.score != null ? r.score : (r.success ? 1.0 : 0.0);
+                baselineScores[desc] = score;
+              }
+
+              // Only show tests that appear in both (quality tests)
+              const sharedTests = Object.keys(baselineScores).filter(d => skillScores[d] != null);
+
+              if (sharedTests.length > 0) {
+                body += `\n### 📊 Baseline Comparison (Quality Tests)\n\n`;
+                body += `| Test | With Skill | Baseline | Delta |\n|------|-----------|----------|-------|\n`;
+
+                for (const desc of sharedTests) {
+                  const skill = skillScores[desc].toFixed(2);
+                  const base = baselineScores[desc].toFixed(2);
+                  const delta = (skillScores[desc] - baselineScores[desc]).toFixed(2);
+                  const sign = parseFloat(delta) > 0 ? '+' : '';
+                  body += `| ${desc} | ${skill} | ${base} | ${sign}${delta} |\n`;
+                }
               }
             }
 
