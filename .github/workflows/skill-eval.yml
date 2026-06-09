@@ -121,20 +121,28 @@ jobs:
               const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
               const baselineResults = baseline.results?.results || [];
 
-              // Get skill scores from the main eval (quality tests only)
+              // Extract g-eval component score (ignores icontains/other binary assertions)
+              const extractGEvalScore = (r) => {
+                const comps = r.gradingResult?.componentResults || [];
+                const g = comps.find(c => c.assertion?.type === 'g-eval');
+                const s = Number(g?.score);
+                return Number.isFinite(s) ? s : null;
+              };
+
+              // Get skill g-eval scores from the main eval
               const skillScores = {};
               for (const r of testResults) {
-                const score = Number(r.score);
-                if (!Number.isFinite(score)) continue;
+                const score = extractGEvalScore(r);
+                if (score == null) continue;
                 const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
                 skillScores[desc] = score;
               }
 
-              // Get baseline scores
+              // Get baseline g-eval scores
               const baselineScores = {};
               for (const r of baselineResults) {
-                const score = Number(r.score);
-                if (!Number.isFinite(score)) continue;
+                const score = extractGEvalScore(r);
+                if (score == null) continue;
                 const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
                 baselineScores[desc] = score;
               }
