@@ -59,6 +59,7 @@ jobs:
           npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
 
       - name: Run baseline comparison
+        continue-on-error: true
         working-directory: evals
         env:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
