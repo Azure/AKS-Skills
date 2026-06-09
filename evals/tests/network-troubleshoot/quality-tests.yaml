@@ -7,6 +7,7 @@
 - description: "DNS failure response covers full diagnostic path"
   metadata:
     skill: network-troubleshoot
+    type: quality
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Pods can't resolve DNS names. Internal service discovery and external DNS both failing."
@@ -20,6 +21,7 @@
 - description: "Cross-namespace traffic blocked covers NetworkPolicy"
   metadata:
     skill: network-troubleshoot
+    type: quality
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Traffic between pods in different namespaces is being dropped. Pods in the same namespace can communicate fine."
@@ -33,6 +35,7 @@
 - description: "Azure NSG investigation for external connectivity"
   metadata:
     skill: network-troubleshoot
+    type: quality
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "My AKS pods can reach other pods but cannot reach external Azure services like Azure SQL."

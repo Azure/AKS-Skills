@@ -47,6 +47,9 @@ npm run eval:view
 ```yaml
 # trigger-tests.yaml — does the skill respond to the right scenarios?
 - description: "Short description of what this tests"
+  metadata:
+    skill: <your-skill-name>
+    type: trigger
   vars:
     skill_path: "providers/azure/<your-skill-name>/SKILL.md"
     prompt: "The user question to test"
@@ -56,6 +59,9 @@ npm run eval:view
 
 # quality-tests.yaml — is the response actually good?
 - description: "Validates response depth for scenario X"
+  metadata:
+    skill: <your-skill-name>
+    type: quality
   vars:
     skill_path: "providers/azure/<your-skill-name>/SKILL.md"
     prompt: "A detailed user scenario"
@@ -87,7 +93,7 @@ tests:
 To measure how much value a skill adds over the base model, run the baseline config after the default eval:
 
 ```bash
-npx promptfoo eval                              # 13 tests with skill (default)
+npx promptfoo eval                              # all tests with skill loaded
 npx promptfoo eval -c promptfoo-baseline.yaml   # quality tests without skill
 npx promptfoo view                              # compare scores side-by-side
 ```
@@ -103,11 +109,17 @@ The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatica
 3. **Baseline comparison** — runs quality tests with/without skill, reports score delta
 4. **PR comment** — posts results table and baseline delta on the pull request
 
-## Running evals for a specific skill
+## Filtering evals
 
 ```bash
 npx promptfoo eval --filter-metadata skill=aks-sre
 npx promptfoo eval --filter-metadata skill=network-troubleshoot
 ```
 
-Each test case has a `metadata.skill` tag matching its skill name.
+Each test case has `metadata.skill` and `metadata.type` tags:
+
+```bash
+npx promptfoo eval --filter-metadata type=quality
+npx promptfoo eval --filter-metadata type=trigger
+npx promptfoo eval --filter-metadata skill=aks-sre --filter-metadata type=quality
+```
