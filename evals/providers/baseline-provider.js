@@ -46,7 +46,7 @@ class BaselineProvider {
     let url, headers, body;
 
     if (azureKey && azureEndpoint) {
-      const apiVersion = '2024-08-01-preview';
+      const apiVersion = '2024-12-01-preview';
       url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
       headers = {
         'Content-Type': 'application/json',
