@@ -18,7 +18,7 @@
       value: "previous"
     - type: g-eval
       value: "Response mentions checking container exit codes or restart reasons, not just suggesting to look at logs generically"
-      threshold: 0.7
+      threshold: 0.9
 
 - description: "Pending pod response identifies scheduling root causes"
   metadata:
