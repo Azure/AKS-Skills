@@ -93,7 +93,7 @@ jobs:
             fi
 
             echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
-            npx promptfoo eval -o results.json --no-progress-bar --filter-failing || true
+            npx promptfoo eval -o results.json --no-progress-bar --filter-failing results.json || true
           done
 
       - name: Comment on PR
