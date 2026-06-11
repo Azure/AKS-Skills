@@ -53,7 +53,7 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          npx promptfoo eval -o results.json --no-progress-bar
+          npx promptfoo eval -o results.json --no-progress-bar || true
           node scripts/show-scores.js || true
           echo "## Skill Evaluation Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -93,7 +93,7 @@ jobs:
             fi
 
             echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
-            npx promptfoo eval -o results.json --no-progress-bar --filter-failing
+            npx promptfoo eval -o results.json --no-progress-bar --filter-failing || true
           done
 
       - name: Comment on PR
