@@ -54,7 +54,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           npx promptfoo eval -o results.json --no-progress-bar || true
-          node scripts/show-scores.js || true
           echo "## Skill Evaluation Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
@@ -93,7 +92,14 @@ jobs:
             fi
 
             echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
-            npx promptfoo eval -o results.json --no-progress-bar --filter-failing results.json || true
+            npx promptfoo eval -o retry-results.json --no-progress-bar --filter-failing results.json || true
+            # Merge: replace failed tests in results.json with retry outcomes
+            jq -s '
+              (.[1].results.results | map({key: (.testCase.description // .testCase.vars.prompt), value: .}) | from_entries) as $retried |
+              .[0] | .results.results |= map(
+                if .success then . else ($retried[.testCase.description // .testCase.vars.prompt] // .) end
+              )
+            ' results.json retry-results.json > merged-results.json && mv merged-results.json results.json
           done
 
       - name: Comment on PR
