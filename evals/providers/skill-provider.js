@@ -75,7 +75,7 @@ class SkillProvider {
 
     if (azureKey && azureEndpoint) {
       // Azure OpenAI
-      const apiVersion = '2024-08-01-preview';
+      const apiVersion = '2024-12-01-preview';
       url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
       headers = {
         'Content-Type': 'application/json',

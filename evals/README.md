@@ -68,7 +68,7 @@ npm run eval:view
   assert:
     - type: g-eval
       value: "Description of what a good response looks like"
-      threshold: 0.7
+      threshold: 0.9
 ```
 
 3. Add your test file paths to `promptfooconfig.yaml` under `tests:`:

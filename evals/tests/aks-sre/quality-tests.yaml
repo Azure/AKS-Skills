@@ -1,6 +1,12 @@
 # aks-sre quality tests
 # Validates that the skill produces high-quality diagnostic responses
 #
+# Assertion strategy:
+#   - icontains: deterministic keyword checks
+#   - g-eval: LLM-as-judge scoring 0–1 against criteria. Preferred over llm-rubric
+#     because it returns a numeric score (enabling threshold tuning) rather than
+#     binary pass/fail. threshold: 0.9 means the model must strongly satisfy the criteria.
+#
 # To add/modify tests: just add new entries to this array.
 # Each test needs: description, vars (prompt + skill_path), assert
 
@@ -32,7 +38,7 @@
       value: "describe"
     - type: g-eval
       value: "Response covers multiple scheduling failure causes: resource constraints, node selectors, taints/tolerations, or PVC binding issues"
-      threshold: 0.7
+      threshold: 0.9
 
 - description: "OOMKilled response covers memory investigation"
   metadata:
@@ -48,7 +54,7 @@
       value: "limit"
     - type: g-eval
       value: "Response recommends checking resource limits and actual memory usage, not just increasing limits blindly"
-      threshold: 0.7
+      threshold: 0.9
 
 - description: "Node NotReady covers both K8s and Azure diagnostics"
   metadata:
@@ -60,4 +66,4 @@
   assert:
     - type: g-eval
       value: "Response includes both Kubernetes-level checks (kubectl describe node, kubelet status) AND Azure-level checks (VM instance view, extension status)"
-      threshold: 0.7
+      threshold: 0.9
