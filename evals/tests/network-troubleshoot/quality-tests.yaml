@@ -1,39 +1,51 @@
 # network-troubleshoot quality tests
 # Validates that the skill produces high-quality network diagnostic responses
 #
+# Assertion strategy:
+#   - icontains: deterministic keyword checks
+#   - g-eval: LLM-as-judge scoring 0–1 against criteria. Preferred over llm-rubric
+#     because it returns a numeric score (enabling threshold tuning) rather than
+#     binary pass/fail. threshold: 0.9 means the model must strongly satisfy the criteria.
+#
 # To add/modify tests: just add new entries to this array.
 # Each test needs: description, vars (prompt + skill_path), assert
 
 - description: "DNS failure response covers full diagnostic path"
   metadata:
     skill: network-troubleshoot
+    type: quality
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Pods can't resolve DNS names. Internal service discovery and external DNS both failing."
   assert:
     - type: icontains
       value: "CoreDNS"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response covers DNS diagnostic chain: pod resolv.conf, CoreDNS pods, upstream DNS, and potential NSG blocks on UDP 53"
+      threshold: 0.9
 
 - description: "Cross-namespace traffic blocked covers NetworkPolicy"
   metadata:
     skill: network-troubleshoot
+    type: quality
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Traffic between pods in different namespaces is being dropped. Pods in the same namespace can communicate fine."
   assert:
     - type: icontains
       value: "policy"
-    - type: llm-rubric
+    - type: g-eval
       value: "Response identifies NetworkPolicy as likely cause and recommends checking policy rules, with packet capture as a verification step"
+      threshold: 0.9
 
 - description: "Azure NSG investigation for external connectivity"
   metadata:
     skill: network-troubleshoot
+    type: quality
   vars:
     skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "My AKS pods can reach other pods but cannot reach external Azure services like Azure SQL."
   assert:
-    - type: llm-rubric
+    - type: g-eval
       value: "Response investigates Azure-level networking: NSG rules on subnet, route tables, service endpoints or private endpoints, and Azure Firewall if applicable"
+      threshold: 0.9

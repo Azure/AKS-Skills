@@ -7,6 +7,7 @@
 - description: "CrashLoopBackOff should trigger aks-sre skill"
   metadata:
     skill: aks-sre
+    type: trigger
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "A pod in my cluster is stuck in CrashLoopBackOff"
@@ -17,6 +18,7 @@
 - description: "Node NotReady should trigger aks-sre skill"
   metadata:
     skill: aks-sre
+    type: trigger
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "My nodes are showing NotReady status after an upgrade"
@@ -27,6 +29,7 @@
 - description: "VM resize should NOT produce AKS troubleshooting"
   metadata:
     skill: aks-sre
+    type: trigger
   vars:
     skill_path: "providers/azure/aks-sre/SKILL.md"
     prompt: "How do I resize my Azure VM that's not part of any Kubernetes cluster?"

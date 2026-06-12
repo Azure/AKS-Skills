@@ -18,7 +18,7 @@ class AzureJudgeProvider {
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const openaiKey = process.env.OPENAI_API_KEY;
     const model = process.env.EVAL_MODEL || 'gpt-5';
-    const apiVersion = this.config.apiVersion || '2024-08-01-preview';
+    const apiVersion = this.config.apiVersion || '2024-12-01-preview';
 
     let url, headers;
     const body = {

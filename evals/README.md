@@ -47,6 +47,9 @@ npm run eval:view
 ```yaml
 # trigger-tests.yaml — does the skill respond to the right scenarios?
 - description: "Short description of what this tests"
+  metadata:
+    skill: <your-skill-name>
+    type: trigger
   vars:
     skill_path: "providers/azure/<your-skill-name>/SKILL.md"
     prompt: "The user question to test"
@@ -56,12 +59,16 @@ npm run eval:view
 
 # quality-tests.yaml — is the response actually good?
 - description: "Validates response depth for scenario X"
+  metadata:
+    skill: <your-skill-name>
+    type: quality
   vars:
     skill_path: "providers/azure/<your-skill-name>/SKILL.md"
     prompt: "A detailed user scenario"
   assert:
-    - type: llm-rubric
+    - type: g-eval
       value: "Description of what a good response looks like"
+      threshold: 0.9
 ```
 
 3. Add your test file paths to `promptfooconfig.yaml` under `tests:`:
@@ -78,21 +85,41 @@ tests:
 |------|--------------|------|
 | `icontains` | Checks if the response contains a keyword (case-insensitive) | Free |
 | `not-icontains` | Checks the response does NOT contain a keyword | Free |
-| `llm-rubric` | Sends response to a judge LLM that grades it against your criteria | 1 LLM call per assertion |
+| `g-eval` | LLM judge that scores output 0–1 against criteria (pass if ≥ threshold) | 1 LLM call per assertion |
+| `llm-rubric` | Binary pass/fail LLM judge against your criteria | 1 LLM call per assertion |
+
+## Baseline comparison
+
+To measure how much value a skill adds over the base model, run the baseline config after the default eval:
+
+```bash
+npx promptfoo eval                              # all tests with skill loaded
+npx promptfoo eval -c promptfoo-baseline.yaml   # quality tests without skill
+npx promptfoo view                              # compare scores side-by-side
+```
+
+This runs quality tests against a bare model (no SKILL.md loaded). Compare g-eval scores against the skill-loaded results from the default eval to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
 
 ## CI/CD
 
 The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:
 
 1. **Lint** — fast-fails if SKILL.md format is invalid
-2. **Eval** — runs all test assertions against the LLM
-3. **PR comment** — posts a pass/fail table on the pull request
+2. **Eval** — runs all test assertions against the LLM (gates on skill provider only)
+3. **Baseline comparison** — runs quality tests with/without skill, reports score delta
+4. **PR comment** — posts results table and baseline delta on the pull request
 
-## Running evals for a specific skill
+## Filtering evals
 
 ```bash
 npx promptfoo eval --filter-metadata skill=aks-sre
 npx promptfoo eval --filter-metadata skill=network-troubleshoot
 ```
 
-Each test case has a `metadata.skill` tag matching its skill name.
+Each test case has `metadata.skill` and `metadata.type` tags:
+
+```bash
+npx promptfoo eval --filter-metadata type=quality
+npx promptfoo eval --filter-metadata type=trigger
+npx promptfoo eval --filter-metadata skill=aks-sre --filter-metadata type=quality
+```

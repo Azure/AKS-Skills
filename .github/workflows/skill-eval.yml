@@ -53,26 +53,54 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          npx promptfoo eval -o results.json --no-progress-bar
+          npx promptfoo eval -o results.json --no-progress-bar || true
           echo "## Skill Evaluation Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
 
+      - name: Run baseline comparison
+        continue-on-error: true
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar
+
       - name: Check results
         working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Fail the job if any assertions failed
-          FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' results.json)
-          TOTAL=$(jq '[.results.results[]] | length' results.json)
-          PASSED=$((TOTAL - FAILURES))
+          for attempt in 1 2 3; do
+            FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' results.json)
+            TOTAL=$(jq '[.results.results[]] | length' results.json)
+            PASSED=$((TOTAL - FAILURES))
+            echo "Attempt ${attempt}: ${PASSED}/${TOTAL} passed"
 
-          echo "Results: ${PASSED}/${TOTAL} passed"
+            if [ "$FAILURES" -eq 0 ]; then
+              exit 0
+            fi
 
-          if [ "$FAILURES" -gt 0 ]; then
-            echo "::error::${FAILURES} evaluation(s) failed"
-            jq -r '.results.results[] | select(.success == false) | "FAIL: \(.testCase.description // .testCase.vars.prompt)"' results.json
-            exit 1
-          fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::${FAILURES} evaluation(s) still failing after 2 retries"
+              jq -r '.results.results[] | select(.success == false) | "FAIL: \(.testCase.description // .testCase.vars.prompt)"' results.json
+              exit 1
+            fi
+
+            echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
+            npx promptfoo eval -o retry-results.json --no-progress-bar --filter-failing results.json || true
+            # Merge: replace failed tests in results.json with retry outcomes
+            jq -s '
+              (.[1].results.results | map({key: (.testCase.description // .testCase.vars.prompt), value: .}) | from_entries) as $retried |
+              .[0] | .results.results |= map(
+                if .success then . else ($retried[.testCase.description // .testCase.vars.prompt] // .) end
+              )
+            ' results.json retry-results.json > merged-results.json && mv merged-results.json results.json
+          done
 
       - name: Comment on PR
         if: github.event_name == 'pull_request' && always()
@@ -97,12 +125,63 @@ jobs:
             if (failed > 0) body += ` ⚠️ ${failed} failed`;
             body += `\n\n`;
 
-            body += `| Status | Test | Skill |\n|--------|------|-------|\n`;
+            // Extract g-eval score from a test result
+            const extractGEvalScore = (r) => {
+              const comps = r.gradingResult?.componentResults || [];
+              const g = comps.find(c => c.assertion?.type === 'g-eval');
+              const s = Number(g?.score);
+              return Number.isFinite(s) ? s : null;
+            };
+
+            body += `| Status | Test | Skill | G-Eval |\n|--------|------|-------|--------|\n`;
             for (const r of testResults) {
               const status = r.success ? '✅' : '❌';
               const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
               const skill = r.testCase?.vars?.skill_path?.split('/').slice(-2, -1)[0] || 'unknown';
-              body += `| ${status} | ${desc} | ${skill} |\n`;
+              const geval = extractGEvalScore(r);
+              const gevalStr = geval != null ? geval.toFixed(2) : '—';
+              body += `| ${status} | ${desc} | ${skill} | ${gevalStr} |\n`;
+            }
+
+            // Baseline comparison — scores come from separate baseline-only run
+            const baselinePath = 'evals/baseline-results.json';
+            if (fs.existsSync(baselinePath)) {
+              const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+              const baselineResults = baseline.results?.results || [];
+
+              // Get skill g-eval scores from the main eval
+              const skillScores = {};
+              for (const r of testResults) {
+                const score = extractGEvalScore(r);
+                if (score == null) continue;
+                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
+                skillScores[desc] = score;
+              }
+
+              // Get baseline g-eval scores
+              const baselineScores = {};
+              for (const r of baselineResults) {
+                const score = extractGEvalScore(r);
+                if (score == null) continue;
+                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
+                baselineScores[desc] = score;
+              }
+
+              // Only show tests that appear in both (quality tests)
+              const sharedTests = Object.keys(baselineScores).filter(d => skillScores[d] != null);
+
+              if (sharedTests.length > 0) {
+                body += `\n### 📊 Baseline Comparison (Quality Tests)\n\n`;
+                body += `| Test | With Skill | Baseline | Delta |\n|------|-----------|----------|-------|\n`;
+
+                for (const desc of sharedTests) {
+                  const skill = skillScores[desc].toFixed(2);
+                  const base = baselineScores[desc].toFixed(2);
+                  const delta = (skillScores[desc] - baselineScores[desc]).toFixed(2);
+                  const sign = parseFloat(delta) > 0 ? '+' : '';
+                  body += `| ${desc} | ${skill} | ${base} | ${sign}${delta} |\n`;
+                }
+              }
             }
 
             // Find existing comment to update

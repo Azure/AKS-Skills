@@ -1,24 +1,19 @@
-const fs = require('fs');
-const path = require('path');
-
 /**
- * Custom promptfoo provider that loads a SKILL.md file and uses it as
- * system context when evaluating a user prompt against Azure OpenAI.
+ * Baseline provider — identical to skill-provider but WITHOUT loading SKILL.md.
+ * Sends only a generic system prompt + the user query.
+ * Used to measure how much value the skill adds over the base model.
  *
  * Env vars (checked in order):
  *   AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT → Azure OpenAI
  *   OPENAI_API_KEY                                → OpenAI direct
  *
  * Test case vars:
- *   skill_path  — relative path from the skills/ directory to the SKILL.md file
- *   prompt      — the user prompt to evaluate
+ *   prompt — the user prompt to evaluate
  */
 
-const SKILLS_BASE = process.env.SKILLS_BASE || path.resolve(__dirname, '../../skills');
-
-class SkillProvider {
+class BaselineProvider {
   constructor(options) {
-    this.providerId = options.id || 'skill-provider';
+    this.providerId = options.id || 'baseline-provider';
     this.config = options.config || {};
   }
 
@@ -28,37 +23,14 @@ class SkillProvider {
 
   async callApi(prompt, context) {
     const vars = context.vars || {};
-    const skillPath = vars.skill_path;
     const userPrompt = vars.prompt;
 
-    if (!skillPath) {
-      return { error: 'Test case must define vars.skill_path' };
-    }
     if (!userPrompt) {
       return { error: 'Test case must define vars.prompt' };
     }
 
-    // Load the SKILL.md content
-    const fullSkillPath = path.resolve(SKILLS_BASE, skillPath);
-    const skillsBaseWithSep = SKILLS_BASE.endsWith(path.sep) ? SKILLS_BASE : SKILLS_BASE + path.sep;
-    if (!fullSkillPath.startsWith(skillsBaseWithSep)) {
-      return { error: `Invalid vars.skill_path (must stay under ${SKILLS_BASE}): ${skillPath}` };
-    }
-    let skillContent;
-    try {
-      skillContent = fs.readFileSync(fullSkillPath, 'utf-8');
-    } catch (err) {
-      return { error: `Failed to read skill file: ${fullSkillPath} — ${err.message}` };
-    }
-
-    // Build messages
-    const systemMessage = [
-      'You are an AKS SRE agent. Follow the skill instructions below to respond to the user.',
-      '',
-      '## Skill Instructions',
-      '',
-      skillContent,
-    ].join('\n');
+    // Generic system prompt — no skill loaded
+    const systemMessage = 'You are a helpful assistant with expertise in Azure Kubernetes Service (AKS) and Kubernetes operations.';
 
     const messages = [
       { role: 'system', content: systemMessage },
@@ -74,34 +46,26 @@ class SkillProvider {
     let url, headers, body;
 
     if (azureKey && azureEndpoint) {
-      // Azure OpenAI
       const apiVersion = '2024-12-01-preview';
       url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
       headers = {
         'Content-Type': 'application/json',
         'api-key': azureKey,
       };
-      body = JSON.stringify({
-        messages,
-      });
+      body = JSON.stringify({ messages });
     } else if (openaiKey) {
-      // OpenAI direct
       url = 'https://api.openai.com/v1/chat/completions';
       headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${openaiKey}`,
       };
-      body = JSON.stringify({
-        model,
-        messages,
-      });
+      body = JSON.stringify({ model, messages });
     } else {
       return {
         error: 'No LLM credentials configured. Set AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, or OPENAI_API_KEY.',
       };
     }
 
-    // Make the API call
     try {
       const response = await fetch(url, { method: 'POST', headers, body });
 
@@ -127,4 +91,4 @@ class SkillProvider {
   }
 }
 
-module.exports = SkillProvider;
+module.exports = BaselineProvider;
