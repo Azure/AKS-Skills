@@ -2,10 +2,11 @@
 # Runs skill quality checks using promptfoo
 #
 # Usage:
-#   npx promptfoo eval                    # run all evals (13 tests, skill only)
+#   npx promptfoo eval                    # run quality evals
 #   npx promptfoo eval --filter-failing   # re-run only failures
 #   npx promptfoo view                    # open results UI
 #
+# For routing (trigger) tests, see promptfoo-routing.yaml.
 # For baseline comparison (quality tests only), see promptfoo-baseline.yaml.
 #
 # Required env vars:
@@ -24,9 +25,7 @@ prompts:
   - "{{prompt}}"
 
 tests:
-  - file://tests/aks-sre/trigger-tests.yaml
   - file://tests/aks-sre/quality-tests.yaml
-  - file://tests/network-troubleshoot/trigger-tests.yaml
   - file://tests/network-troubleshoot/quality-tests.yaml
 
 # LLM-as-judge for g-eval/llm-rubric assertions.

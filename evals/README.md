@@ -1,11 +1,13 @@
 # Skill Evaluations
 
-Automated quality checks for AKS skills. Runs on every PR that touches `skills/` or `evals/`.
+Automated quality and routing checks for AKS skills. Runs on every PR that touches `skills/` or `evals/`.
 
 ## What it does
 
 - **Lint** — validates SKILL.md formatting (front matter, required fields, script shebangs, internal references). No API key needed.
-- **Eval** — sends test prompts to an LLM with the skill loaded as context, then checks the response against assertions. Catches regressions in skill quality.
+- **Quality eval** — sends test prompts to the model with the skill loaded, then grades the response with `icontains` and `g-eval` assertions.
+- **Trigger eval** — asks the model which skill should handle a query (router-provider), asserts with deterministic `equals`.
+- **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
 
 ## Quick start
 
@@ -16,16 +18,15 @@ npm ci
 # Lint only (instant, no API key)
 npm run lint
 
-# Full eval (requires LLM credentials)
+# Requires LLM credentials
 export AZURE_OPENAI_API_KEY="your-key"
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
-npm run eval
-```
 
-To view results in a browser after running eval:
-
-```bash
-npm run eval:view
+npm run eval              # quality tests → results.json
+npm run eval:trigger      # trigger/routing tests → routing-results.json
+npm run eval:baseline     # baseline comparison → baseline-results.json
+npm run eval:all          # quality + trigger
+npm run eval:view         # open results in browser
 ```
 
 ## Environment variables
@@ -45,19 +46,20 @@ npm run eval:view
 2. Add test files following this format:
 
 ```yaml
-# trigger-tests.yaml — does the skill respond to the right scenarios?
-- description: "Short description of what this tests"
+# trigger-tests.yaml — does the router select the right skill?
+# Auto-discovered by promptfoo-routing.yaml via glob.
+- description: "Query X should trigger my-skill"
   metadata:
     skill: <your-skill-name>
     type: trigger
   vars:
-    skill_path: "providers/azure/<your-skill-name>/SKILL.md"
     prompt: "The user question to test"
   assert:
-    - type: icontains
-      value: "keyword the response should contain"
+    - type: equals
+      value: "<your-skill-name>"
 
 # quality-tests.yaml — is the response actually good?
+# Must be added to promptfooconfig.yaml tests list.
 - description: "Validates response depth for scenario X"
   metadata:
     skill: <your-skill-name>
@@ -71,13 +73,15 @@ npm run eval:view
       threshold: 0.9
 ```
 
-3. Add your test file paths to `promptfooconfig.yaml` under `tests:`:
+3. Add quality tests to `promptfooconfig.yaml` under `tests:`. Trigger tests are auto-discovered via glob (`file://tests/*/trigger-tests.yaml`).
 
-```yaml
-tests:
-  - file://tests/<your-skill-name>/trigger-tests.yaml
-  - file://tests/<your-skill-name>/quality-tests.yaml
-```
+## Configs
+
+| Config | What it tests | Provider | Assertions | Gate |
+|--------|---------------|----------|------------|------|
+| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (loads SKILL.md) | `icontains`, `g-eval` | Yes (with retry) |
+| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | Yes |
+| `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
 
 ## Assertion types
 
@@ -85,41 +89,41 @@ tests:
 |------|--------------|------|
 | `icontains` | Checks if the response contains a keyword (case-insensitive) | Free |
 | `not-icontains` | Checks the response does NOT contain a keyword | Free |
-| `g-eval` | LLM judge that scores output 0–1 against criteria (pass if ≥ threshold) | 1 LLM call per assertion |
-| `llm-rubric` | Binary pass/fail LLM judge against your criteria | 1 LLM call per assertion |
+| `equals` | Exact string match (used in trigger tests) | Free |
+| `g-eval` | LLM judge that scores output 0–1 against criteria (pass if ≥ threshold) | 1 LLM call |
 
 ## Baseline comparison
 
-To measure how much value a skill adds over the base model, run the baseline config after the default eval:
-
 ```bash
-npx promptfoo eval                              # all tests with skill loaded
-npx promptfoo eval -c promptfoo-baseline.yaml   # quality tests without skill
-npx promptfoo view                              # compare scores side-by-side
+npm run eval              # quality tests with skill
+npm run eval:baseline     # same tests without skill
+npm run eval:view         # compare scores side-by-side
 ```
 
-This runs quality tests against a bare model (no SKILL.md loaded). Compare g-eval scores against the skill-loaded results from the default eval to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
+Compare g-eval scores between skill-loaded and baseline to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
 
 ## CI/CD
 
 The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:
 
 1. **Lint** — fast-fails if SKILL.md format is invalid
-2. **Eval** — runs all test assertions against the LLM (gates on skill provider only)
-3. **Baseline comparison** — runs quality tests with/without skill, reports score delta
-4. **PR comment** — posts results table and baseline delta on the pull request
+2. **Quality eval** — runs quality tests with skill loaded (gates, retries failing tests up to 2x)
+3. **Trigger eval** — runs routing tests via router-provider (gates)
+4. **Baseline comparison** — quality tests without skill, reports score delta
+5. **PR comment** — posts results table with g-eval scores and baseline delta
 
 ## Filtering evals
 
-```bash
-npx promptfoo eval --filter-metadata skill=aks-sre
-npx promptfoo eval --filter-metadata skill=network-troubleshoot
-```
-
-Each test case has `metadata.skill` and `metadata.type` tags:
+Filter by skill or test type using `--filter-metadata`:
 
 ```bash
-npx promptfoo eval --filter-metadata type=quality
-npx promptfoo eval --filter-metadata type=trigger
-npx promptfoo eval --filter-metadata skill=aks-sre --filter-metadata type=quality
+# Quality tests for one skill
+npm run eval -- --filter-metadata skill=aks-sre
+
+# Trigger tests for one skill
+npm run eval:trigger -- --filter-metadata skill=network-troubleshoot
+
+# Single test by description pattern
+npm run eval -- --filter-pattern "CrashLoopBackOff"
+npm run eval:trigger -- --filter-pattern "Egress"
 ```
