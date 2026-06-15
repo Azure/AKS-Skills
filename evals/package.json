@@ -8,7 +8,7 @@
     "eval": "promptfoo eval -o results.json",
     "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
     "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",
-    "eval:all": "npm run eval && npm run eval:trigger",
+    "eval:all": "npm run eval; npm run eval:trigger",
     "eval:view": "promptfoo view"
   },
   "dependencies": {
