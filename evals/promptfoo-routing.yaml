@@ -1,0 +1,16 @@
+# Routing evaluation — tests skill selection accuracy
+# Run: npx promptfoo eval -c promptfoo-routing.yaml
+#
+# Uses the router-provider which auto-discovers all skills and asks the model
+# which skill (if any) should handle each query. Assertions are simple string
+# equality — no LLM judge needed.
+
+providers:
+  - id: "file://providers/router-provider.js"
+    label: "Skill Router"
+
+prompts:
+  - "{{prompt}}"
+
+tests:
+  - file://tests/*/trigger-tests.yaml

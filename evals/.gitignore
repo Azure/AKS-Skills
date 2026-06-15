@@ -1,4 +1,7 @@
 node_modules/
 results.json
+routing-results.json
+baseline-results.json
+retry-results.json
 .promptfoo/
 output/

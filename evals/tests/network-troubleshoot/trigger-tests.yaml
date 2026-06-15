@@ -1,38 +1,36 @@
-# network-troubleshoot trigger tests
+# network-troubleshoot trigger tests (routing)
 # Validates that prompts are correctly routed (or not routed) to this skill
 #
-# To add/modify tests: just add new entries to this array.
-# Each test needs: description, vars (prompt + skill_path), assert
+# These tests run via promptfoo-routing.yaml using the router-provider,
+# which returns a skill id (e.g. "network-troubleshoot") or "none".
+# Assertions are deterministic string equality — no LLM judge needed.
 
 - description: "Egress blocked should trigger network-troubleshoot skill"
   metadata:
     skill: network-troubleshoot
     type: trigger
   vars:
-    skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "Pods can't reach external services, egress seems blocked"
   assert:
-    - type: llm-rubric
-      value: "Response provides network-specific troubleshooting including NSG rules, network policies, or firewall investigation"
+    - type: equals
+      value: "network-troubleshoot"
 
 - description: "DNS resolution failure should trigger network-troubleshoot skill"
   metadata:
     skill: network-troubleshoot
     type: trigger
   vars:
-    skill_path: "providers/azure/network-troubleshoot/SKILL.md"
-    prompt: "DNS resolution is failing inside my pods"
+    prompt: "Pods can't resolve DNS names, I suspect CoreDNS or NSG blocking UDP 53"
   assert:
-    - type: llm-rubric
-      value: "Response addresses DNS-specific diagnosis including CoreDNS, resolv.conf, or Azure DNS configuration"
+    - type: equals
+      value: "network-troubleshoot"
 
-- description: "OOMKilled should NOT produce network troubleshooting"
+- description: "OOMKilled should trigger aks-sre (not network-troubleshoot)"
   metadata:
-    skill: network-troubleshoot
+    skill: aks-sre
     type: trigger
   vars:
-    skill_path: "providers/azure/network-troubleshoot/SKILL.md"
     prompt: "My pod keeps getting OOMKilled with exit code 137"
   assert:
-    - type: llm-rubric
-      value: "Response acknowledges this is a memory issue not a networking issue, rather than providing network diagnostic steps"
+    - type: equals
+      value: "aks-sre"

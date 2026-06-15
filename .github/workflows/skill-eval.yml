@@ -58,6 +58,15 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
 
+      - name: Run routing evaluations
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          npx promptfoo eval -c promptfoo-routing.yaml -o routing-results.json --no-progress-bar || true
+
       - name: Run baseline comparison
         continue-on-error: true
         working-directory: evals
@@ -101,6 +110,23 @@ jobs:
               )
             ' results.json retry-results.json > merged-results.json && mv merged-results.json results.json
           done
+
+      - name: Check routing results
+        working-directory: evals
+        run: |
+          if [ ! -f routing-results.json ]; then
+            echo "::error::Routing eval did not produce routing-results.json"
+            exit 1
+          fi
+          FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' routing-results.json)
+          TOTAL=$(jq '[.results.results[]] | length' routing-results.json)
+          PASSED=$((TOTAL - FAILURES))
+          echo "Routing: ${PASSED}/${TOTAL} passed"
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "::error::${FAILURES} routing test(s) failed"
+            jq -r '.results.results[] | select(.success == false) | "FAIL: \(.testCase.description // .testCase.vars.prompt)"' routing-results.json
+            exit 1
+          fi
 
       - name: Comment on PR
         if: github.event_name == 'pull_request' && always()
@@ -181,6 +207,22 @@ jobs:
                   const sign = parseFloat(delta) > 0 ? '+' : '';
                   body += `| ${desc} | ${skill} | ${base} | ${sign}${delta} |\n`;
                 }
+              }
+            }
+
+            // Routing/trigger results
+            const routingPath = 'evals/routing-results.json';
+            if (fs.existsSync(routingPath)) {
+              const routing = JSON.parse(fs.readFileSync(routingPath, 'utf8'));
+              const routingResults = routing.results?.results || [];
+              const rPassed = routingResults.filter(r => r.success).length;
+              body += `\n### 🔀 Trigger Tests (${rPassed}/${routingResults.length} passed)\n\n`;
+              body += `| Status | Test | Routed To |\n|--------|------|-----------|\n`;
+              for (const r of routingResults) {
+                const status = r.success ? '✅' : '❌';
+                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
+                const output = r.response?.output || '—';
+                body += `| ${status} | ${desc} | ${output} |\n`;
               }
             }
 

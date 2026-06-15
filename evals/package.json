@@ -5,10 +5,14 @@
   "description": "Evaluation pipeline for AKS Skills",
   "scripts": {
     "lint": "node lint-skills.js",
-    "eval": "promptfoo eval",
+    "eval": "promptfoo eval -o results.json",
+    "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
+    "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",
+    "eval:all": "npm run eval; npm run eval:trigger",
     "eval:view": "promptfoo view"
   },
   "dependencies": {
+    "js-yaml": "^4.2.0",
     "promptfoo": "^0.121.13"
   }
 }
