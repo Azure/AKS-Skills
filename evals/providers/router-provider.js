@@ -127,8 +127,10 @@ class RouterProvider {
       }
       const data = await response.json();
       const raw = data.choices?.[0]?.message?.content || '';
-      // Normalize: lowercase, trim, strip quotes/punctuation
-      const output = raw.toLowerCase().trim().replace(/['"`.]/g, '');
+      // Normalize: extract first token matching a known skill id or "none"
+      const tokens = raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
+      const allowed = new Set(['none', ...skills.map(s => s.id.toLowerCase())]);
+      const output = tokens.find(t => allowed.has(t)) || raw.toLowerCase().trim();
 
       return {
         output,

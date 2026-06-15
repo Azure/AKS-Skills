@@ -115,8 +115,8 @@ jobs:
         working-directory: evals
         run: |
           if [ ! -f routing-results.json ]; then
-            echo "::warning::No routing results found, skipping"
-            exit 0
+            echo "::error::Routing eval did not produce routing-results.json"
+            exit 1
           fi
           FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' routing-results.json)
           TOTAL=$(jq '[.results.results[]] | length' routing-results.json)

@@ -12,6 +12,7 @@
     "eval:view": "promptfoo view"
   },
   "dependencies": {
+    "js-yaml": "^4.2.0",
     "promptfoo": "^0.121.13"
   }
 }

@@ -25,9 +25,9 @@
     - type: equals
       value: "network-troubleshoot"
 
-- description: "OOMKilled should NOT trigger network-troubleshoot"
+- description: "OOMKilled should trigger aks-sre (not network-troubleshoot)"
   metadata:
-    skill: network-troubleshoot
+    skill: aks-sre
     type: trigger
   vars:
     prompt: "My pod keeps getting OOMKilled with exit code 137"
