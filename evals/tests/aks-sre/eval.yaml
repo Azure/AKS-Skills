@@ -1,0 +1,105 @@
+# Vally eval config for aks-sre skill
+# Tests skill invocation, output quality, and tool awareness
+
+name: aks-sre-agentic-eval
+description: |
+  Agentic evaluation for aks-sre skill — tests that the agent
+  correctly invokes the skill and produces SRE-appropriate responses
+  for AKS cluster investigation scenarios.
+tags:
+  type: integration
+  skill: aks-sre
+
+environment:
+  skills:
+    - ../../../skills/providers/azure/aks-sre
+
+defaults:
+  runs: 1
+  timeout: "5m"
+  executor: copilot-sdk
+  model: claude-sonnet-4.6
+
+scoring:
+  threshold: 0.8
+
+stimuli:
+  # ── Routing: CrashLoopBackOff investigation ──
+  - name: "Routing: CrashLoopBackOff pods"
+    prompt: "My pods in the payments namespace are in CrashLoopBackOff. Help me investigate."
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-sre
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-sre
+
+  # ── Routing: OOMKilled pods ──
+  - name: "Routing: OOMKilled investigation"
+    prompt: "Several pods are being OOMKilled in my AKS cluster. What should I do?"
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-sre
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-sre
+
+  # ── Output: mentions diagnostic tools ──
+  - name: "Output: references cluster-snapshot diagnostic step"
+    prompt: "I have a node showing NotReady status in my AKS cluster. Investigate."
+    tags:
+      type: integration
+      tier: full
+      cost: llm
+      area: output
+    graders:
+      - type: completed
+      - type: output-matches
+        config:
+          pattern: "(?i)kubectl|describe|node|NotReady|snapshot|cluster-snapshot"
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-sre
+
+  # ── Output: investigation report structure ──
+  - name: "Output: structured investigation response"
+    prompt: "Pods in namespace checkout are pending for 10 minutes. Run an investigation and provide findings."
+    tags:
+      type: integration
+      tier: full
+      cost: llm
+      area: output
+    graders:
+      - type: completed
+      - type: output-matches
+        config:
+          pattern: "(?i)pending|resource|schedule|node|capacity|investigate"
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-sre

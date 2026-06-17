@@ -1,0 +1,18 @@
+paths:
+  skills:
+    - skills/providers
+  evals:
+    # Directory scan — every tests/<skill>/eval.yaml is auto-discovered.
+    # Add a skill by dropping in evals/tests/<skill>/eval.yaml; no config edits.
+    - evals/tests
+  results: results
+
+suites:
+  smoke:
+    description: "Routing checks — smoke-tier stimuli across all skills, runs: 1"
+    filter:
+      tier: smoke
+
+  full:
+    description: "All agentic stimuli across all skills"
+    filter: {}
