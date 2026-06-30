@@ -1,0 +1,25 @@
+{
+  "_comment": "Mock fixture: AKS node pool fails to scale up due to vCPU (core) quota exhaustion. Ground truth = QuotaExceeded on the user node pool 'np2'. The `az aks show` response is a healthy distractor (control plane is fine) to test that the agent does not misattribute the failure. Patterns are matched in order against the full command line; keep specific patterns before general ones.",
+  "responses": [
+    {
+      "match": "^az aks nodepool list",
+      "stdout": "Name  Mode    Count  ProvisioningState\n----  ------  -----  -----------------\nnp1   System  3      Succeeded\nnp2   User    0      Failed"
+    },
+    {
+      "match": "^az aks nodepool show.*(-n |--name )np2",
+      "stdout": "{\n  \"name\": \"np2\",\n  \"mode\": \"User\",\n  \"count\": 0,\n  \"vmSize\": \"Standard_D4s_v3\",\n  \"provisioningState\": \"Failed\",\n  \"orchestratorVersion\": \"1.29.4\"\n}"
+    },
+    {
+      "match": "^az monitor activity-log list",
+      "stdout": "OperationName: Microsoft.ContainerService/managedClusters/agentPools/write (Create or Update Agent Pool)\nStatus: Failed\nSubStatus: QuotaExceeded\nLevel: Error\nMessage: Provisioning of resource(s) for agent pool 'np2' failed. Operation could not be completed as it results in exceeding approved standardDSv3Family Cores quota. Additional details - Deployment Model: Resource Manager, Location: eastus, Current Limit: 48, Current Usage: 48, Additional Required: 16."
+    },
+    {
+      "match": "^az vm list-usage",
+      "stdout": "Name                          CurrentValue  Limit\n----------------------------  ------------  -----\nTotal Regional vCPUs          48            50\nStandard DSv3 Family vCPUs    48            48"
+    },
+    {
+      "match": "^az aks show",
+      "stdout": "{\n  \"name\": \"prod\",\n  \"provisioningState\": \"Succeeded\",\n  \"powerState\": { \"code\": \"Running\" },\n  \"kubernetesVersion\": \"1.29.4\"\n}"
+    }
+  ]
+}

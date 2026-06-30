@@ -11,7 +11,8 @@
     "eval:all": "npm run eval; npm run eval:trigger",
     "eval:view": "promptfoo view",
     "lint:agentic": "vally lint --eval-spec tests",
-    "eval:agentic": "vally eval --workers 2"
+    "eval:agentic": "vally eval --workers 2",
+    "eval:mock": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --tag tier=mock"
   },
   "dependencies": {
     "js-yaml": "^4.2.0",

@@ -13,6 +13,7 @@ suites:
     filter:
       tier: smoke
 
-  full:
-    description: "All agentic stimuli across all skills"
-    filter: {}
+  mock:
+    description: "Mock-substrate investigation scenarios (no cluster; shimmed az/kubectl)"
+    filter:
+      tier: mock

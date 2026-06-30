@@ -19,6 +19,7 @@ defaults:
   timeout: "5m"
   executor: copilot-sdk
   model: claude-sonnet-4.6
+  judge_model: claude-sonnet-4.6
 
 scoring:
   threshold: 0.8
@@ -64,42 +65,60 @@ stimuli:
       expect_skills:
         - aks-sre
 
-  # ── Output: mentions diagnostic tools ──
-  - name: "Output: references cluster-snapshot diagnostic step"
-    prompt: "I have a node showing NotReady status in my AKS cluster. Investigate."
+  # ── Mock: node pool scale failure (vCPU quota) ──
+  # Runs the agent against a fake-broken cluster (shimmed az/kubectl). Ground
+  # truth = vCPU quota exhaustion; az aks show is a healthy distractor.
+  - name: "Mock: node pool scale failure (vCPU quota)"
+    prompt: "My user node pool 'np2' won't scale up in AKS cluster 'prod'. Investigate and tell me the root cause."
     tags:
       type: integration
-      tier: full
+      tier: mock
       cost: llm
-      area: output
+      area: investigation
+    environment:
+      skills:
+        - ../../../skills/providers/azure/aks-sre
+      files:
+        - src: ../../scenarios/aks-sre/nodepool-scale-failure/responses.json
+          dest: .mocks/responses.json
     graders:
-      - type: completed
+      # Outcome (deterministic): named the real cause
       - type: output-matches
         config:
-          pattern: "(?i)kubectl|describe|node|NotReady|snapshot|cluster-snapshot"
+          pattern: "(?i)quota|vcpu|core limit|cores"
+      # Process/recall: actually inspected the node pool + quota
+      - type: tool-calls
+        config:
+          required:
+            - name: "^bash$"
+              command: "az aks nodepool (list|show)"
+            - name: "^bash$"
+              command: "az (monitor activity-log|vm list-usage)"
+      # Precision/anti-rabbit-hole: did NOT chase unrelated components
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "^bash$"
+              command: "kubectl (logs|describe pod)"
+            - name: "^bash$"
+              command: "az network"
+      # Efficiency: bounded tool calls
+      - type: tool-call-count
+        config:
+          max: 30
+      # Outcome (rubric, LLM judge): two-pass-style correctness check
+      - type: prompt
+        config:
+          threshold: 0.6
+      # Crash guard
       - type: output-not-matches
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
+    rubric:
+      - "Correctly identifies the root cause as vCPU/core quota exhaustion blocking node pool scale-up."
+      - "Does NOT misattribute the failure to a healthy control plane or unrelated workload pods."
+      - "Recommends a concrete fix (request a quota increase, change VM SKU, or lower min-count)."
     constraints:
       expect_skills:
         - aks-sre
-
-  # ── Output: investigation report structure ──
-  - name: "Output: structured investigation response"
-    prompt: "Pods in namespace checkout are pending for 10 minutes. Run an investigation and provide findings."
-    tags:
-      type: integration
-      tier: full
-      cost: llm
-      area: output
-    graders:
-      - type: completed
-      - type: output-matches
-        config:
-          pattern: "(?i)pending|resource|schedule|node|capacity|investigate"
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
-    constraints:
-      expect_skills:
-        - aks-sre
+      max_turns: 15
