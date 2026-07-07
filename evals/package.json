@@ -21,5 +21,8 @@
   "devDependencies": {
     "@microsoft/vally": "^0.6.0",
     "@microsoft/vally-cli": "^0.6.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

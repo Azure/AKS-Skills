@@ -28,7 +28,13 @@ try {
 }
 
 for (const r of spec.responses ?? []) {
-  if (new RegExp(r.match).test(cmd)) {
+  let re;
+  try {
+    re = new RegExp(r.match);
+  } catch {
+    continue; // skip invalid/non-string match entries so one bad fixture line can't crash the run
+  }
+  if (re.test(cmd)) {
     if (r.stdout) {
       process.stdout.write(r.stdout.endsWith("\n") ? r.stdout : r.stdout + "\n");
     }
