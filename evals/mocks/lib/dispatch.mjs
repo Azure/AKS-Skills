@@ -28,17 +28,20 @@ try {
 }
 
 for (const r of spec.responses ?? []) {
+  // A non-string `match` would coerce in surprising ways (e.g. `undefined` →
+  // /(?:)/, which matches everything), so require an explicit string pattern.
+  if (typeof r.match !== "string") continue;
   let re;
   try {
     re = new RegExp(r.match);
   } catch {
-    continue; // skip invalid/non-string match entries so one bad fixture line can't crash the run
+    continue; // skip invalid regex so one bad fixture line can't crash the run
   }
   if (re.test(cmd)) {
-    if (r.stdout) {
+    if (typeof r.stdout === "string") {
       process.stdout.write(r.stdout.endsWith("\n") ? r.stdout : r.stdout + "\n");
     }
-    if (r.stderr) {
+    if (typeof r.stderr === "string") {
       process.stderr.write(r.stderr.endsWith("\n") ? r.stderr : r.stderr + "\n");
     }
     process.exit(r.exit ?? 0);
