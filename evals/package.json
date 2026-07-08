@@ -12,7 +12,8 @@
     "eval:view": "promptfoo view",
     "lint:agentic": "vally lint --eval-spec tests",
     "eval:agentic": "vally eval --workers 2",
-    "eval:mock": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --tag tier=mock"
+    "eval:mock": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --tag tier=mock",
+    "report": "node scripts/generate-report.mjs"
   },
   "dependencies": {
     "js-yaml": "^4.2.0",
