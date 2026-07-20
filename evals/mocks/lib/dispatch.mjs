@@ -44,7 +44,7 @@ for (const r of spec.responses ?? []) {
     if (typeof r.stderr === "string") {
       process.stderr.write(r.stderr.endsWith("\n") ? r.stderr : r.stderr + "\n");
     }
-    process.exit(r.exit ?? 0);
+    process.exit(typeof r.exit === "number" ? r.exit : 0);
   }
 }
 

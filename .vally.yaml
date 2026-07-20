@@ -5,7 +5,6 @@ paths:
     # Directory scan — every tests/<skill>/eval.yaml is auto-discovered.
     # Add a skill by dropping in evals/tests/<skill>/eval.yaml; no config edits.
     - evals/tests
-  results: results
 
 suites:
   smoke:
