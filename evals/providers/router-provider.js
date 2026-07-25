@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const { chat } = require('./llm-client');
 
 /**
  * Router provider — tests skill selection, not response quality.
@@ -11,8 +12,7 @@ const yaml = require('js-yaml');
  * or accepts an explicit list via config.skills.
  *
  * Env vars:
- *   AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT → Azure OpenAI
- *   OPENAI_API_KEY                                → OpenAI direct
+ *   Backend and model are resolved by ./llm-client (EVAL_PROVIDER / EVAL_MODEL).
  *
  * Config (optional):
  *   skills: [{id, description}] — explicit skill list (overrides auto-discovery)
@@ -93,56 +93,16 @@ class RouterProvider {
       '- Do not explain your reasoning. Output only the skill id or "none".',
     ].join('\n');
 
-    const messages = [
-      { role: 'system', content: systemMessage },
-      { role: 'user', content: userPrompt },
-    ];
+    const result = await chat(systemMessage, userPrompt);
+    if (result.error) return result;
 
-    // Determine which API to call
-    const azureKey = process.env.AZURE_OPENAI_API_KEY;
-    const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const model = process.env.EVAL_MODEL || 'gpt-5';
+    // Normalize: extract first token matching a known skill id or "none"
+    const raw = result.output || '';
+    const tokens = raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
+    const allowed = new Set(['none', ...skills.map(s => s.id.toLowerCase())]);
+    const output = tokens.find(t => allowed.has(t)) || raw.toLowerCase().trim();
 
-    let url, headers, body;
-
-    if (azureKey && azureEndpoint) {
-      const apiVersion = '2024-12-01-preview';
-      url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
-      headers = { 'Content-Type': 'application/json', 'api-key': azureKey };
-      body = JSON.stringify({ messages });
-    } else if (openaiKey) {
-      url = 'https://api.openai.com/v1/chat/completions';
-      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` };
-      body = JSON.stringify({ model, messages });
-    } else {
-      return { error: 'No LLM credentials configured. Set AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, or OPENAI_API_KEY.' };
-    }
-
-    try {
-      const response = await fetch(url, { method: 'POST', headers, body });
-      if (!response.ok) {
-        const text = await response.text();
-        return { error: `LLM API error ${response.status}: ${text}` };
-      }
-      const data = await response.json();
-      const raw = data.choices?.[0]?.message?.content || '';
-      // Normalize: extract first token matching a known skill id or "none"
-      const tokens = raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
-      const allowed = new Set(['none', ...skills.map(s => s.id.toLowerCase())]);
-      const output = tokens.find(t => allowed.has(t)) || raw.toLowerCase().trim();
-
-      return {
-        output,
-        tokenUsage: {
-          total: data.usage?.total_tokens,
-          prompt: data.usage?.prompt_tokens,
-          completion: data.usage?.completion_tokens,
-        },
-      };
-    } catch (err) {
-      return { error: `Request failed: ${err.message}` };
-    }
+    return { output, tokenUsage: result.tokenUsage };
   }
 }
 
