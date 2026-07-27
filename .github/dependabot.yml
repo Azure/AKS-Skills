@@ -1,0 +1,38 @@
+# Dependabot version updates.
+# Grouped so routine bumps arrive as one reviewable PR rather than one per package —
+# the eval harness pulls a large transitive tree and ungrouped updates drown the queue.
+# Follows the convention in Azure/aks-mcp.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/evals"
+    schedule:
+      interval: "weekly"
+    groups:
+      eval-harness:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+      eval-harness-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+          - "major"
