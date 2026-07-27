@@ -2,63 +2,190 @@
  * Shared LLM client for all eval providers.
  *
  * Every provider (skill, baseline, router, judge) needs the same thing: send a
- * system + user message, get text back. This centralises backend selection so a
- * skill can be scored against more than one model family.
+ * system + user turn and get text back. Centralising that lets a skill be scored
+ * against more than one model family.
  *
  * That matters because a skill's value is model-dependent. Guidance that helps
  * one model can be redundant — or actively conflicting — for another. Scoring on
  * a single model tells you a skill works there, not that it is durable.
  *
- * Backend selection:
- *   EVAL_PROVIDER=azure|openai|anthropic|github   explicit override
- *   otherwise auto-detected in this order:
- *     AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT → azure
- *     OPENAI_API_KEY                               → openai
- *     ANTHROPIC_API_KEY                            → anthropic
- *     GITHUB_MODELS_TOKEN                          → github
+ * ---------------------------------------------------------------------------
+ * Backends
+ * ---------------------------------------------------------------------------
  *
- * GitHub Models is deliberately excluded from auto-detection unless the
- * dedicated GITHUB_MODELS_TOKEN is set. GitHub Actions injects GITHUB_TOKEN into
- * every job, so auto-detecting on it would silently reroute CI to a different
- * model the moment an Azure secret expired.
+ *   foundry   Microsoft Foundry. The CI backend. One endpoint fronts many model
+ *             deployments, so adding a model to the durability matrix is a
+ *             config change rather than a code change.
  *
- * Model selection: EVAL_MODEL. Defaults to gpt-5 (azure/openai) and
- * openai/gpt-5 (github). Anthropic has no default — model ids are dated and a
- * stale guess fails as a confusing 404.
+ *   azure     Classic Azure OpenAI deployment path. Retained so existing setups
+ *             keep working unchanged.
+ *
+ *   github    GitHub Models. LOCAL DEVELOPMENT ONLY — see below.
+ *
+ * Foundry brokers several model families, but it does so at the billing and
+ * governance layer, not the protocol layer: OpenAI-family deployments speak
+ * chat/completions while Claude deployments speak the Anthropic Messages API.
+ * Both are reachable from the same resource, so the protocol is selected
+ * explicitly with EVAL_PROTOCOL rather than guessed from the model name.
+ *
+ * ---------------------------------------------------------------------------
+ * Why GitHub Models is local-only
+ * ---------------------------------------------------------------------------
+ *
+ * It is genuinely useful locally: no resource to provision, and `gh auth token`
+ * is a credential contributors already have. But it is a different model pool
+ * from the one CI gates on, so a number produced there is not comparable to a
+ * number produced in CI. Set EVAL_REQUIRE_FOUNDRY=1 in CI to make that a hard
+ * failure rather than a convention.
+ *
+ * It is also excluded from auto-detection unless the dedicated
+ * GITHUB_MODELS_TOKEN is set, because Actions injects GITHUB_TOKEN into every
+ * job — auto-detecting on it would silently reroute CI to a different model the
+ * moment a Foundry secret expired, and the run would still look green.
+ *
+ * ---------------------------------------------------------------------------
+ * Configuration
+ * ---------------------------------------------------------------------------
+ *
+ *   EVAL_PROVIDER          foundry | azure | github. Auto-detected if unset.
+ *   EVAL_MODEL             Deployment name (foundry/azure) or model id (github).
+ *   EVAL_PROTOCOL          openai | anthropic. Foundry only. Default: openai.
+ *   EVAL_REQUIRE_FOUNDRY   Set to 1 in CI to reject non-Foundry backends.
+ *
+ *   FOUNDRY_ENDPOINT       https://<resource>.services.ai.azure.com
+ *   FOUNDRY_ACCESS_TOKEN   Entra bearer token. Preferred, and required for
+ *                          models that do not accept API keys.
+ *   FOUNDRY_API_KEY        Key auth, where the deployment allows it.
+ *
+ * Prefer Entra over keys. CI should obtain a token via OIDC federated
+ * credentials (azure/login with id-token: write, then
+ * `az account get-access-token --resource https://cognitiveservices.azure.com`)
+ * so no long-lived secret is stored, and so newer Claude deployments — which do
+ * not accept API keys at all — work without a second auth path.
  */
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const AZURE_API_VERSION = '2024-12-01-preview';
 const GITHUB_MODELS_URL = 'https://models.github.ai/inference/chat/completions';
 
-function detectBackend() {
-  const forced = (process.env.EVAL_PROVIDER || '').trim().toLowerCase();
-  if (forced) {
-    if (!['azure', 'openai', 'anthropic', 'github'].includes(forced)) {
-      return { error: `Unknown EVAL_PROVIDER "${forced}". Use azure, openai, anthropic, or github.` };
-    }
-    return { backend: forced };
-  }
+// Foundry's v1 surface keeps the model out of the URL, so one endpoint serves
+// every deployment. Override if the resource is pinned to a different version.
+const FOUNDRY_API_VERSION = process.env.FOUNDRY_API_VERSION || 'preview';
 
-  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT) return { backend: 'azure' };
-  if (process.env.OPENAI_API_KEY) return { backend: 'openai' };
-  if (process.env.ANTHROPIC_API_KEY) return { backend: 'anthropic' };
-  if (process.env.GITHUB_MODELS_TOKEN) return { backend: 'github' };
+const BACKENDS = ['foundry', 'azure', 'github'];
 
-  return {
-    error:
-      'No LLM credentials configured. Set one of: ' +
-      'AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, OPENAI_API_KEY, ' +
-      'ANTHROPIC_API_KEY, or GITHUB_MODELS_TOKEN (or EVAL_PROVIDER=github with GITHUB_TOKEN).',
-  };
+function foundryCredential() {
+  const token = process.env.FOUNDRY_ACCESS_TOKEN;
+  if (token) return { headers: { Authorization: `Bearer ${token}` } };
+  const key = process.env.FOUNDRY_API_KEY;
+  if (key) return { headers: { 'api-key': key } };
+  return null;
 }
 
-function buildRequest(backend, system, user) {
-  const model = process.env.EVAL_MODEL;
+function detectBackend() {
+  const forced = (process.env.EVAL_PROVIDER || '').trim().toLowerCase();
+
+  let backend;
+  if (forced) {
+    if (!BACKENDS.includes(forced)) {
+      return { error: `Unknown EVAL_PROVIDER "${forced}". Use ${BACKENDS.join(', ')}.` };
+    }
+    backend = forced;
+  } else if (process.env.FOUNDRY_ENDPOINT && foundryCredential()) {
+    backend = 'foundry';
+  } else if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT) {
+    backend = 'azure';
+  } else if (process.env.GITHUB_MODELS_TOKEN) {
+    backend = 'github';
+  } else {
+    return {
+      error:
+        'No LLM credentials configured. Set FOUNDRY_ENDPOINT plus ' +
+        'FOUNDRY_ACCESS_TOKEN or FOUNDRY_API_KEY (recommended), or ' +
+        'AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, or GITHUB_MODELS_TOKEN ' +
+        'for local development.',
+    };
+  }
+
+  // A comparison is only meaningful against the pool CI gates on.
+  if (process.env.EVAL_REQUIRE_FOUNDRY === '1' && backend !== 'foundry') {
+    return {
+      error:
+        `EVAL_REQUIRE_FOUNDRY=1 but the resolved backend is "${backend}". ` +
+        'CI must run against Foundry so results stay comparable across runs.',
+    };
+  }
+
+  return { backend };
+}
+
+/** OpenAI-shaped chat/completions payload. Shared by foundry, azure, github. */
+function openAiBody(model, system, user) {
   // The judge grades a self-contained rubric prompt and passes no system turn.
   const messages = system
     ? [{ role: 'system', content: system }, { role: 'user', content: user }]
     : [{ role: 'user', content: user }];
+  return model ? { model, messages } : { messages };
+}
+
+/** Anthropic Messages payload. `system` is top-level; max_tokens is required. */
+function anthropicBody(model, system, user) {
+  return {
+    model,
+    max_tokens: Number(process.env.EVAL_MAX_TOKENS) || 4096,
+    ...(system ? { system } : {}),
+    messages: [{ role: 'user', content: user }],
+  };
+}
+
+function buildFoundryRequest(system, user) {
+  const endpoint = (process.env.FOUNDRY_ENDPOINT || '').replace(/\/$/, '');
+  if (!endpoint) {
+    return { error: 'EVAL_PROVIDER=foundry requires FOUNDRY_ENDPOINT (https://<resource>.services.ai.azure.com).' };
+  }
+
+  const cred = foundryCredential();
+  if (!cred) {
+    return {
+      error:
+        'EVAL_PROVIDER=foundry requires FOUNDRY_ACCESS_TOKEN (Entra, preferred) or FOUNDRY_API_KEY. ' +
+        'Newer Claude deployments accept Entra only.',
+    };
+  }
+
+  const model = process.env.EVAL_MODEL;
+  if (!model) {
+    return { error: 'EVAL_MODEL is required for the foundry backend. Use the deployment name.' };
+  }
+
+  const protocol = (process.env.EVAL_PROTOCOL || 'openai').trim().toLowerCase();
+  const headers = { 'Content-Type': 'application/json', ...cred.headers };
+
+  if (protocol === 'anthropic') {
+    return {
+      protocol,
+      url: `${endpoint}/anthropic/v1/messages`,
+      headers: { ...headers, 'anthropic-version': ANTHROPIC_VERSION },
+      body: anthropicBody(model, system, user),
+    };
+  }
+
+  if (protocol !== 'openai') {
+    return { error: `Unknown EVAL_PROTOCOL "${protocol}". Use openai or anthropic.` };
+  }
+
+  return {
+    protocol,
+    url: `${endpoint}/openai/v1/chat/completions?api-version=${FOUNDRY_API_VERSION}`,
+    headers,
+    body: openAiBody(model, system, user),
+  };
+}
+
+function buildRequest(backend, system, user) {
+  if (backend === 'foundry') return buildFoundryRequest(system, user);
+
+  const model = process.env.EVAL_MODEL;
 
   if (backend === 'azure') {
     const key = process.env.AZURE_OPENAI_API_KEY;
@@ -68,74 +195,40 @@ function buildRequest(backend, system, user) {
     }
     const deployment = model || 'gpt-5';
     return {
+      protocol: 'openai',
       url: `${endpoint.replace(/\/$/, '')}/openai/deployments/${deployment}/chat/completions?api-version=${AZURE_API_VERSION}`,
       headers: { 'Content-Type': 'application/json', 'api-key': key },
-      body: { messages },
+      body: openAiBody(null, system, user),
     };
   }
 
-  if (backend === 'openai') {
-    const key = process.env.OPENAI_API_KEY;
-    if (!key) return { error: 'EVAL_PROVIDER=openai requires OPENAI_API_KEY.' };
-    return {
-      url: 'https://api.openai.com/v1/chat/completions',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: { model: model || 'gpt-5', messages },
-    };
-  }
-
-  if (backend === 'github') {
-    const key = process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN;
-    if (!key) {
-      return { error: 'EVAL_PROVIDER=github requires GITHUB_MODELS_TOKEN or GITHUB_TOKEN.' };
-    }
-    return {
-      url: GITHUB_MODELS_URL,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: { model: model || 'openai/gpt-5', messages },
-    };
-  }
-
-  // anthropic
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { error: 'EVAL_PROVIDER=anthropic requires ANTHROPIC_API_KEY.' };
-  if (!model) {
-    return {
-      error:
-        'EVAL_MODEL is required for the anthropic backend (model ids are dated, e.g. ' +
-        'claude-opus-4-1-20250805). Set EVAL_MODEL to the exact id you want to score against.',
-    };
+  // github — local development only.
+  const key = process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN;
+  if (!key) {
+    return { error: 'EVAL_PROVIDER=github requires GITHUB_MODELS_TOKEN or GITHUB_TOKEN.' };
   }
   return {
-    url: 'https://api.anthropic.com/v1/messages',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': ANTHROPIC_VERSION,
-    },
-    body: {
-      model,
-      max_tokens: Number(process.env.EVAL_MAX_TOKENS) || 4096,
-      ...(system ? { system } : {}),
-      messages: [{ role: 'user', content: user }],
-    },
+    protocol: 'openai',
+    url: GITHUB_MODELS_URL,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: openAiBody(model || 'openai/gpt-5', system, user),
   };
 }
 
-function parseResponse(backend, data) {
-  if (backend === 'anthropic') {
+function parseResponse(protocol, data) {
+  if (protocol === 'anthropic') {
     const output = (data.content || [])
       .filter((block) => block.type === 'text')
       .map((block) => block.text)
       .join('');
-    const input = data.usage?.input_tokens;
-    const outputTokens = data.usage?.output_tokens;
+    const prompt = data.usage?.input_tokens;
+    const completion = data.usage?.output_tokens;
     return {
       output,
       tokenUsage: {
-        total: input != null && outputTokens != null ? input + outputTokens : undefined,
-        prompt: input,
-        completion: outputTokens,
+        total: prompt != null && completion != null ? prompt + completion : undefined,
+        prompt,
+        completion,
       },
     };
   }
@@ -174,7 +267,7 @@ async function chat(system, user) {
       return { error: `LLM API error (${backend} ${response.status}): ${text}` };
     }
 
-    return parseResponse(backend, await response.json());
+    return parseResponse(req.protocol, await response.json());
   } catch (err) {
     return { error: `LLM API call failed (${backend}): ${err.message}` };
   }
@@ -183,7 +276,12 @@ async function chat(system, user) {
 /** Backend name for logging and result labelling. */
 function activeBackend() {
   const detected = detectBackend();
-  return detected.error ? 'unconfigured' : detected.backend;
+  if (detected.error) return 'unconfigured';
+  if (detected.backend === 'foundry') {
+    const protocol = (process.env.EVAL_PROTOCOL || 'openai').trim().toLowerCase();
+    return `foundry(${protocol})`;
+  }
+  return detected.backend;
 }
 
 module.exports = { chat, activeBackend };

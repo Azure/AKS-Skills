@@ -18,9 +18,11 @@ npm ci
 # Lint only (instant, no API key)
 npm run lint
 
-# Requires LLM credentials
-export AZURE_OPENAI_API_KEY="your-key"
-export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+# Requires LLM credentials — Microsoft Foundry
+export FOUNDRY_ENDPOINT="https://your-resource.services.ai.azure.com"
+export FOUNDRY_ACCESS_TOKEN="$(az account get-access-token \
+  --resource https://cognitiveservices.azure.com --query accessToken -o tsv)"
+export EVAL_MODEL="your-deployment-name"
 
 npm run eval              # quality tests → results.json
 npm run eval:trigger      # trigger/routing tests → routing-results.json
@@ -31,14 +33,39 @@ npm run eval:view         # open results in browser
 
 ## Environment variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `AZURE_OPENAI_API_KEY` | Yes* | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT` | Yes* | Full endpoint URL (e.g. `https://my-resource.openai.azure.com`) — base URL only, no path suffix |
-| `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set |
-| `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5`). Set if your deployment is named differently. |
+Pick one backend. Foundry is what CI runs against.
 
-*Either Azure OpenAI or OpenAI credentials must be provided.
+| Variable | Backend | Description |
+|----------|---------|-------------|
+| `FOUNDRY_ENDPOINT` | foundry | `https://<resource>.services.ai.azure.com` |
+| `FOUNDRY_ACCESS_TOKEN` | foundry | Entra bearer token. Preferred, and required for deployments that don't accept keys. |
+| `FOUNDRY_API_KEY` | foundry | Key auth, where the deployment allows it. |
+| `AZURE_OPENAI_API_KEY` | azure | Azure OpenAI key |
+| `AZURE_OPENAI_ENDPOINT` | azure | Base URL only, no path suffix |
+| `GITHUB_MODELS_TOKEN` | github | **Local development only** — see below |
+| `EVAL_PROVIDER` | any | `foundry` \| `azure` \| `github`. Auto-detected if unset. |
+| `EVAL_MODEL` | any | Deployment name (foundry/azure) or model id (github) |
+| `EVAL_PROTOCOL` | foundry | `openai` (default) or `anthropic` for Claude deployments |
+| `EVAL_REQUIRE_FOUNDRY` | any | Set to `1` in CI to reject non-Foundry backends |
+
+### Why two protocols
+
+Foundry fronts several model families from one resource, but it brokers them at
+the billing and governance layer, not the protocol layer. OpenAI-family
+deployments speak `chat/completions`; Claude deployments speak the Anthropic
+Messages API. Set `EVAL_PROTOCOL=anthropic` when scoring against a Claude
+deployment.
+
+### Why GitHub Models is local-only
+
+It needs no resource and works with a token contributors already have, which
+makes it good for iterating. But it is a different model pool from the one CI
+gates on, so its numbers are not comparable to CI numbers and should not be
+quoted in a decision. `EVAL_REQUIRE_FOUNDRY=1` makes that a hard failure in CI
+rather than a convention. It is also excluded from auto-detection unless
+`GITHUB_MODELS_TOKEN` is set explicitly — Actions injects `GITHUB_TOKEN` into
+every job, so auto-detecting on it would silently reroute CI to a different
+model if a Foundry secret expired, and the run would still look green.
 
 ## Adding eval coverage for a new skill
 

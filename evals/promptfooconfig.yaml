@@ -10,8 +10,10 @@
 # For baseline comparison (quality tests only), see promptfoo-baseline.yaml.
 #
 # Required env vars:
-#   AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT  (preferred)
-#   OR OPENAI_API_KEY                              (fallback)
+#   FOUNDRY_ENDPOINT + FOUNDRY_ACCESS_TOKEN (or FOUNDRY_API_KEY)  (CI)
+#   OR AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT
+#   OR GITHUB_MODELS_TOKEN                                        (local dev only)
+# See providers/llm-client.js for the full list.
 
 description: "AKS Skills Quality Evaluation"
 
