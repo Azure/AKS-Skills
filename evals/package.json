@@ -11,8 +11,8 @@
     "eval:all": "npm run eval; npm run eval:trigger",
     "eval:view": "promptfoo view"
   },
-  "dependencies": {
+  "devDependencies": {
     "js-yaml": "^4.2.0",
-    "promptfoo": "^0.121.13"
+    "promptfoo": "^0.121.19"
   }
 }
