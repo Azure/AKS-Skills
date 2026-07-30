@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Mock shim for `kubectl` — intercepts the agent's calls during mock-tier evals.
+# Placed first on PATH so this runs instead of the real kubectl. Delegates to the
+# shared node dispatcher, which returns canned fixture output for the scenario.
+exec node "$(dirname "$0")/../lib/dispatch.mjs" kubectl "$@"

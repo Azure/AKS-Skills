@@ -1,0 +1,124 @@
+# Vally eval config for aks-troubleshooting skill
+# Tests skill invocation, output quality, and tool awareness
+
+name: aks-troubleshooting-agentic-eval
+description: |
+  Agentic evaluation for aks-troubleshooting skill — tests that the agent
+  correctly invokes the skill and produces SRE-appropriate responses
+  for AKS cluster investigation scenarios.
+tags:
+  type: integration
+  skill: aks-troubleshooting
+
+environment:
+  skills:
+    - ../../../skills/aks-troubleshooting
+
+defaults:
+  runs: 1
+  timeout: "5m"
+  executor: copilot-sdk
+  model: claude-sonnet-4.6
+  judge_model: claude-sonnet-4.6
+
+scoring:
+  threshold: 0.8
+
+stimuli:
+  # ── Routing: CrashLoopBackOff investigation ──
+  - name: "Routing: CrashLoopBackOff pods"
+    prompt: "My pods in the payments namespace are in CrashLoopBackOff. Help me investigate."
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-troubleshooting
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-troubleshooting
+
+  # ── Routing: OOMKilled pods ──
+  - name: "Routing: OOMKilled investigation"
+    prompt: "Several pods are being OOMKilled in my AKS cluster. What should I do?"
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-troubleshooting
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-troubleshooting
+
+  # ── Mock: node pool scale failure (vCPU quota) ──
+  # Runs the agent against a fake-broken cluster (shimmed az/kubectl). Ground
+  # truth = vCPU quota exhaustion; az aks show is a healthy distractor.
+  - name: "Mock: node pool scale failure (vCPU quota)"
+    prompt: "My user node pool 'np2' won't scale up in AKS cluster 'prod'. Investigate and tell me the root cause."
+    tags:
+      type: integration
+      tier: mock
+      cost: llm
+      area: investigation
+    environment:
+      skills:
+        - ../../../skills/aks-troubleshooting
+      files:
+        - src: ../../scenarios/aks-troubleshooting/nodepool-scale-failure/responses.json
+          dest: .mocks/responses.json
+    graders:
+      # Outcome (deterministic): named the real cause
+      - type: output-matches
+        config:
+          pattern: "(?i)quota|vcpu|core limit|cores"
+      # Process/recall: actually inspected the node pool + quota
+      - type: tool-calls
+        config:
+          required:
+            - name: "^bash$"
+              command: "az aks nodepool (list|show)"
+            - name: "^bash$"
+              command: "az (monitor activity-log|vm list-usage)"
+      # Precision/anti-rabbit-hole: did NOT chase unrelated components
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "^bash$"
+              command: "kubectl (logs|describe pod)"
+            - name: "^bash$"
+              command: "az network"
+      # Efficiency: bounded tool calls
+      - type: tool-call-count
+        config:
+          max: 30
+      # Outcome (rubric, LLM judge): two-pass-style correctness check
+      - type: prompt
+        config:
+          threshold: 0.6
+      # Crash guard
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    rubric:
+      - "Correctly identifies the root cause as vCPU/core quota exhaustion blocking node pool scale-up."
+      - "Does NOT misattribute the failure to a healthy control plane or unrelated workload pods."
+      - "Recommends a concrete fix (request a quota increase, change VM SKU, or lower min-count)."
+    constraints:
+      expect_skills:
+        - aks-troubleshooting
+      max_turns: 15

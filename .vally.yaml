@@ -1,0 +1,18 @@
+paths:
+  skills:
+    - skills
+  evals:
+    # Directory scan — every tests/<skill>/eval.yaml is auto-discovered.
+    # Add a skill by dropping in evals/tests/<skill>/eval.yaml; no config edits.
+    - evals/tests
+
+suites:
+  smoke:
+    description: "Routing checks — smoke-tier stimuli across all skills, runs: 1"
+    filter:
+      tier: smoke
+
+  mock:
+    description: "Mock-substrate investigation scenarios (no cluster; shimmed az/kubectl)"
+    filter:
+      tier: mock

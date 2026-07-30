@@ -79,6 +79,18 @@ A dropped packet often dies in the Azure network layer, not in Kubernetes. After
 - **Service / private endpoints** — for reaching Azure PaaS (SQL, Storage, Key Vault).
 - **Private DNS** — the script enumerates zones subscription-wide, because a zone linked to the cluster VNET frequently lives in a *different* resource group than the cluster.
 
+### Egress to Azure PaaS fails (Azure SQL, Storage, Key Vault)
+
+When pod-to-pod (east-west) traffic works but egress to external Azure services fails, the fault is almost always in the **Azure network layer**, not the cluster CNI. Investigate in order, before concluding it is DNS:
+
+1. **NSG rules on the node subnet (and NIC)** — outbound `Deny` rules blocking the destination port/service tag (`Sql`, `Storage`, `AzureCloud`). Most common cause; inspect first.
+2. **Route tables / UDR** — a `0.0.0.0/0` route to a firewall/NVA can black-hole or redirect PaaS-bound traffic. Confirm the effective routes on the subnet.
+3. **Service / private endpoints** — verify the service endpoint is enabled on the subnet, or that the private endpoint's DNS resolves to the private IP and the NSG/route path to it is open.
+4. **Azure Firewall / NVA** — if egress is forced through the firewall, confirm an application/network rule allows the destination FQDN or service tag.
+5. **DNS** — only after the above, confirm the FQDN resolves to the intended (public vs. privatelink) endpoint.
+
+`scripts/collect-azure-network-info.sh` gathers the NSG rules, route tables, firewall config, and endpoint state to identify which layer blocks the flow.
+
 ## Successful vs. broken flow
 
 When you have the pcap and the Azure config, map the path and mark where it breaks:

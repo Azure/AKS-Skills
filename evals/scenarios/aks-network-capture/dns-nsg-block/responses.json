@@ -1,0 +1,30 @@
+{
+  "_comment": "Mock fixture: pods cannot resolve DNS in AKS. Ground truth = an NSG rule blocking outbound UDP 53. The CoreDNS pods are HEALTHY (distractor) so the agent must not stop at 'CoreDNS is broken'; it must inspect the Azure NSG and find the deny rule. Patterns matched in order against the full command line.",
+  "responses": [
+    {
+      "match": "^kubectl get pods -n kube-system.*(k8s-app=kube-dns|coredns)",
+      "stdout": "NAME              READY   STATUS    RESTARTS   AGE\ncoredns-7b9f-aaaa   1/1     Running   0          6d\ncoredns-7b9f-bbbb   1/1     Running   0          6d"
+    },
+    {
+      "match": "^kubectl logs.*(kube-system|coredns)",
+      "stdout": "[INFO] plugin/ready: Still waiting on: \"kubernetes\"\n[INFO] CoreDNS-1.11.1\n[INFO] 127.0.0.1:50000 - 12345 \"A IN kubernetes.default.svc.cluster.local. udp\" NOERROR\n.:53 ready"
+    },
+    {
+      "match": "^kubectl exec.*nslookup",
+      "stderr": ";; connection timed out; no servers could be reached",
+      "exit": 1
+    },
+    {
+      "match": "^kubectl exec.*cat /etc/resolv.conf",
+      "stdout": "search default.svc.cluster.local svc.cluster.local cluster.local\nnameserver 10.0.0.10\noptions ndots:5"
+    },
+    {
+      "match": "^az network nsg rule list",
+      "stdout": "Name              Priority  Direction  Access  Protocol  DestinationPortRange  Description\n----------------  --------  ---------  ------  --------  --------------------  -----------\nDenyDnsOutbound   100       Outbound   Deny    Udp       53                    Blocks outbound DNS\nAllowVnetOutbound 65000     Outbound   Allow   *         *                     Default allow"
+    },
+    {
+      "match": "^az network route-table",
+      "stdout": "[]"
+    }
+  ]
+}
