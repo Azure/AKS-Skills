@@ -26,7 +26,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 ```
 
 - **`description`** carries the routing surface. It must include `WHEN:` triggers **and** a `DO NOT USE FOR:` boundary that names the sibling skill to use instead (the parenthetical-redirect grammar). No two skills may share a description or have one subsume another.
-- **Budget:** `SKILL.md` ≤ 500 tokens, `references/**/*.md` ≤ 1000 tokens (host description budgets truncate long skills). Offload depth to `references/`.
+- **Budget:** the front-matter `description` must fit host routing budgets — keep it under ~500 tokens (~2000 characters), since some hosts truncate long descriptions at routing time. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into `references/` — progressive disclosure, loaded only when the skill is active.
 - **Runtime hints are additive, never conflicting:** `metadata.openclaw.requires.anyBins` (openclaw gating, harmless elsewhere); the repo-root `plugin.json` + `.mcp.json` for SRE Agent / marketplace install.
 
 ## 3. Content rules
