@@ -1,0 +1,15 @@
+{
+  "name": "aks",
+  "description": "Azure Kubernetes Service (AKS) agent skills and MCP integration: troubleshoot live clusters, optimize cost, assess AKS Automatic readiness, operate GPU and model-inference workloads, capture packet-level evidence, and design clusters. Deep Day-2 AKS operations that complement the broader Azure Skills plugin.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Microsoft",
+    "url": "https://www.microsoft.com"
+  },
+  "homepage": "https://github.com/Azure/AKS-Skills",
+  "repository": "https://github.com/Azure/AKS-Skills",
+  "license": "MIT",
+  "keywords": ["aks", "kubernetes", "azure", "troubleshooting", "gpu", "inference", "cost", "devops"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

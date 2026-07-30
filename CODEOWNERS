@@ -1,0 +1,18 @@
+# See https://help.github.com/articles/about-codeowners/
+# Uses the same pattern rules as .gitignore.
+#
+# AKS Skills — every change requires an owner's review. Add the AKS team handle
+# (e.g. @Azure/aks-skills-maintainers) here once it exists.
+
+# Catch-all: all changes.
+*                       @nikhilkaul1234
+
+# Scripts run against customer clusters — require security-aware review.
+/skills/**/scripts/     @nikhilkaul1234
+/evals/tests/**/*.sh    @nikhilkaul1234
+
+# The contract, boundary, and CI gates define the bar for everything else.
+/docs/skill-contract.md         @nikhilkaul1234
+/docs/skills-vs-azure-skills.md @nikhilkaul1234
+/.github/workflows/             @nikhilkaul1234
+/evals/lint-skills.js           @nikhilkaul1234
