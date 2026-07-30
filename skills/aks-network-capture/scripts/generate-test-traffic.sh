@@ -1,6 +1,13 @@
-#!/bin/bash
-# generate-test-traffic.sh — Generate test network traffic from pod's network namespace
-set -e
+#!/usr/bin/env bash
+# generate-test-traffic.sh — Generate bounded test traffic from a pod's network namespace.
+#
+# Safe-by-construction: --target and --target-port are validated, then passed to a FIXED
+# in-pod script as POSITIONAL ARGUMENTS ($1/$2). User data is never interpolated into a
+# shell command string, so there is no injection path and no `eval`. The ephemeral debug
+# container uses a digest-pinned MCR image and runs non-interactively.
+set -euo pipefail
+
+DEBUG_IMAGE="mcr.microsoft.com/cbl-mariner/busybox:2.0@sha256:e4fb4d51fc9b70d6cdc1ce66a0af02ab40554d2ca632e1d188fabc760e432fdd"
 
 TRAFFIC_TYPE="http"
 TARGET=""
@@ -8,141 +15,105 @@ TARGET_PORT=""
 SOURCE_POD=""
 SOURCE_NAMESPACE="default"
 DURATION="30s"
-REQUEST_RATE="1"
+INTERVAL="1"
 
 usage() {
   cat <<EOF
-Usage: $0 --source-pod <pod> --target <target> [options]
+Usage: $0 --source-pod <pod> --target <ip|hostname> [options]
 
 Required:
-  --source-pod <name>        Pod to generate traffic from (shares network namespace)
+  --source-pod <name>        Pod to generate traffic from (RFC 1123 name)
   --target <ip|hostname>     Target IP or hostname
 
 Options:
-  --type <type>              Traffic type: http, https, dns, tcp, ping (default: http)
-  --target-port <port>       Target port (default: 80 for http, 443 for https, 53 for dns)
+  --type <type>              http | https | dns | tcp | ping (default: http)
+  --target-port <1-65535>    Target port (default: 80/443/53 by type; required for tcp)
   --source-namespace <ns>    Source pod namespace (default: default)
-  --duration <duration>      How long to generate traffic (default: 30s)
-  --rate <requests/sec>      Request rate per second (default: 1)
-
-Description:
-  Generates test network traffic from the source pod's network namespace.
-  First tries to exec directly into the pod. If that fails, uses 'kubectl debug'
-  to create an ephemeral debug container sharing the pod's network namespace.
-
-Traffic Types:
-  http     - HTTP GET requests (default port 80)
-  https    - HTTPS GET requests (default port 443)
-  dns      - DNS queries (default port 53)
-  tcp      - TCP connection attempts
-  ping     - ICMP ping
+  --duration <Ns|Nm|Nh>      How long to generate traffic (default: 30s, max 1h)
+  --interval <seconds>       Whole seconds between requests (default: 1)
 
 Examples:
-  # Generate HTTP traffic from frontend pod to backend
   $0 --source-pod frontend-abc123 --target backend.default.svc.cluster.local
-
-  # Generate traffic to specific IP from app pod
   $0 --source-pod app-xyz --source-namespace production --target 10.244.0.5 --target-port 8080 --type tcp
-
-  # DNS test from pod
-  $0 --source-pod debug-pod --target 10.0.0.10 --type dns --duration 60s
 EOF
   exit 1
 }
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --source-pod) SOURCE_POD="$2"; shift 2 ;;
-    --source-namespace) SOURCE_NAMESPACE="$2"; shift 2 ;;
-    --target) TARGET="$2"; shift 2 ;;
-    --target-port) TARGET_PORT="$2"; shift 2 ;;
-    --type) TRAFFIC_TYPE="$2"; shift 2 ;;
-    --duration) DURATION="$2"; shift 2 ;;
-    --rate) REQUEST_RATE="$2"; shift 2 ;;
+die() { echo "Error: $*" >&2; exit 1; }
+valid_rfc1123() { printf '%s' "$1" | grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'; }
+# Host = IPv4/IPv6/DNS name: letters, digits, dot, dash, colon (v6) only.
+valid_host() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._:-]+$'; }
+valid_uint() { printf '%s' "$1" | grep -Eq '^[0-9]+$'; }
+valid_duration() { printf '%s' "$1" | grep -Eq '^[0-9]+[smh]$'; }
+duration_to_seconds() {
+  local d="$1" n unit; n="${d%[smh]}"; unit="${d##*[0-9]}"
+  case "$unit" in s) echo "$n";; m) echo "$((n*60))";; h) echo "$((n*3600))";; esac
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --source-pod) SOURCE_POD="${2:-}"; shift 2 ;;
+    --source-namespace) SOURCE_NAMESPACE="${2:-}"; shift 2 ;;
+    --target) TARGET="${2:-}"; shift 2 ;;
+    --target-port) TARGET_PORT="${2:-}"; shift 2 ;;
+    --type) TRAFFIC_TYPE="${2:-}"; shift 2 ;;
+    --duration) DURATION="${2:-}"; shift 2 ;;
+    --interval) INTERVAL="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
-    *) echo "Unknown option: $1"; usage ;;
+    *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
 
-if [ -z "$SOURCE_POD" ] || [ -z "$TARGET" ]; then
-  echo "Error: --source-pod and --target are required"
-  usage
-fi
+[ -n "$SOURCE_POD" ] && [ -n "$TARGET" ] || die "--source-pod and --target are required"
+valid_rfc1123 "$SOURCE_POD" || die "--source-pod must be an RFC 1123 name"
+valid_rfc1123 "$SOURCE_NAMESPACE" || die "--source-namespace must be an RFC 1123 name"
+valid_host "$TARGET" || die "--target has invalid characters"
+valid_duration "$DURATION" || die "--duration must look like 30s, 5m, or 1h"
+DUR_SECONDS="$(duration_to_seconds "$DURATION")"
+[ "$DUR_SECONDS" -ge 1 ] && [ "$DUR_SECONDS" -le 3600 ] || die "--duration must be 1s..1h"
+valid_uint "$INTERVAL" || die "--interval must be a non-negative integer"
 
 case "$TRAFFIC_TYPE" in
   dns) TARGET_PORT="${TARGET_PORT:-53}" ;;
   https) TARGET_PORT="${TARGET_PORT:-443}" ;;
   http) TARGET_PORT="${TARGET_PORT:-80}" ;;
-  tcp) 
-    if [ -z "$TARGET_PORT" ]; then
-      echo "Error: --target-port is required for tcp traffic"
-      exit 1
-    fi
-    ;;
+  tcp) [ -n "$TARGET_PORT" ] || die "--target-port is required for tcp" ;;
+  ping) TARGET_PORT="0" ;;
+  *) die "--type must be one of: http https dns tcp ping" ;;
 esac
+valid_uint "$TARGET_PORT" || die "--target-port must be an integer"
+[ "$TARGET_PORT" -le 65535 ] || die "--target-port out of range"
 
-echo "Generating test traffic from pod: $SOURCE_POD"
-echo "  Namespace: $SOURCE_NAMESPACE"
-echo "  Type: $TRAFFIC_TYPE"
-echo "  Target: $TARGET${TARGET_PORT:+:$TARGET_PORT}"
-echo "  Duration: $DURATION"
-echo "  Rate: $REQUEST_RATE requests/sec"
-echo ""
-
-INTERVAL=$(echo "scale=2; 1 / $REQUEST_RATE" | bc)
-
-build_traffic_command() {
-  case "$TRAFFIC_TYPE" in
-    http)
-      echo "timeout $DURATION sh -c 'while true; do curl -s -o /dev/null -w \"HTTP %{http_code} - %{time_total}s\n\" http://${TARGET}:${TARGET_PORT}/ || echo \"Request failed\"; sleep $INTERVAL; done'"
-      ;;
-    https)
-      echo "timeout $DURATION sh -c 'while true; do curl -s -k -o /dev/null -w \"HTTPS %{http_code} - %{time_total}s\n\" https://${TARGET}:${TARGET_PORT}/ || echo \"Request failed\"; sleep $INTERVAL; done'"
-      ;;
-    dns)
-      echo "timeout $DURATION sh -c 'while true; do nslookup ${TARGET} && echo \"DNS query succeeded\" || echo \"DNS query failed\"; sleep $INTERVAL; done'"
-      ;;
-    tcp)
-      echo "timeout $DURATION sh -c 'while true; do nc -zv ${TARGET} ${TARGET_PORT} 2>&1 && echo \"TCP connection succeeded\" || echo \"TCP connection failed\"; sleep $INTERVAL; done'"
-      ;;
-    ping)
-      echo "timeout $DURATION ping -i $INTERVAL ${TARGET}"
-      ;;
-    *)
-      echo "Error: Unknown traffic type: $TRAFFIC_TYPE"
-      exit 1
-      ;;
+# Fixed in-pod script: reads target/port/duration/interval as POSITIONAL args ($1..$4).
+# No user data is interpolated into this text — it is a constant single-quoted string.
+POD_SCRIPT='
+set -u
+target="$1"; port="$2"; dur="$3"; iv="$4"; type="$5"
+end=$(( $(date +%s) + dur ))
+while [ "$(date +%s)" -lt "$end" ]; do
+  case "$type" in
+    http)  wget -q -O /dev/null -T 5 "http://$target:$port/"  && echo "http ok"  || echo "http fail" ;;
+    https) wget -q -O /dev/null -T 5 --no-check-certificate "https://$target:$port/" && echo "https ok" || echo "https fail" ;;
+    dns)   nslookup "$target" >/dev/null 2>&1 && echo "dns ok" || echo "dns fail" ;;
+    tcp)   nc -z -w 5 "$target" "$port" && echo "tcp ok" || echo "tcp fail" ;;
+    ping)  ping -c 1 -W 5 "$target" >/dev/null 2>&1 && echo "ping ok" || echo "ping fail" ;;
   esac
-}
+  [ "$iv" -gt 0 ] && sleep "$iv"
+done
+'
 
-TRAFFIC_CMD=$(build_traffic_command)
+echo "Generating $TRAFFIC_TYPE traffic from $SOURCE_POD to $TARGET${TARGET_PORT:+:$TARGET_PORT} for ${DUR_SECONDS}s"
+command -v kubectl >/dev/null 2>&1 || die "kubectl not found on PATH"
 
-echo "Trying to exec directly into pod..."
-if kubectl exec -n "$SOURCE_NAMESPACE" "$SOURCE_POD" -- sh -c "echo 'Pod accessible'" >/dev/null 2>&1; then
-  echo "✓ Pod is accessible via exec"
-  echo "Generating traffic..."
-  echo "----------------------------------------"
-  kubectl exec -n "$SOURCE_NAMESPACE" "$SOURCE_POD" -- sh -c "$TRAFFIC_CMD"
-  echo "----------------------------------------"
-  echo "Traffic generation complete"
+# Pass user values only as trailing positional arguments (safe: never in the script text).
+if kubectl exec -n "$SOURCE_NAMESPACE" "$SOURCE_POD" -- sh -c 'exit 0' >/dev/null 2>&1; then
+  kubectl exec -n "$SOURCE_NAMESPACE" "$SOURCE_POD" -- \
+    sh -c "$POD_SCRIPT" _ "$TARGET" "$TARGET_PORT" "$DUR_SECONDS" "$INTERVAL" "$TRAFFIC_TYPE"
 else
-  echo "✗ Cannot exec into pod directly"
-  echo "Using kubectl debug to create ephemeral container in pod's network namespace..."
-  echo ""
-  
-  DEBUG_CONTAINER="traffic-gen-$(date +%s)"
-  
-  echo "Creating debug container: $DEBUG_CONTAINER"
-  echo "This container shares the network namespace with $SOURCE_POD"
-  echo "----------------------------------------"
-  
+  echo "Direct exec unavailable; using an ephemeral debug container sharing the pod netns."
+  target_container="$(kubectl get pod -n "$SOURCE_NAMESPACE" "$SOURCE_POD" -o jsonpath='{.spec.containers[0].name}')"
   kubectl debug -n "$SOURCE_NAMESPACE" "$SOURCE_POD" \
-    --image=nicolaka/netshoot:latest \
-    --target="$(kubectl get pod -n "$SOURCE_NAMESPACE" "$SOURCE_POD" -o jsonpath='{.spec.containers[0].name}')" \
-    -it -- sh -c "$TRAFFIC_CMD"
-  
-  echo "----------------------------------------"
-  echo "Traffic generation complete"
-  echo ""
-  echo "Note: Debug container was automatically cleaned up"
+    --image="$DEBUG_IMAGE" --target="$target_container" -q -- \
+    sh -c "$POD_SCRIPT" _ "$TARGET" "$TARGET_PORT" "$DUR_SECONDS" "$INTERVAL" "$TRAFFIC_TYPE"
 fi
+echo "Traffic generation complete"

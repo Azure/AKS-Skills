@@ -105,7 +105,7 @@ spec:
   restartPolicy: Never
   containers:
   - name: retrieve
-    image: busybox:latest
+    image: mcr.microsoft.com/cbl-mariner/busybox:2.0@sha256:e4fb4d51fc9b70d6cdc1ce66a0af02ab40554d2ca632e1d188fabc760e432fdd
     command: ["sh", "-c", "sleep 300"]
     volumeMounts:
     - name: capture-output

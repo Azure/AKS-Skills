@@ -120,9 +120,14 @@ if [ -n "$VNET_SUBNET_ID" ]; then
   
   VNET_INFO=$(az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" -o json 2>/dev/null || echo "{}")
   SUBNETS=$(az network vnet subnet list --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" -o json 2>/dev/null || echo "[]")
-  
+  # Scoped detail for the cluster's own subnet: the effective UDR, NSG, and delegations.
+  NODE_SUBNET=$(az network vnet subnet show --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" --name "$SUBNET_NAME" \
+    --query "{name:name, addressPrefix:addressPrefix, udr:routeTable, nsg:networkSecurityGroup, delegations:delegations}" \
+    -o json 2>/dev/null || echo "{}")
+
   jq --argjson vnet "$VNET_INFO" '.vnet = $vnet' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
   jq --argjson subnets "$SUBNETS" '.subnets = $subnets' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+  jq --argjson node_subnet "$NODE_SUBNET" '.nodeSubnet = $node_subnet' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
   
   # Get VNET peerings
   echo "Collecting VNET peering information..."
@@ -150,10 +155,12 @@ echo "Collecting Public IPs..."
 PUBLIC_IPS=$(az network public-ip list --resource-group "$NODE_RESOURCE_GROUP" -o json 2>/dev/null || echo "[]")
 jq --argjson ips "$PUBLIC_IPS" '.publicIPs = $ips' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
 
-# Get private DNS zones (if any linked to the VNET)
+# Get private DNS zones. Enumerate subscription-wide (no --resource-group): a zone
+# linked to the cluster VNET frequently lives in a DIFFERENT resource group than the
+# cluster, so scoping to the cluster RG silently misses it.
 if [ -n "$VNET_NAME" ]; then
-  echo "Collecting Private DNS Zones..."
-  DNS_ZONES=$(az network private-dns zone list --resource-group "$RESOURCE_GROUP" -o json 2>/dev/null || echo "[]")
+  echo "Collecting Private DNS Zones (subscription-wide)..."
+  DNS_ZONES=$(az network private-dns zone list -o json 2>/dev/null || echo "[]")
   jq --argjson zones "$DNS_ZONES" '.privateDnsZones = $zones' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
 fi
 
