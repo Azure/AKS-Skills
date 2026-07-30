@@ -9,10 +9,20 @@
     "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
     "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",
     "eval:all": "npm run eval; npm run eval:trigger",
-    "eval:view": "promptfoo view"
+    "eval:view": "promptfoo view",
+    "lint:agentic": "vally lint --eval-spec tests",
+    "eval:agentic": "vally eval --workers 2",
+    "eval:mock": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --tag tier=mock"
   },
   "dependencies": {
     "js-yaml": "^4.2.0",
     "promptfoo": "^0.121.13"
+  },
+  "devDependencies": {
+    "@microsoft/vally": "^0.6.0",
+    "@microsoft/vally-cli": "^0.6.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

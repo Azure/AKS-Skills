@@ -37,6 +37,29 @@ When troubleshooting AKS clusters, also analyze Azure network resources that may
 - **Service Endpoints / Private Endpoints**: Verify connectivity to Azure services
 - **DNS Configuration**: Check private DNS zones and resolution paths
 
+### Egress to Azure PaaS Fails (e.g., Azure SQL, Storage, Key Vault)
+
+When pod-to-pod (east-west) traffic works but egress to external Azure services
+fails, the fault is almost always in the **Azure network layer**, not the cluster
+CNI. Investigate all of the following, in order, before concluding it is DNS:
+
+1. **NSG rules on the node subnet (and NIC)** — check for outbound `Deny` rules
+   that block the destination port/service tag (e.g., `Sql`, `Storage`,
+   `AzureCloud`). This is the most common cause; always inspect it first.
+2. **Route tables / user-defined routes (UDR)** — a `0.0.0.0/0` route to a
+   firewall/NVA appliance can black-hole or redirect PaaS-bound traffic. Confirm
+   the effective routes on the subnet.
+3. **Service endpoints / private endpoints** — verify the service endpoint is
+   enabled on the subnet, or that the private endpoint's DNS resolves to the
+   private IP and the NSG/route path to it is open.
+4. **Azure Firewall / NVA** — if egress is forced through Azure Firewall, confirm
+   an application/network rule allows the destination FQDN or service tag.
+5. **DNS** — only after the above, confirm the FQDN resolves to the intended
+   (public vs. privatelink) endpoint.
+
+Run `scripts/collect-azure-network-info.sh` to gather NSG rules, route tables,
+firewall config, and endpoint state, then report which layer blocks the flow.
+
 ## How to Use This Skill
 
 - `scripts/setup-capture-configmap.sh` — deploy network collection scripts to cluster (run once)
