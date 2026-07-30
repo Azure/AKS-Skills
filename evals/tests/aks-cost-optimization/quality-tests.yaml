@@ -1,0 +1,13 @@
+# aks-cost-optimization quality tests
+
+- description: "Rightsizing recommendation is data-driven, not a blind cut"
+  metadata:
+    skill: aks-cost-optimization
+    type: quality
+  vars:
+    skill_path: "aks-cost-optimization/SKILL.md"
+    prompt: "My AKS bill is high and I think pods are over-provisioned. How do I safely rightsize?"
+  assert:
+    - type: g-eval
+      value: "Response bases rightsizing on observed usage (VPA recommendations / actual vs requested), not a blind percentage cut, and considers the autoscaler and spot pools for further savings"
+      threshold: 0.8

@@ -1,0 +1,13 @@
+# aks-automatic-readiness quality tests
+
+- description: "Readiness assessment identifies concrete incompatibilities"
+  metadata:
+    skill: aks-automatic-readiness
+    type: quality
+  vars:
+    skill_path: "aks-automatic-readiness/SKILL.md"
+    prompt: "Assess whether my workloads are ready to move to AKS Automatic and what I need to change."
+  assert:
+    - type: g-eval
+      value: "Response assesses workloads/cluster config against specific AKS Automatic constraints (e.g. resource requests/limits, node/pool assumptions, unsupported settings) and proposes concrete fixes, rather than generic 'it depends' advice"
+      threshold: 0.8

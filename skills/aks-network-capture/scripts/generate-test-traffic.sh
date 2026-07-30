@@ -89,11 +89,13 @@ valid_uint "$TARGET_PORT" || die "--target-port must be an integer"
 POD_SCRIPT='
 set -u
 target="$1"; port="$2"; dur="$3"; iv="$4"; type="$5"
+# Bracket IPv6 literals for URL use (a bare colon in the host is IPv6, never a hostname/IPv4).
+case "$target" in *:*) urlhost="[$target]";; *) urlhost="$target";; esac
 end=$(( $(date +%s) + dur ))
 while [ "$(date +%s)" -lt "$end" ]; do
   case "$type" in
-    http)  wget -q -O /dev/null -T 5 "http://$target:$port/"  && echo "http ok"  || echo "http fail" ;;
-    https) wget -q -O /dev/null -T 5 --no-check-certificate "https://$target:$port/" && echo "https ok" || echo "https fail" ;;
+    http)  wget -q -O /dev/null -T 5 "http://$urlhost:$port/"  && echo "http ok"  || echo "http fail" ;;
+    https) wget -q -O /dev/null -T 5 --no-check-certificate "https://$urlhost:$port/" && echo "https ok" || echo "https fail" ;;
     dns)   nslookup "$target" >/dev/null 2>&1 && echo "dns ok" || echo "dns fail" ;;
     tcp)   nc -z -w 5 "$target" "$port" && echo "tcp ok" || echo "tcp fail" ;;
     ping)  ping -c 1 -W 5 "$target" >/dev/null 2>&1 && echo "ping ok" || echo "ping fail" ;;

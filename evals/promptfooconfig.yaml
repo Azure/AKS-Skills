@@ -27,6 +27,10 @@ prompts:
 tests:
   - file://tests/aks-troubleshooting/quality-tests.yaml
   - file://tests/aks-gpu-inference/quality-tests.yaml
+  - file://tests/aks-cost-optimization/quality-tests.yaml
+  - file://tests/aks-automatic-readiness/quality-tests.yaml
+  - file://tests/aks-cluster-setup/quality-tests.yaml
+  - file://tests/aks-network-capture/quality-tests.yaml
 
 # LLM-as-judge for g-eval/llm-rubric assertions.
 # Custom provider needed because promptfoo's built-in azureopenai provider sends

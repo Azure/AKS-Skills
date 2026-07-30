@@ -1,0 +1,13 @@
+# aks-cluster-setup quality tests
+
+- description: "Cluster setup makes AKS-specific design calls and delegates provisioning"
+  metadata:
+    skill: aks-cluster-setup
+    type: quality
+  vars:
+    skill_path: "aks-cluster-setup/SKILL.md"
+    prompt: "Help me design and create a production AKS cluster with private networking."
+  assert:
+    - type: g-eval
+      value: "Response makes AKS-specific Day-0 design decisions (SKU Automatic vs Standard, CNI/pod-IP model, private API server, egress) AND delegates the actual provisioning to the Azure Skills engine (azure-prepare/validate/deploy) rather than hand-rolling the deployment"
+      threshold: 0.8
