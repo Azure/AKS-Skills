@@ -17,7 +17,11 @@ class AzureJudgeProvider {
     const azureKey = process.env.AZURE_OPENAI_API_KEY;
     const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const openaiKey = process.env.OPENAI_API_KEY;
-    const model = process.env.EVAL_MODEL || 'gpt-5';
+    // Decouple the judge from the model under test. Set EVAL_JUDGE_MODEL to a fixed
+    // deployment so the grader stays constant while EVAL_MODEL varies across a
+    // multi-model / cross-release matrix — otherwise every candidate grades itself
+    // (self-preference bias) and scores are not comparable across models.
+    const model = process.env.EVAL_JUDGE_MODEL || process.env.EVAL_MODEL || 'gpt-5';
     const apiVersion = this.config.apiVersion || '2024-12-01-preview';
 
     let url, headers;

@@ -1,0 +1,13 @@
+# aks-network-capture quality tests
+
+- description: "Capture guidance is safe and Azure-network-aware"
+  metadata:
+    skill: aks-network-capture
+    type: quality
+  vars:
+    skill_path: "aks-network-capture/SKILL.md"
+    prompt: "Pods can reach each other but egress to Azure SQL fails. I want packet-level proof of where it drops."
+  assert:
+    - type: g-eval
+      value: "Response investigates the Azure network layer in order (NSG, routes/UDR, service/private endpoints, firewall) before DNS, and describes a bounded, least-privilege capture rather than a blanket privileged tcpdump"
+      threshold: 0.8

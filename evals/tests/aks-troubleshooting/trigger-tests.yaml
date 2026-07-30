@@ -1,0 +1,46 @@
+# aks-troubleshooting trigger tests (routing)
+# Validates that prompts route (or do not route) to this skill.
+#
+# Run via promptfoo-routing.yaml using the router-provider, which returns a
+# skill id (e.g. "aks-troubleshooting") or "none". Assertions are deterministic
+# string equality — no LLM judge.
+
+- description: "CrashLoopBackOff should route to aks-troubleshooting"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+  vars:
+    prompt: "A pod in my cluster is stuck in CrashLoopBackOff"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Node NotReady should route to aks-troubleshooting"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+  vars:
+    prompt: "My nodes are showing NotReady status after an upgrade"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "DNS resolution failure should route to aks-troubleshooting (not the capture skill)"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+  vars:
+    prompt: "Pods can't resolve DNS names, internal and external lookups both failing"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Non-Kubernetes VM resize should route to no skill"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+  vars:
+    prompt: "How do I resize my Azure VM that's not part of any Kubernetes cluster?"
+  assert:
+    - type: equals
+      value: "none"

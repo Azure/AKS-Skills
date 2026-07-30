@@ -1,0 +1,15 @@
+{
+  "name": "aks-skills",
+  "owner": {
+    "name": "Microsoft",
+    "url": "https://www.microsoft.com"
+  },
+  "plugins": [
+    {
+      "name": "aks",
+      "description": "Azure Kubernetes Service (AKS) agent skills and MCP integration for troubleshooting, cost, AKS Automatic readiness, GPU/inference operations, packet capture, and cluster design.",
+      "source": ".",
+      "homepage": "https://github.com/Azure/AKS-Skills"
+    }
+  ]
+}

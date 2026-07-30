@@ -1,0 +1,31 @@
+# aks-cost-optimization trigger tests (routing)
+
+- description: "Reduce AKS spend routes to aks-cost-optimization"
+  metadata:
+    skill: aks-cost-optimization
+    type: trigger
+  vars:
+    prompt: "My AKS bill is too high, help me rightsize pods and scale down idle nodes"
+  assert:
+    - type: equals
+      value: "aks-cost-optimization"
+
+- description: "Spot node pools for savings routes to aks-cost-optimization"
+  metadata:
+    skill: aks-cost-optimization
+    type: trigger
+  vars:
+    prompt: "Can I move my batch workloads to spot node pools to save money?"
+  assert:
+    - type: equals
+      value: "aks-cost-optimization"
+
+- description: "GPU/idle-GPU cost routes to aks-gpu-inference, not general cost"
+  metadata:
+    skill: aks-cost-optimization
+    type: trigger
+  vars:
+    prompt: "My GPU node pool is idle and expensive, how do I scale it to zero?"
+  assert:
+    - type: equals
+      value: "aks-gpu-inference"

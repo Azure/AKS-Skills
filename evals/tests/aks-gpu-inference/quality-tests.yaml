@@ -1,0 +1,39 @@
+# aks-gpu-inference quality tests
+
+- description: "GPU pod Pending covers the quota/taint/device-plugin chain"
+  metadata:
+    skill: aks-gpu-inference
+    type: quality
+  vars:
+    skill_path: "aks-gpu-inference/SKILL.md"
+    prompt: "A GPU pod is stuck Pending with 'Insufficient nvidia.com/gpu' on my AKS cluster. Walk me through diagnosing it."
+  assert:
+    - type: icontains
+      value: "quota"
+    - type: g-eval
+      value: "Response checks GPU vCPU quota (per VM family, defaults to 0), the sku=gpu:NoSchedule taint/toleration match, and whether the device plugin advertises nvidia.com/gpu — not just a generic 'add more nodes'"
+      threshold: 0.8
+
+- description: "KAITO stuck workspace covers conditions, quota, and the cost trap"
+  metadata:
+    skill: aks-gpu-inference
+    type: quality
+  vars:
+    skill_path: "aks-gpu-inference/SKILL.md"
+    prompt: "My KAITO Workspace never becomes ready. How do I troubleshoot, and what do I clean up afterward?"
+  assert:
+    - type: g-eval
+      value: "Response inspects the Workspace status conditions, names GPU quota / region availability as the top cause, allows for the ~10-20 min provisioning time, and warns that deleting the Workspace does NOT delete the GPU node pool (manual cleanup needed to stop cost)"
+      threshold: 0.8
+
+- description: "Model OOM on load covers VRAM sizing rather than raising limits"
+  metadata:
+    skill: aks-gpu-inference
+    type: quality
+  vars:
+    skill_path: "aks-gpu-inference/SKILL.md"
+    prompt: "My inference pod gets OOMKilled while loading model weights on a T4. What's going on?"
+  assert:
+    - type: g-eval
+      value: "Response explains VRAM exhaustion (weights + KV cache exceed the card's memory), points to DCGM FB_USED/FB_FREE, and recommends right-sizing the GPU SKU or quantizing rather than blindly raising Kubernetes memory limits"
+      threshold: 0.8

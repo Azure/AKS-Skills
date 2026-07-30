@@ -7,7 +7,7 @@ const yaml = require('js-yaml');
  * Presents all skill descriptions to the model and asks which skill
  * (if any) should handle the user's query. Returns just the skill id.
  *
- * Auto-discovers skills by walking skills/providers/ for SKILL.md files,
+ * Auto-discovers skills by walking the whole skills/ tree for SKILL.md files,
  * or accepts an explicit list via config.skills.
  *
  * Env vars:
@@ -25,7 +25,6 @@ const SKILLS_BASE = process.env.SKILLS_BASE || path.resolve(__dirname, '../../sk
 
 function discoverSkills() {
   const skills = [];
-  const providersDir = path.join(SKILLS_BASE, 'providers');
 
   function walk(dir) {
     if (!fs.existsSync(dir)) return;
@@ -51,7 +50,7 @@ function discoverSkills() {
     }
   }
 
-  walk(providersDir);
+  walk(SKILLS_BASE);
   return skills;
 }
 

@@ -1,0 +1,122 @@
+# Vally eval config for aks-network-capture skill
+# Tests skill invocation, output quality, and tool awareness
+
+name: aks-network-capture-agentic-eval
+description: |
+  Agentic evaluation for aks-network-capture skill — tests that the
+  agent correctly invokes the skill and produces network-diagnostic
+  responses for AKS connectivity scenarios.
+tags:
+  type: integration
+  skill: aks-network-capture
+
+environment:
+  skills:
+    - ../../../skills/aks-network-capture
+
+defaults:
+  runs: 1
+  timeout: "5m"
+  executor: copilot-sdk
+  model: claude-sonnet-4.6
+  judge_model: claude-sonnet-4.6
+
+scoring:
+  threshold: 0.8
+
+stimuli:
+  # ── Routing: DNS resolution failure ──
+  - name: "Routing: DNS resolution failure"
+    prompt: "My pods can't resolve DNS names in my AKS cluster. I suspect CoreDNS or an NSG blocking UDP 53. Help me investigate."
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-network-capture
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-network-capture
+
+  # ── Routing: egress blocked ──
+  - name: "Routing: egress traffic blocked"
+    prompt: "Pods in my AKS cluster can't reach external services and egress seems blocked. What should I do?"
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-network-capture
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    constraints:
+      expect_skills:
+        - aks-network-capture
+
+  # ── Mock: DNS failure caused by an NSG blocking UDP 53 ──
+  # Runs the agent against a fake-broken cluster (shimmed az/kubectl). Ground
+  # truth = NSG deny rule on outbound UDP 53; CoreDNS pods are a healthy distractor.
+  - name: "Mock: DNS resolution blocked by NSG (UDP 53)"
+    prompt: "Pods in my AKS cluster 'prod' suddenly can't resolve any DNS names. Investigate and tell me the root cause."
+    tags:
+      type: integration
+      tier: mock
+      cost: llm
+      area: investigation
+    environment:
+      skills:
+        - ../../../skills/aks-network-capture
+      files:
+        - src: ../../scenarios/aks-network-capture/dns-nsg-block/responses.json
+          dest: .mocks/responses.json
+    graders:
+      # Outcome (deterministic): named the real cause
+      - type: output-matches
+        config:
+          pattern: "(?i)NSG|network security group|udp 53|outbound.*(deny|block)|deny.*dns"
+      # Process/recall: checked DNS resolution AND the Azure NSG
+      - type: tool-calls
+        config:
+          required:
+            - name: "^bash$"
+              command: "kubectl exec.*(nslookup|resolv.conf)"
+            - name: "^bash$"
+              command: "az network nsg rule list"
+      # Precision/anti-rabbit-hole: did NOT conclude on healthy CoreDNS / restart pods
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "^bash$"
+              command: "kubectl (delete|rollout restart).*(coredns|kube-dns)"
+      # Efficiency: bounded tool calls
+      - type: tool-call-count
+        config:
+          max: 30
+      # Outcome (rubric, LLM judge): two-pass-style correctness check
+      - type: prompt
+        config:
+          threshold: 0.6
+      # Crash guard
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    rubric:
+      - "Correctly identifies the root cause as an NSG rule blocking outbound UDP 53 (DNS)."
+      - "Does NOT misattribute the failure to CoreDNS, which is healthy/Running in this scenario."
+      - "Recommends removing or amending the NSG deny rule for UDP 53 as the fix."
+    constraints:
+      expect_skills:
+        - aks-network-capture
+      max_turns: 15

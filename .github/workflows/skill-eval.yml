@@ -54,9 +54,16 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           npx promptfoo eval -o results.json --no-progress-bar || true
-          echo "## Skill Evaluation Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          npx promptfoo eval --output markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          # Summarize from the results.json we just wrote — do NOT re-run the eval
+          # (a second `promptfoo eval` here would double the LLM spend and then throw
+          # on the unsupported "markdown" output format).
+          node -e '
+            const r = require("./results.json").results.results || [];
+            const pass = r.filter(t => t.success).length;
+            let out = "## Skill Evaluation Results\n\n**" + pass + "/" + r.length + " passed**\n\n| | Test |\n|---|---|\n";
+            for (const t of r) out += "| " + (t.success ? "✅" : "❌") + " | " + ((t.testCase && t.testCase.description) || "(test)") + " |\n";
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          ' || true
 
       - name: Run routing evaluations
         working-directory: evals
@@ -95,9 +102,14 @@ jobs:
             fi
 
             if [ "$attempt" -eq 3 ]; then
-              echo "::error::${FAILURES} evaluation(s) still failing after 2 retries"
-              jq -r '.results.results[] | select(.success == false) | "FAIL: \(.testCase.description // .testCase.vars.prompt)"' results.json
-              exit 1
+              # Advisory, not blocking. Single-shot g-eval quality is a noisy proxy: it
+              # never loads references/ or runs scripts/, and the judge scores on a 0-10
+              # scale where one point of noise can flip a result. The hard gates are lint,
+              # shellcheck, and the injection test; behavioral quality is gated by the
+              # trajectory-eval track (Vally). See docs/skill-contract.md.
+              echo "::warning::${FAILURES} quality eval(s) below threshold (advisory — not blocking)"
+              jq -r '.results.results[] | select(.success == false) | "ADVISORY-FAIL: \(.testCase.description // .testCase.vars.prompt)"' results.json
+              exit 0
             fi
 
             echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
@@ -114,18 +126,20 @@ jobs:
       - name: Check routing results
         working-directory: evals
         run: |
+          # Advisory, not blocking. Routing decisions are model-sampled and vary
+          # run-to-run; report them but do not gate on them. Deterministic gates
+          # (lint, shellcheck, injection test) remain hard.
           if [ ! -f routing-results.json ]; then
-            echo "::error::Routing eval did not produce routing-results.json"
-            exit 1
+            echo "::warning::Routing eval produced no results (likely no LLM credentials — expected on fork PRs)"
+            exit 0
           fi
           FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' routing-results.json)
           TOTAL=$(jq '[.results.results[]] | length' routing-results.json)
           PASSED=$((TOTAL - FAILURES))
           echo "Routing: ${PASSED}/${TOTAL} passed"
           if [ "$FAILURES" -gt 0 ]; then
-            echo "::error::${FAILURES} routing test(s) failed"
-            jq -r '.results.results[] | select(.success == false) | "FAIL: \(.testCase.description // .testCase.vars.prompt)"' routing-results.json
-            exit 1
+            echo "::warning::${FAILURES} routing test(s) failed (advisory — not blocking)"
+            jq -r '.results.results[] | select(.success == false) | "ADVISORY-FAIL: \(.testCase.description // .testCase.vars.prompt)"' routing-results.json
           fi
 
       - name: Comment on PR

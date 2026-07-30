@@ -1,0 +1,31 @@
+# aks-cluster-setup trigger tests (routing)
+
+- description: "Create a production cluster routes to aks-cluster-setup"
+  metadata:
+    skill: aks-cluster-setup
+    type: trigger
+  vars:
+    prompt: "Help me design and create a production-ready AKS cluster with private networking"
+  assert:
+    - type: equals
+      value: "aks-cluster-setup"
+
+- description: "Day-0 SKU/networking design routes to aks-cluster-setup"
+  metadata:
+    skill: aks-cluster-setup
+    type: trigger
+  vars:
+    prompt: "Should I use AKS Automatic or Standard, and Azure CNI Overlay or kubenet, for a new cluster?"
+  assert:
+    - type: equals
+      value: "aks-cluster-setup"
+
+- description: "Debugging an existing cluster routes to aks-troubleshooting, not setup"
+  metadata:
+    skill: aks-cluster-setup
+    type: trigger
+  vars:
+    prompt: "My existing cluster's nodes keep going NotReady, help me debug"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"

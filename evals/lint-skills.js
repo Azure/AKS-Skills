@@ -75,7 +75,9 @@ function findSkillFolders(dir) {
     const hasSkillMd = entries.some(e => e.isFile() && e.name === 'SKILL.md');
     if (hasSkillMd) {
       results.push(current);
-      return; // Don't recurse into sub-folders of a skill
+      // Keep recursing: a skill's own references/ and scripts/ subfolders hold no
+      // SKILL.md, so they are never double-counted, and any genuinely nested skill
+      // must still be discovered rather than silently skipped.
     }
     for (const entry of entries) {
       if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
@@ -102,6 +104,50 @@ function checkScripts(skillDir) {
     if (!firstLine.startsWith('#!')) {
       addWarning(filePath, 'Script missing shebang (#!/bin/bash or #!/usr/bin/env python3)');
     }
+  }
+}
+
+// Coaching lemmas: phrases that prescribe how to think/write/behave generally.
+// A match is only flagged when the line carries NO AKS/Azure/K8s domain token and
+// NO safety verb (see checkCoaching) — so durable tool/policy/safety lines pass.
+const COACHING_LEMMAS = [
+  'painfully concise', 'be concise', 'be thorough', 'step by step', 'step-by-step',
+  'think carefully', 'think hard', 'bias towards', 'bias toward', "don't stop at",
+  'do not stop at', 'always use tools', 'use tools first', 'proactively',
+  'leave out', 'filler words', 'five whys', 'be brief', 'be professional',
+];
+// Domain tokens whose presence marks a line as durable (command/resource/error/field).
+const DOMAIN_RE = /\b(az|kubectl|aks|nsg|cni|vnet|nodepool|kubelet|coredns|nvidia|gpu|dcgm|kaito|mcp|pvc|pdb|snat|vm|nic|udr|helm|tcpdump|bpf)\b|networkProfile|nvidia\.com|mcr\.microsoft|error code|`[^`]+`/i;
+const SAFETY_RE = /\b(delete|drain|cordon|scale|restart|upgrade|reconfigure|read-only|readonly|do not|never)\b/i;
+
+/**
+ * Coaching-phrase lint (advisory). Flags second-person coaching that fights the host
+ * model's trained posture, so a reviewer can decide whether it still earns its place.
+ * Never errors — durability is a judgment call, not a hard gate.
+ */
+function checkCoaching(skillDir, content) {
+  const body = content.replace(/^---\n[\s\S]*?\n---/, ''); // skip front matter
+  const lines = body.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lower = line.toLowerCase();
+    const lemma = COACHING_LEMMAS.find(l => lower.includes(l));
+    if (!lemma) continue;
+    if (DOMAIN_RE.test(line) || SAFETY_RE.test(line)) continue; // durable — tool/policy/safety
+    addWarning(path.join(skillDir, 'SKILL.md'),
+      `coaching phrase "${lemma}" (durability: does this fight the host model's default posture? drop unless it encodes a policy/tool/safety rule)`);
+  }
+}
+
+/**
+ * Coverage gate: every skill must have routing or quality tests. Errors if none.
+ */
+function checkTestCoverage(skillName, skillMdPath) {
+  const testDir = path.join(__dirname, 'tests', skillName);
+  const hasTests = fs.existsSync(path.join(testDir, 'trigger-tests.yaml'))
+    || fs.existsSync(path.join(testDir, 'quality-tests.yaml'));
+  if (!hasTests) {
+    addError(skillMdPath, `no eval tests found at evals/tests/${skillName}/ (add trigger-tests.yaml and/or quality-tests.yaml)`);
   }
 }
 
@@ -172,6 +218,12 @@ for (const skillDir of skillFolders) {
 
   // Internal references
   checkInternalRefs(skillDir, content);
+
+  // Eval coverage (error if a skill has no tests)
+  checkTestCoverage(folderName, skillMdPath);
+
+  // Durability: coaching-phrase lint (warning only)
+  checkCoaching(skillDir, content);
 }
 
 // --- Report ---

@@ -1,0 +1,48 @@
+name: Script Security
+
+# Lints every shipped shell script and runs the packet-capture injection
+# regression test. No secrets required, so this gate also runs on fork PRs.
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**/scripts/**'
+      - 'evals/tests/**/*.test.sh'
+      - '.github/workflows/scripts.yml'
+  push:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint all skill shell scripts
+        run: |
+          set -e
+          found=0
+          while IFS= read -r -d '' f; do
+            found=1
+            echo "== shellcheck $f =="
+            shellcheck -S warning "$f"
+          done < <(find skills -type f -name '*.sh' -print0)
+          [ "$found" -eq 1 ] || { echo "no scripts found"; exit 1; }
+      - name: Assert no eval and no :latest / Docker Hub images in scripts
+        run: |
+          set -e
+          if grep -rnE '(^|[;&|]|then|do|else)[[:space:]]*eval[[:space:]]' skills --include='*.sh'; then
+            echo "::error::eval found in a skill script"; exit 1
+          fi
+          if grep -rnE 'image:\s*\S+:latest|nicolaka/netshoot|docker\.io/' skills --include='*.sh'; then
+            echo "::error::unpinned or Docker Hub image reference in a skill script"; exit 1
+          fi
+          echo "ok: no eval, no unpinned/Docker Hub images"
+
+  injection-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run packet-capture injection regression test
+        run: bash evals/tests/aks-network-capture/injection.test.sh

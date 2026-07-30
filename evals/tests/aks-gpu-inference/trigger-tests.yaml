@@ -1,0 +1,32 @@
+# aks-gpu-inference trigger tests (routing)
+# Boundary: GPU/inference Day-2 -> here; generic pod/node issues -> aks-troubleshooting.
+
+- description: "GPU pod Pending on Insufficient nvidia.com/gpu routes to aks-gpu-inference"
+  metadata:
+    skill: aks-gpu-inference
+    type: trigger
+  vars:
+    prompt: "My pod is stuck Pending with 'Insufficient nvidia.com/gpu' and the GPU node never appears"
+  assert:
+    - type: equals
+      value: "aks-gpu-inference"
+
+- description: "KAITO workspace stuck routes to aks-gpu-inference"
+  metadata:
+    skill: aks-gpu-inference
+    type: trigger
+  vars:
+    prompt: "My KAITO Workspace has been not-ready for 30 minutes serving a llama model"
+  assert:
+    - type: equals
+      value: "aks-gpu-inference"
+
+- description: "Generic (non-GPU) Pending pod routes to aks-troubleshooting, not the GPU skill"
+  metadata:
+    skill: aks-gpu-inference
+    type: trigger
+  vars:
+    prompt: "A normal web pod is stuck Pending, no GPU involved"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
