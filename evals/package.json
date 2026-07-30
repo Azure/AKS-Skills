@@ -15,7 +15,7 @@
     "eval:mock": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --tag tier=mock"
   },
   "dependencies": {
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.0",
     "promptfoo": "^0.121.13"
   },
   "devDependencies": {
