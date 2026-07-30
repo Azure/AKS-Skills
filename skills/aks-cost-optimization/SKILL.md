@@ -1,6 +1,10 @@
 ---
-name: azure-kubernetes-cost-optimization
-description: "Reduce AKS spending: pod rightsizing, VPA setup, cluster autoscaler tuning, spot node pools, namespace cost visibility, cost anomaly detection. WHEN: rightsize pods, VPA recommendations, idle nodes, scale-down, autoscaler profile, spot nodes, cheaper compute, cost add-on, namespace cost breakdown, spending anomaly."
+name: aks-cost-optimization
+license: MIT
+metadata:
+  author: Microsoft
+  version: "1.0.0"
+description: "Reduce Azure Kubernetes Service (AKS) spending: pod rightsizing, VPA-driven recommendations, cluster-autoscaler tuning, spot node pools, namespace-level cost visibility, and cost-anomaly detection. WHEN: rightsize pods, VPA recommendations, idle nodes, scale-down, autoscaler profile, spot nodes, cheaper compute, cost add-on, namespace cost breakdown, spending anomaly, 'my AKS bill is too high'. DO NOT USE FOR: GPU / inference cost and idle GPU pools (use aks-gpu-inference); autoscaler that is failing to scale up during an incident (use aks-troubleshooting); choosing SKUs at cluster-creation time (use aks-cluster-setup)."
 ---
 
 # AKS Cost Optimization — Router

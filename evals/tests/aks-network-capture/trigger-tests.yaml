@@ -1,0 +1,35 @@
+# aks-network-capture trigger tests (routing)
+# Validates the boundary with aks-troubleshooting: general networking goes to
+# aks-troubleshooting; only packet-level capture routes here.
+#
+# Run via promptfoo-routing.yaml using the router-provider (deterministic equals).
+
+- description: "Explicit packet-capture request routes to aks-network-capture"
+  metadata:
+    skill: aks-network-capture
+    type: trigger
+  vars:
+    prompt: "I need to capture packets on the node hosting my pod to see exactly where the traffic is being dropped"
+  assert:
+    - type: equals
+      value: "aks-network-capture"
+
+- description: "tcpdump / pcap request routes to aks-network-capture"
+  metadata:
+    skill: aks-network-capture
+    type: trigger
+  vars:
+    prompt: "Can you run a tcpdump on my AKS nodes filtered to port 443 and give me the pcap?"
+  assert:
+    - type: equals
+      value: "aks-network-capture"
+
+- description: "Generic DNS failure routes to aks-troubleshooting, not the capture skill"
+  metadata:
+    skill: aks-network-capture
+    type: trigger
+  vars:
+    prompt: "Pods can't resolve DNS names, I suspect CoreDNS or an NSG blocking UDP 53"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"

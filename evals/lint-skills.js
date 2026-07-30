@@ -75,7 +75,9 @@ function findSkillFolders(dir) {
     const hasSkillMd = entries.some(e => e.isFile() && e.name === 'SKILL.md');
     if (hasSkillMd) {
       results.push(current);
-      return; // Don't recurse into sub-folders of a skill
+      // Keep recursing: a skill's own references/ and scripts/ subfolders hold no
+      // SKILL.md, so they are never double-counted, and any genuinely nested skill
+      // must still be discovered rather than silently skipped.
     }
     for (const entry of entries) {
       if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {

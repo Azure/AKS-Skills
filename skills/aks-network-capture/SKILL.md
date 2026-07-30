@@ -1,14 +1,16 @@
 ---
-name: network-troubleshoot
-description: >
-  Network packet capture, analysis, and troubleshooting for Kubernetes clusters, with special focus on AKS environments. Creates distributed packet capture jobs across nodes with advanced filtering (IP, port, tcpdump filters). Collects both live packet traces and static network configuration (ip addr, routes, iptables, conntrack, etc.), analyzes Azure network resources (NSG rules, route tables, firewall settings, VNET peering), and diagnoses root causes of both Kubernetes and Azure networking issues.
+name: aks-network-capture
+license: MIT
 metadata:
+  author: Microsoft
+  version: "1.0.0"
   openclaw:
     emoji: "🔍"
     requires:
       anyBins:
         - kubectl
         - az
+description: "Packet-level network evidence for AKS: run a bounded, distributed packet capture across nodes (filtered by IP, port, or tcpdump/BPF expression), and collect static network configuration (ip addr, routes, iptables, conntrack) plus Azure network resources (NSG rules, route tables, firewall, VNET peering) when you need pcap-level proof of where traffic drops. Escalation tool for when logs and read-only checks are inconclusive. WHEN: capture packets on a node, take a pcap, tcpdump on AKS, prove where a packet is dropped, verify an NSG or route is blocking traffic at the wire. DO NOT USE FOR: general DNS / connectivity / ingress troubleshooting — start with aks-troubleshooting (which routes here when a capture is actually needed)."
 ---
 
 # Network Troubleshoot Skill
@@ -117,7 +119,7 @@ graph LR
     A[Source Pod<br/>10.244.1.5] -->|1. veth| B[CNI Bridge]
     B -->|2. PREROUTING| C[iptables DNAT]
     C -->|3. Service VIP<br/>10.96.0.10 → 10.244.2.8| D[Routing]
-    D -->|4. FORWARD允许| E[Dest Pod<br/>10.244.2.8:8443]
+    D -->|4. FORWARD allow| E[Dest Pod<br/>10.244.2.8:8443]
     E -.->|5. Response| A
     style A fill:#e1f5ff
     style E fill:#c8e6c9
