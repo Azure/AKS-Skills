@@ -4,7 +4,7 @@ set -e
 
 CAPTURE_NAME=""
 OUTPUT_PATH="/var/log/network-captures"
-WORKSPACE_DIR="${WORKSPACE_DIR:-/home/azureuser/.openclaw/workspace}"
+WORKSPACE_DIR="${WORKSPACE_DIR:-./aks-network-captures}"
 CAPTURES_DIR="${WORKSPACE_DIR}/network-captures"
 
 usage() {
