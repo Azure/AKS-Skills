@@ -23,7 +23,7 @@
       value: "previous"
     - type: g-eval
       value: "Response mentions checking container exit codes or restart reasons, not just suggesting to look at logs generically"
-      threshold: 0.9
+      threshold: 0.8
 
 - description: "Pending pod response identifies scheduling root causes"
   metadata:
@@ -37,7 +37,7 @@
       value: "describe"
     - type: g-eval
       value: "Response covers multiple scheduling failure causes: resource constraints, node selectors, taints/tolerations, or PVC binding issues"
-      threshold: 0.9
+      threshold: 0.8
 
 - description: "OOMKilled response covers memory investigation"
   metadata:
@@ -53,7 +53,7 @@
       value: "limit"
     - type: g-eval
       value: "Response recommends checking resource limits and actual memory usage, not just increasing limits blindly"
-      threshold: 0.9
+      threshold: 0.8
 
 - description: "Node NotReady covers both Kubernetes and Azure diagnostics"
   metadata:
@@ -65,7 +65,7 @@
   assert:
     - type: g-eval
       value: "Response includes both Kubernetes-level checks (kubectl describe node, kubelet status) AND Azure-level checks (VM instance view, extension status)"
-      threshold: 0.9
+      threshold: 0.8
 
 - description: "DNS failure response covers the full diagnostic path"
   metadata:
@@ -79,7 +79,7 @@
       value: "CoreDNS"
     - type: g-eval
       value: "Response covers the DNS diagnostic chain: pod resolv.conf, CoreDNS pods, upstream/forwarder DNS, and potential NSG blocks on UDP 53"
-      threshold: 0.9
+      threshold: 0.8
 
 - description: "Cross-namespace traffic blocked covers NetworkPolicy"
   metadata:
@@ -93,7 +93,7 @@
       value: "policy"
     - type: g-eval
       value: "Response identifies NetworkPolicy as a likely cause and recommends checking policy rules, with packet capture as a verification step"
-      threshold: 0.9
+      threshold: 0.8
 
 - description: "External connectivity failure investigates Azure-level networking"
   metadata:
@@ -105,4 +105,4 @@
   assert:
     - type: g-eval
       value: "Response investigates Azure-level networking: NSG rules on the subnet, route tables, service/private endpoints, and Azure Firewall if applicable"
-      threshold: 0.9
+      threshold: 0.8

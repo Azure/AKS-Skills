@@ -1,0 +1,31 @@
+# aks-automatic-readiness trigger tests (routing)
+
+- description: "Automatic readiness check routes to aks-automatic-readiness"
+  metadata:
+    skill: aks-automatic-readiness
+    type: trigger
+  vars:
+    prompt: "Is my cluster ready to migrate to AKS Automatic? Check my manifests for incompatibilities."
+  assert:
+    - type: equals
+      value: "aks-automatic-readiness"
+
+- description: "Migrate Standard to Automatic routes to aks-automatic-readiness"
+  metadata:
+    skill: aks-automatic-readiness
+    type: trigger
+  vars:
+    prompt: "I want to move from AKS Standard to AKS Automatic — what will break?"
+  assert:
+    - type: equals
+      value: "aks-automatic-readiness"
+
+- description: "Creating a brand-new cluster routes to aks-cluster-setup, not readiness"
+  metadata:
+    skill: aks-automatic-readiness
+    type: trigger
+  vars:
+    prompt: "Create a new production AKS cluster for me from scratch"
+  assert:
+    - type: equals
+      value: "aks-cluster-setup"
