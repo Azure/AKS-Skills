@@ -3,7 +3,7 @@
 set -e
 
 CAPTURE_NAME=""
-OUTPUT_PATH="/var/log/network-captures"
+OUTPUT_PATH="/var/log/aks-network-captures"
 WORKSPACE_DIR="${WORKSPACE_DIR:-./aks-network-captures}"
 CAPTURES_DIR="${WORKSPACE_DIR}/network-captures"
 
@@ -15,7 +15,7 @@ Required:
   --name <string>              Capture name (same as used in create-capture.sh)
 
 Options:
-  --output-path <path>        Host path where captures are stored (default: /var/log/network-captures)
+  --output-path <path>        Host path where captures are stored (default: ${OUTPUT_PATH})
   --workspace-dir <path>      Agent workspace directory (default: ${WORKSPACE_DIR})
 
 Description:
