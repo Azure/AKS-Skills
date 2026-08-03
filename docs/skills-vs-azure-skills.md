@@ -11,6 +11,20 @@ Two skill packages work together with **distinct responsibilities**. This page d
 
 You will usually install **both**: AKS Skills for deep AKS operations, Azure Skills as the provisioning engine underneath.
 
+## Why a separate repo?
+
+AKS Skills is a dedicated repo, not a folder inside the all-up `azure-skills` plugin, for three reasons:
+
+- **`azure-skills` is a read-only mirror** of the [GitHub Copilot for Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure) plugin, synced and owned by that team. It's the right home for broad, **Day-0** provisioning across all Azure services — not a place the AKS team can own and iterate on deep **Day-2** operational skills.
+- **Focus beats breadth for routing.** A host agent picks a skill from its description, and hosts cap how much skill text they load at once. Packing six deep AKS skills into a general multi-service plugin would compete for that budget and dilute routing; a dedicated, purpose-built plugin routes more reliably.
+- **Ownership and cadence.** The AKS team validates skills here — with its own evals and CI — and ships on its own timeline, then promotes validated skills upstream for broad distribution.
+
+The two are designed to **coexist**, not compete. Install both.
+
+## How Azure SRE Agent loads these
+
+Azure SRE Agent keeps a **maximum of five skills active at once** in a conversation; past that it auto-unloads the oldest and reactivates it on demand by re-reading the skill file ([SRE Agent skills limits](https://learn.microsoft.com/azure/sre-agent/skills#limits-and-constraints)). This runtime cap applies to *any* plugin — it is not an `azure-skills`-specific limit — and it's a further reason to keep a **focused, well-scoped** set of AKS skills rather than a sprawling catalog: the agent routes to the right skill and keeps the relevant few active.
+
 ## The boundary
 
 **AKS Skills is the deep Day-2 AKS operator.** It owns AKS-specific operational knowledge that a general Azure plugin does not: the symptom→cause maps for live incidents, the GPU/KAITO failure signatures, the cost-and-scaling levers, and AKS-specific design opinions. Its skills work standalone — troubleshooting, cost, and readiness need no other plugin.
