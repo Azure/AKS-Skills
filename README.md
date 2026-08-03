@@ -1,5 +1,9 @@
 # AKS Skills
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Agent Skills](https://img.shields.io/badge/format-Agent%20Skills-5b9bff.svg)](https://agentskills.io)
+[![Azure Kubernetes Service](https://img.shields.io/badge/Azure-Kubernetes%20Service-0078d4.svg)](https://learn.microsoft.com/azure/aks/)
+
 Agent skills for operating **Azure Kubernetes Service (AKS)** clusters. AKS Skills is the deep Day-2 AKS operator — troubleshoot live incidents, optimize cost, assess AKS Automatic readiness, run GPU/inference workloads, and capture packet-level evidence. It complements the broader [Azure Skills](https://github.com/microsoft/azure-skills) plugin (the provisioning engine); install both. See **[docs/skills-vs-azure-skills.md](docs/skills-vs-azure-skills.md)** for the boundary.
 
 A "skill" is a folder with a `SKILL.md` (YAML front matter + guidance) plus optional `references/` and `scripts/`. A host agent reads the skill descriptions, picks the relevant one, loads its `SKILL.md`, and progressively reads references or runs scripts. The format is the open [Agent Skills standard](https://agentskills.io), so these skills run across Claude Code, GitHub Copilot, Azure SRE Agent, openclaw, and other compatible hosts.
@@ -14,6 +18,19 @@ A "skill" is a folder with a `SKILL.md` (YAML front matter + guidance) plus opti
 | [`aks-gpu-inference`](skills/aks-gpu-inference) | Day-2 GPU and model-inference operations: scheduling/quota, KAITO Workspaces, GPU cost/scaling, DCGM observability. |
 | [`aks-network-capture`](skills/aks-network-capture) | Packet-level evidence: bounded, distributed capture and Azure-side network analysis. Escalation tool. |
 | [`aks-cluster-setup`](skills/aks-cluster-setup) | Make AKS-specific cluster design decisions, then delegate provisioning to Azure Skills. |
+
+## Try it
+
+Once installed, just describe the problem in natural language — the host agent picks the right skill by its description. For example:
+
+- *"A pod in my `payments` namespace is stuck in CrashLoopBackOff — investigate."* → `aks-troubleshooting`
+- *"My AKS bill jumped this month; help me rightsize and find idle nodes."* → `aks-cost-optimization`
+- *"Is my cluster ready to move to AKS Automatic? What needs to change?"* → `aks-automatic-readiness`
+- *"My GPU pod is Pending with 'Insufficient nvidia.com/gpu' and the KAITO workspace never becomes ready."* → `aks-gpu-inference`
+- *"Egress to Azure SQL fails but pod-to-pod works — I want packet-level proof of where it drops."* → `aks-network-capture`
+- *"Design and stand up a production AKS cluster with a private API server."* → `aks-cluster-setup`
+
+Skills default to **read-only** investigation and ask before changing anything.
 
 ## Install
 

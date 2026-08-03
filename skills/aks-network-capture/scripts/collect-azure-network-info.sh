@@ -4,7 +4,7 @@ set -e
 
 RESOURCE_GROUP=""
 CLUSTER_NAME=""
-OUTPUT_DIR="${WORKSPACE_DIR:-/home/azureuser/.openclaw/workspace}/network-captures"
+OUTPUT_DIR="${WORKSPACE_DIR:-./aks-network-captures}/network-captures"
 TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
 
 usage() {
