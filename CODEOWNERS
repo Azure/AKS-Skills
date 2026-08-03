@@ -5,14 +5,14 @@
 # (e.g. @Azure/aks-skills-maintainers) here once it exists.
 
 # Catch-all: all changes.
-*                       @nikhilkaul1234
+*                       @nikhilkaul1234 @nthevenin @ryanzhang-oss
 
 # Scripts run against customer clusters — require security-aware review.
-/skills/**/scripts/     @nikhilkaul1234
-/evals/tests/**/*.sh    @nikhilkaul1234
+/skills/**/scripts/     @nikhilkaul1234 @nthevenin @ryanzhang-oss
+/evals/tests/**/*.sh    @nikhilkaul1234 @nthevenin @ryanzhang-oss
 
 # The contract, boundary, and CI gates define the bar for everything else.
-/docs/skill-contract.md         @nikhilkaul1234
-/docs/skills-vs-azure-skills.md @nikhilkaul1234
-/.github/workflows/             @nikhilkaul1234
-/evals/lint-skills.js           @nikhilkaul1234
+/docs/skill-contract.md         @nikhilkaul1234 @nthevenin @ryanzhang-oss
+/docs/skills-vs-azure-skills.md @nikhilkaul1234 @nthevenin @ryanzhang-oss
+/.github/workflows/             @nikhilkaul1234 @nthevenin @ryanzhang-oss
+/evals/lint-skills.js           @nikhilkaul1234 @nthevenin @ryanzhang-oss
