@@ -115,6 +115,12 @@ get_skill_version() {
     [ -n "$skillMdPath" ] || return 0
     # Normalize backslashes so Windows-style paths are readable
     skillMdPath="$(echo "$skillMdPath" | tr '\\' '/')"
+    # Refuse path traversal: a crafted skill name / reference from a hook payload
+    # could otherwise point this at an arbitrary file and leak a version-shaped
+    # line from it via telemetry.
+    case "$skillMdPath" in
+        *..*) return 0 ;;
+    esac
     [ -f "$skillMdPath" ] || return 0
     # Read the frontmatter block (between the first two --- lines) and pull the
     # version value, stripping surrounding quotes and whitespace.
@@ -308,7 +314,7 @@ if [ -n "$toolName" ]; then
     fi
 fi
 
-# Capture file path from any tool input (only track files in azure skills folder)
+# Capture file path from any tool input (only track files in AKS-Skills folder)
 # Skip if already matched as SKILL.md skill_invocation — SKILL.md is not a valid file-reference
 if [ -z "$filePath" ] && [ -z "$skillName" ]; then
     pathToCheck=$(extract_toolargs_path "$rawInput")
@@ -316,7 +322,7 @@ if [ -z "$filePath" ] && [ -z "$skillName" ]; then
         # Normalize path for matching: replace backslashes and squeeze consecutive slashes
         pathLower=$(echo "$pathToCheck" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|//*|/|g')
 
-        # Check if path matches azure skills folder structure
+        # Check if path matches AKS-Skills folder structure
         if is_aks_skills_path "$pathLower"; then
             # Extract relative path after 'skills/'
             pathNormalized=$(echo "$pathToCheck" | tr '\\' '/' | sed 's|//*|/|g')

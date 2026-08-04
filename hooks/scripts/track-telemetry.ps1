@@ -113,6 +113,10 @@ function Get-SkillVersion {
     param([string]$SkillMdPath)
     if (-not $SkillMdPath) { return $null }
     $SkillMdPath = $SkillMdPath -replace '\\', '/'
+    # Refuse path traversal: a crafted skill name / reference from a hook payload
+    # could otherwise point this at an arbitrary file and leak a version-shaped
+    # line from it via telemetry.
+    if ($SkillMdPath -match '\.\.') { return $null }
     if (-not (Test-Path -LiteralPath $SkillMdPath)) { return $null }
     try {
         $lines = Get-Content -LiteralPath $SkillMdPath -ErrorAction SilentlyContinue
@@ -295,7 +299,7 @@ if ($toolName) {
     }
 }
 
-# Capture file path from any tool input (only track files in azure skills folder)
+# Capture file path from any tool input (only track files in AKS-Skills folder)
 # Skip if already matched as SKILL.md skill_invocation — SKILL.md is not a valid file-reference
 if (-not $filePath -and -not $skillName) {
     $pathToCheck = Get-ToolInputPath
