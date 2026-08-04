@@ -37,7 +37,7 @@ Agent-native flow (what the agent should do)
        - If the test runs longer than 5 minutes, stop the test immediately and mark it as failed with reason "timeout_exceeded".
      - Score the agent's answer against expected_output.
      - Always run after_test (as above) to clean up, even if before/ask/score failed.
-3) Write results under skills/holmesgpt-eval/results/<timestamp>:
+3) Write results under evals/holmesgpt-eval/results/<timestamp>:
    - results.json — array of case results (prompt, expected, output, pass/fail, skipped, details)
    - report.md — concise summary (pass/fail/skip counts; per-case status, expected list, output, missing elements if any)
    - latest-results.md — points to the latest report
@@ -85,7 +85,7 @@ Shell execution hygiene (avoid interactive prompts)
 - Capture stdout/stderr/exit code for both before and after scripts, and record them in case results.
 
 Gold-blind answering (prevent peeking at expected_output)
-- Fixtures are preprocessed during fetch: expected_output is split into a separate gold.json under skills/holmesgpt-eval/_gold, and a solver YAML (test_case.solver.yaml) is generated without expected_output.
+- Fixtures are preprocessed during fetch: expected_output is split into a separate gold.json under evals/holmesgpt-eval/_gold, and a solver YAML (test_case.solver.yaml) is generated without expected_output.
 - The runner loads user_prompt and before/after from test_case.solver.yaml, answers, then reads expected_output from gold.json for scoring.
 - Record audit details per case: timestamps (answered_at < scored_at) and working directory used during answer.
 

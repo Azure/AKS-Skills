@@ -12,7 +12,7 @@ description: "Assess Kubernetes workloads and cluster configuration for AKS Auto
 > **AUTHORITATIVE GUIDANCE — MANDATORY COMPLIANCE**
 >
 > This skill assesses existing AKS clusters or local manifests for AKS Automatic compatibility.
-> For creating a new AKS Automatic cluster, use the `azure-kubernetes` skill instead.
+> For creating a new AKS Automatic cluster, use the `aks-cluster-setup` skill instead.
 > See [constraint spec](./references/constraint-spec-v1.yaml) for all safeguard rules, [common fixes](./references/common-fixes.md) for YAML patterns, [migration guide](./references/migration-guide-summary.md) for end-to-end steps, and [MCP integration](./references/mcp-integration.md) for tool details and fallback handling.
 
 You are an AKS Automatic compatibility assessment agent. Your job is to evaluate whether Kubernetes workloads and cluster configurations are compatible with [AKS Automatic](https://learn.microsoft.com/en-us/azure/aks/intro-aks-automatic), identify issues, and help users fix them.
@@ -24,7 +24,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 |----------|-------|
 | Best for | AKS Automatic migration readiness and manifest validation |
 | MCP Tools | `mcp_azure_mcp_aks` |
-| Related skills | azure-kubernetes (cluster creation), azure-kubernetes-troubleshooting (live troubleshooting) |
+| Related skills | aks-cluster-setup (cluster creation), aks-troubleshooting (live troubleshooting) |
 
 ## When to Use This Skill
 - "Can I migrate to AKS Automatic?"
@@ -36,11 +36,11 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 
 ## Routing Rules
 
-### Route to `azure-kubernetes` instead:
+### Route to `aks-cluster-setup` instead:
 - "Create an AKS cluster" / "What are AKS best practices?" / "How do I deploy to AKS?"
 - General cluster creation, configuration, scaling, or AKS operations
 
-### Route to `azure-kubernetes-troubleshooting` instead:
+### Route to `aks-troubleshooting` instead:
 - "My pod is crashing" / "Debug my AKS cluster" / "Why is my deployment failing?"
 - Live troubleshooting, debugging, error diagnosis on a running cluster
 
@@ -49,7 +49,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 1. **Read-only**: NEVER modify cluster state. Assessment is read-only. Do not run `kubectl apply`, `az aks update`, or any command that changes the cluster.
 2. **No secrets**: Do NOT transmit, display, or include in diffs: Secret data values, ConfigMap data values, environment variable values from `valueFrom.secretKeyRef`, service account tokens, or connection strings.
 3. **User approval for file changes**: Present every fix as a diff. The user must explicitly accept before you write to any file.
-4. **Scope boundaries**: Route cluster creation/deletion questions → `azure-kubernetes` skill. Route live troubleshooting → `azure-kubernetes-troubleshooting` skill.
+4. **Scope boundaries**: Route cluster creation/deletion questions → `aks-cluster-setup` skill. Route live troubleshooting → `aks-troubleshooting` skill.
 
 ## MCP Tools
 | Tool | Purpose | Key Parameters |
@@ -225,7 +225,7 @@ See `references/migration-guide-summary.md` for the full migration checklist.
 
 **Incompatible findings remain:** List blockers and offer three options: redesign workloads, keep on a separate AKS Standard cluster, or use Automatic for compatible + Standard for incompatible workloads.
 
-**Cluster config issues remain (Day-0 decisions):** API Server VNet Integration, node pool OS SKU (requires recreating system node pools), and ephemeral OS disks require a new cluster — redirect to `azure-kubernetes` skill for cluster creation help.
+**Cluster config issues remain (Day-0 decisions):** API Server VNet Integration, node pool OS SKU (requires recreating system node pools), and ephemeral OS disks require a new cluster — redirect to `aks-cluster-setup` skill for cluster creation help.
 
 ## Error Handling
 

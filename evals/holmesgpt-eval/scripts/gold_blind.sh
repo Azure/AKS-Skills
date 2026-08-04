@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gold_blind.sh - helpers to enforce gold-blind answering for eval cases
 # Usage (from a case directory containing test_case.yaml):
-#   source /home/azureuser/.openclaw/workspace/skills/holmesgpt-eval/scripts/gold_blind.sh
+#   source evals/holmesgpt-eval/scripts/gold_blind.sh
 #   lock_case_yaml   # chmod 000 test_case.yaml
 #   unlock_case_yaml # chmod 644 test_case.yaml (if exists)
 

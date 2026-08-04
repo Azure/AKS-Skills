@@ -14,7 +14,7 @@ Loaded when user asks about migration steps or after assessment is complete.
 - [ ] Review `autoFixed` items — understand what AKS Automatic will mutate at runtime
 - [ ] Address cluster-level Day-0 config issues (see below)
 
-### Phase 2 — Create AKS Automatic Cluster (use `azure-kubernetes` skill)
+### Phase 2 — Create AKS Automatic Cluster (use `aks-cluster-setup` skill)
 
 ```bash
 az aks create \
@@ -65,7 +65,7 @@ az aks delete \
 
 ## Day-0 Decisions — Cluster-Level Configuration Requirements
 
-Some settings require creating a **new** cluster; others can be enabled on existing clusters. Route to `azure-kubernetes` skill for cluster creation.
+Some settings require creating a **new** cluster; others can be enabled on existing clusters. Route to `aks-cluster-setup` skill for cluster creation.
 
 | Requirement | AKS Automatic default | What to do |
 |---|---|---|
