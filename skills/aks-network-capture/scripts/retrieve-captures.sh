@@ -32,6 +32,25 @@ EOF
   exit 1
 }
 
+# Input validation (mirrors create-capture.sh's allowlist hardening).
+validate_rfc1123() {
+  case "$1" in
+    ""|-*|*-) return 1 ;;
+    *[!a-z0-9-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 63 ]
+}
+validate_hostpath() {
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *..*|*[!a-zA-Z0-9/_.-]*) return 1 ;;
+  esac
+  return 0
+}
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --name) CAPTURE_NAME="$2"; shift 2 ;;
@@ -45,6 +64,16 @@ done
 if [ -z "$CAPTURE_NAME" ]; then
   echo "Error: --name is required"
   usage
+fi
+
+if ! validate_rfc1123 "$CAPTURE_NAME"; then
+  echo "Error: --name must be an RFC 1123 label (lowercase alphanumeric and '-', no leading/trailing '-', <=63 chars)"
+  exit 1
+fi
+
+if ! validate_hostpath "$OUTPUT_PATH"; then
+  echo "Error: --output-path must be an absolute path with no '..' and only [a-zA-Z0-9/_.-] characters"
+  exit 1
 fi
 
 CAPTURES_DIR="${WORKSPACE_DIR}/network-captures"
@@ -92,7 +121,7 @@ for job in $CAPTURE_JOBS; do
   
   echo "  Retrieving capture files..."
   
-  TEMP_POD_NAME="retrieve-${CAPTURE_NAME}-$(echo $NODE_NAME | tr '.' '-' | tr '_' '-' | cut -c1-20)-$(date +%s)"
+  TEMP_POD_NAME="retrieve-${CAPTURE_NAME}-$(echo "$NODE_NAME" | tr '.' '-' | tr '_' '-' | cut -c1-20)-$(date +%s)"
   
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -118,16 +147,16 @@ spec:
 EOF
 
   echo "  Waiting for retrieval pod to start..."
-  kubectl wait --for=condition=Ready pod/${TEMP_POD_NAME} --timeout=60s
+  kubectl wait --for=condition=Ready "pod/${TEMP_POD_NAME}" --timeout=60s
   
   echo "  Copying files from node to workspace..."
   kubectl cp "${TEMP_POD_NAME}:/capture-output/." "${CAPTURE_OUTPUT_DIR}/" -c retrieve || echo "  Warning: Copy may have partially failed"
   
   echo "  Cleaning up capture files on node..."
-  kubectl exec ${TEMP_POD_NAME} -c retrieve -- sh -c "rm -f /capture-output/capture-${NODE_NAME}-*.tar.gz /capture-output/capture-${NODE_NAME}-*.pcap /capture-output/network-info-${NODE_NAME}-*.txt" || echo "  Warning: Cleanup may have partially failed"
+  kubectl exec "${TEMP_POD_NAME}" -c retrieve -- sh -c "rm -f /capture-output/capture-${NODE_NAME}-*.tar.gz /capture-output/capture-${NODE_NAME}-*.pcap /capture-output/network-info-${NODE_NAME}-*.txt" || echo "  Warning: Cleanup may have partially failed"
   
   echo "  Deleting retrieval pod..."
-  kubectl delete pod ${TEMP_POD_NAME} --wait=false
+  kubectl delete pod "${TEMP_POD_NAME}" --wait=false
   
   echo "  ✓ Retrieved captures from node: $NODE_NAME"
   echo ""

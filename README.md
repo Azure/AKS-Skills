@@ -41,8 +41,7 @@ Skills default to **read-only** investigation and ask before changing anything.
 | **Claude Code** | `/plugin marketplace add Azure/AKS-Skills`, then `/plugin install aks@aks-skills` |
 | **GitHub Copilot CLI** | `/plugin marketplace add Azure/AKS-Skills`, then `/plugin install aks@aks-skills` |
 | **Azure SRE Agent** | Install from URL: `https://github.com/Azure/AKS-Skills` (reads `plugin.json` + `skills/`) |
-| **openclaw** | `openclaw skills install https://github.com/Azure/AKS-Skills` |
-| **Any Agent Skills host** | `npx skills add https://github.com/Azure/AKS-Skills` |
+| **Any Agent Skills host** | `npx skills add https://github.com/Azure/AKS-Skills --all` (installs the skills; `.mcp.json` wiring is not applied on this path — skills fall back to `az`/`kubectl`) |
 
 For deployment/provisioning, also install [Azure Skills](https://github.com/microsoft/azure-skills).
 

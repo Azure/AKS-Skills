@@ -44,8 +44,8 @@ npm install -g @github/copilot   # one-time, cross-platform (macOS/Linux/Windows
 copilot                          # launch the CLI, then run /login inside it for one-time auth
 
 npm run lint:agentic                                                          # validate all eval.yaml specs (instant, no auth)
-npm run eval:agentic -- --eval-spec tests/aks-sre/eval.yaml --tag tier=smoke  # one skill, routing tier only
-npm run eval:agentic -- --eval-spec tests/aks-sre/eval.yaml                   # one skill, all tiers
+npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml --tag tier=smoke  # one skill, routing tier only
+npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml                   # one skill, all tiers
 npm run eval:mock                                                             # all mock-tier investigations (all skills)
 ```
 
@@ -97,7 +97,7 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
     skill: <your-skill-name>
     type: quality
   vars:
-    skill_path: "providers/azure/<your-skill-name>/SKILL.md"
+    skill_path: "<your-skill-name>/SKILL.md"
     prompt: "A detailed user scenario"
   assert:
     - type: g-eval
@@ -113,7 +113,7 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
 name: <your-skill-name>-agentic-eval
 environment:
   skills:
-    - ../../../skills/providers/azure/<your-skill-name>
+    - ../../../skills/<your-skill-name>
 defaults:
   runs: 1
   timeout: "5m"
@@ -132,14 +132,14 @@ stimuli:
       expect_skills: [<your-skill-name>]
 ```
 
-For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade the trajectory with `tool-calls` (required + disallowed), `tool-call-count`, and a `prompt` rubric. See `tests/aks-sre/eval.yaml` for a complete example.
+For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade the trajectory with `tool-calls` (required + disallowed), `tool-call-count`, and a `prompt` rubric. See `tests/aks-troubleshooting/eval.yaml` for a complete example.
 
 ## Configs
 
 | Config | What it tests | Provider | Assertions | Gate |
 |--------|---------------|----------|------------|------|
-| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (loads SKILL.md) | `icontains`, `g-eval` | Yes (with retry) |
-| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | Yes |
+| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (loads SKILL.md) | `icontains`, `g-eval` | No (advisory — retries 2x, reports only) |
+| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | No (advisory — reports only) |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
 | `tests/<skill>/eval.yaml` | Agentic — real agent routes to skill (smoke) + investigates a fake-broken cluster (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `tool-call-count`, `prompt`, `output-matches` | No (run manually) |
 
@@ -166,9 +166,9 @@ Compare g-eval scores between skill-loaded and baseline to quantify skill value.
 
 The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:
 
-1. **Lint** — fast-fails if SKILL.md format is invalid
-2. **Quality eval** — runs quality tests with skill loaded (gates, retries failing tests up to 2x)
-3. **Trigger eval** — runs routing tests via router-provider (gates)
+1. **Lint** — fast-fails if SKILL.md format is invalid (a hard gate, alongside shellcheck and the injection test)
+2. **Quality eval** — runs quality tests with skill loaded (advisory — retries failing tests up to 2x, reports but does not block merge)
+3. **Trigger eval** — runs routing tests via router-provider (advisory — reports but does not block merge)
 4. **Baseline comparison** — quality tests without skill, reports score delta
 5. **PR comment** — posts results table with g-eval scores and baseline delta
 
@@ -178,10 +178,10 @@ Filter by skill or test type using `--filter-metadata`:
 
 ```bash
 # Quality tests for one skill
-npm run eval -- --filter-metadata skill=aks-sre
+npm run eval -- --filter-metadata skill=aks-troubleshooting
 
 # Trigger tests for one skill
-npm run eval:trigger -- --filter-metadata skill=network-troubleshoot
+npm run eval:trigger -- --filter-metadata skill=aks-network-capture
 
 # Single test by description pattern
 npm run eval -- --filter-pattern "CrashLoopBackOff"

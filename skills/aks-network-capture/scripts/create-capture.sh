@@ -9,8 +9,9 @@
 #      compile-checked in-pod with `tcpdump -d`, and handed to tcpdump as a single
 #      trailing argv element. There is no `eval` and no shell string interpolation
 #      of user data into a command.
-#   3. The capture pod is least-privilege: NET_ADMIN + NET_RAW (+ SYS_ADMIN/SYS_CHROOT
-#      to use the node's own tcpdump via chroot), hostNetwork only — NOT privileged,
+#   3. The capture pod is scoped, not `privileged`: NET_ADMIN + NET_RAW (+ SYS_ADMIN/
+#      SYS_CHROOT to run the node's own tcpdump via chroot, which mounts the node root
+#      read-write) + hostNetwork — effectively node-level access, but NOT privileged
 #      and NOT hostPID.
 #   4. The container image is pinned by digest to Microsoft Container Registry.
 #

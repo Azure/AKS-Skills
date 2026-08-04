@@ -13,7 +13,7 @@ This skill owns the **AKS-specific design decisions** for standing up a producti
 
 ## How this works with Azure Skills
 
-This is a **thin facade over provisioning**, following the same pattern as `azure-functions-deploy`: it does not run `azd` or `az deployment` itself. It enriches the request with AKS-specific design decisions, then delegates the generic provisioning workflow to Azure Skills.
+This is a **thin facade over provisioning** — it owns the AKS design and delegates the generic provisioning execution to Azure Skills; it does not run `azd` or `az deployment` itself. It enriches the request with AKS-specific design decisions, then delegates the generic provisioning workflow to Azure Skills.
 
 ```text
 User: "Create a production AKS cluster"

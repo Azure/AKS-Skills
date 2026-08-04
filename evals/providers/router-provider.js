@@ -87,7 +87,7 @@ class RouterProvider {
       skillList,
       '',
       'Rules:',
-      '- Reply with ONLY the skill id (e.g. "aks-sre") if the query matches a skill.',
+      '- Reply with ONLY the skill id (e.g. "aks-troubleshooting") if the query matches a skill.',
       '- Reply with ONLY "none" if no skill is appropriate.',
       '- Do not explain your reasoning. Output only the skill id or "none".',
     ].join('\n');

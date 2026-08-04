@@ -24,8 +24,8 @@ This is an escalation tool. For most networking symptoms (DNS, connectivity, ing
 Packet capture requires elevated node access, so these scripts are built to be safe by construction:
 
 - **No shell injection.** User-supplied filters and targets are validated against strict allowlists, passed to `tcpdump` as a single trailing argument (never a shell string), and compile-checked in-pod with `tcpdump -d`. There is no `eval`. A negative regression test (`evals/tests/aks-network-capture/injection.test.sh`) proves malicious inputs are rejected.
-- **Least privilege.** Capture pods use `NET_ADMIN` + `NET_RAW` (plus `SYS_ADMIN`/`SYS_CHROOT` to use the node's own `tcpdump`) — **not** `privileged`, and never `hostPID`.
-- **Pinned images.** All container images are Microsoft Container Registry references pinned by digest; no Docker Hub `:latest`.
+- **Scoped access, not `privileged`.** Capture pods use `NET_ADMIN` + `NET_RAW` (plus `SYS_ADMIN`/`SYS_CHROOT` to run the node's own `tcpdump` via `chroot`, which mounts the node root read-write) — so this is effectively node-level access, but never `privileged: true` and never `hostPID`.
+- **Pinned images.** The capture scripts' container images are Microsoft Container Registry references pinned by digest; no Docker Hub, no `:latest`. (The illustrative `kubectl debug` example below uses the MCR tag for readability.)
 
 > Not yet validated on a live cluster in CI. Before relying on distributed capture in production, run the live-cluster smoke test — `evals/tests/aks-network-capture/smoke-live-cluster.sh` — against a throwaway AKS cluster you control (it creates a short capture, retrieves it, and asserts a non-empty pcap came back).
 
