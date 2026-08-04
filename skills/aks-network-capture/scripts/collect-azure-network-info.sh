@@ -2,6 +2,10 @@
 # collect-azure-network-info.sh — Collect Azure network resource configuration for AKS clusters
 set -e
 
+# Identify AKS Skills as the caller on Azure CLI requests so this traffic is
+# attributable server-side. Appends to any user agent the caller already set.
+export AZURE_HTTP_USER_AGENT="${AZURE_HTTP_USER_AGENT:+$AZURE_HTTP_USER_AGENT }AKS-Skills"
+
 RESOURCE_GROUP=""
 CLUSTER_NAME=""
 OUTPUT_DIR="${WORKSPACE_DIR:-./aks-network-captures}/network-captures"
