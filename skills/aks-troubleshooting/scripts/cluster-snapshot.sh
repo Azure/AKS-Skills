@@ -4,6 +4,10 @@
 # Usage: sh cluster-snapshot.sh [resource-group] [cluster-name]
 set -e
 
+# Identify AKS Skills as the caller on Azure CLI requests so this traffic is
+# attributable server-side. Appends to any user agent the caller already set.
+export AZURE_HTTP_USER_AGENT="${AZURE_HTTP_USER_AGENT:+$AZURE_HTTP_USER_AGENT }AKS-Skills"
+
 RG="${1:-${AKS_RESOURCE_GROUP:-}}"
 CLUSTER="${2:-${AKS_CLUSTER_NAME:-}}"
 
