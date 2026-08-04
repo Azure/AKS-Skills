@@ -51,6 +51,8 @@ npm run eval:mock                                                             # 
 
 Pass the skill's spec path with `--eval-spec`; add `--tag tier=smoke` for the fast routing checks, or use `npm run eval:mock` for the full fake-broken-cluster investigations.
 
+> **Windows:** `npm run eval:mock` uses a POSIX `PATH=...` prefix to inject the shell shims, so run it from **WSL** (or macOS/Linux). The other commands work on native Windows.
+
 #### Mock investigations (no cluster)
 
 The mock tier proves the agent can *investigate*, not just route — without any live Azure resources. It works by intercepting the agent's shell calls:
