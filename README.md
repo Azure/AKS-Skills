@@ -52,6 +52,12 @@ For deployment/provisioning, also install [Azure Skills](https://github.com/micr
 - The **Azure MCP server** (`@azure/mcp`) is wired via [`.mcp.json`](.mcp.json); skills prefer the AKS MCP tools and fall back to `az`/`kubectl`.
 - Skills default to **read-only** operations and ask before making changes.
 
+## Telemetry
+
+When installed as a plugin, AKS Skills emits anonymous usage telemetry — which skill or tool was invoked, the skill version, and a session id; **no code, prompts, file contents, or resource data** — via the Azure MCP server's `plugin-telemetry`, the same mechanism the [Azure Skills](https://github.com/microsoft/azure-skills) plugin uses. It helps the AKS team see which skills are useful and where they fall short.
+
+Opt out any time by setting `AZURE_MCP_COLLECT_TELEMETRY=false` in your environment. The hook fails silently and never blocks or delays a tool call.
+
 ## Contributing
 
 Contributions are welcome. AKS Skills accepts **deep, AKS-specific Day-2 operational knowledge and AKS-specific design opinions** — not generic Azure provisioning, generic Kubernetes any model already knows, or cross-resource workflows (those belong in Azure Skills). Every skill must meet the [Skill Contract](docs/skill-contract.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
