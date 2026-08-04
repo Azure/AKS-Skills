@@ -166,7 +166,7 @@ function buildFoundryRequest(system, user, model) {
   }
 
   if (!model) {
-    return { error: 'EVAL_MODEL is required for the foundry backend. Use the deployment name.' };
+    return { error: 'The foundry backend needs a model/deployment name — set EVAL_MODEL or pass a per-call { model } override (e.g. the judge).' };
   }
 
   const protocol = (process.env.EVAL_PROTOCOL || 'openai').trim().toLowerCase();
