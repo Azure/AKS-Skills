@@ -1,13 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const { chat } = require('./llm-client');
 
 /**
  * Custom promptfoo provider that loads a SKILL.md file and uses it as
- * system context when evaluating a user prompt against Azure OpenAI.
+ * system context when evaluating a user prompt.
  *
- * Env vars (checked in order):
- *   AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT → Azure OpenAI
- *   OPENAI_API_KEY                                → OpenAI direct
+ * Backend selection + credentials are handled by ./llm-client (foundry / azure /
+ * openai / github). See its header for configuration.
  *
  * Test case vars:
  *   skill_path  — relative path from the skills/ directory to the SKILL.md file
@@ -60,70 +60,11 @@ class SkillProvider {
       skillContent,
     ].join('\n');
 
-    const messages = [
-      { role: 'system', content: systemMessage },
-      { role: 'user', content: userPrompt },
-    ];
-
-    // Determine which API to call
-    const azureKey = process.env.AZURE_OPENAI_API_KEY;
-    const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const model = process.env.EVAL_MODEL || 'gpt-5';
-
-    let url, headers, body;
-
-    if (azureKey && azureEndpoint) {
-      // Azure OpenAI
-      const apiVersion = '2024-12-01-preview';
-      url = `${azureEndpoint.replace(/\/$/, '')}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
-      headers = {
-        'Content-Type': 'application/json',
-        'api-key': azureKey,
-      };
-      body = JSON.stringify({
-        messages,
-      });
-    } else if (openaiKey) {
-      // OpenAI direct
-      url = 'https://api.openai.com/v1/chat/completions';
-      headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiKey}`,
-      };
-      body = JSON.stringify({
-        model,
-        messages,
-      });
-    } else {
-      return {
-        error: 'No LLM credentials configured. Set AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, or OPENAI_API_KEY.',
-      };
+    const result = await chat(systemMessage, userPrompt);
+    if (result.error) {
+      return { error: result.error };
     }
-
-    // Make the API call
-    try {
-      const response = await fetch(url, { method: 'POST', headers, body });
-
-      if (!response.ok) {
-        const text = await response.text();
-        return { error: `LLM API error ${response.status}: ${text}` };
-      }
-
-      const data = await response.json();
-      const output = data.choices?.[0]?.message?.content;
-
-      return {
-        output: output || '',
-        tokenUsage: {
-          total: data.usage?.total_tokens,
-          prompt: data.usage?.prompt_tokens,
-          completion: data.usage?.completion_tokens,
-        },
-      };
-    } catch (err) {
-      return { error: `LLM API call failed: ${err.message}` };
-    }
+    return { output: result.output, tokenUsage: result.tokenUsage };
   }
 }
 
