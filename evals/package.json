@@ -5,6 +5,7 @@
   "description": "Evaluation pipeline for AKS Skills",
   "scripts": {
     "lint": "node lint-skills.js",
+    "lint:selftest": "node lint-skills.test.js",
     "eval": "promptfoo eval -o results.json",
     "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
     "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",

@@ -1,0 +1,5 @@
+# Normalize every text file to LF — skill scripts execute inside Linux debug
+# pods, and the eval tooling (lint, mock shims, injection test) parses files
+# byte-for-byte. The linter also normalizes CRLF defensively (lint-skills.js),
+# so uncommitted files authored with CRLF still lint correctly.
+* text=auto eol=lf
