@@ -67,10 +67,29 @@ The mock tier proves the agent can *investigate*, not just route — without any
 |----------|----------|-------------|
 | `AZURE_OPENAI_API_KEY` | Yes* | Azure OpenAI API key |
 | `AZURE_OPENAI_ENDPOINT` | Yes* | Full endpoint URL (e.g. `https://my-resource.openai.azure.com`) — base URL only, no path suffix |
-| `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set |
-| `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5`). Set if your deployment is named differently. |
+| `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set. Optional when `OPENAI_BASE_URL` points at a keyless self-hosted server. |
+| `OPENAI_BASE_URL` | No | Point the `openai` backend at any OpenAI-compatible endpoint instead of `api.openai.com` — a self-hosted or local model server (llama.cpp / vLLM / Ollama) or a gateway. Default: `https://api.openai.com/v1`. |
+| `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5`). Set if your deployment is named differently, or to the model your local server serves. |
 
 *Either Azure OpenAI or OpenAI credentials must be provided.
+
+### Evaluating a local or self-hosted model
+
+To measure how well the skills perform on a non-frontier, local, or disconnected model, point the `openai` backend at any OpenAI-compatible server — no Azure or OpenAI credentials needed:
+
+```bash
+# e.g. a local llama.cpp / vLLM / Ollama server exposing /v1/chat/completions
+export OPENAI_BASE_URL="http://localhost:8080/v1"
+export EVAL_MODEL="my-local-model"      # the name the server serves
+# OPENAI_API_KEY is optional for a keyless local server
+
+npm run eval            # quality
+npm run eval:trigger    # routing
+```
+
+Local runs are a development signal, not a CI gate — like the GitHub Models backend, results aren't directly comparable to the frontier CI pool.
+
+The judge and the model under test share one endpoint per run today, so a local run is graded by a model on that same endpoint. Grading a small local model with a separate frontier judge in a single run (a cross-endpoint model-tier matrix) is a natural next step, not yet wired.
 
 Agentic evals don't use these variables — they authenticate via the GitHub Copilot CLI (`copilot /login`).
 
