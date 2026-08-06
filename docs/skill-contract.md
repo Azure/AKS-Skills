@@ -10,6 +10,8 @@ The contract exists because **content decays and the contract compounds.** A ski
 
 **Reject:** generic Azure provisioning (belongs in Azure Skills), generic Kubernetes any capable model already knows, and cross-resource workflows. When a skill overlaps Azure Skills, it must delegate or draw an explicit boundary (see [skills-vs-azure-skills.md](skills-vs-azure-skills.md)).
 
+**Scope:** this contract governs `skills/**` — the skill inventory that `plugin.json` registers and the router presents. A SKILL.md anywhere else in the repo (for example `evals/holmesgpt-eval/`) is an internal harness fixture: not registered as a skill, not routed, and outside the lint walk (see [evals/README.md](../evals/README.md)).
+
 ## 2. Manifest (front matter)
 
 Required, in this order:
@@ -64,6 +66,6 @@ CI fails if a skill has no tests (the coverage gate).
 
 ## 7. What CI enforces automatically
 
-- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings.
+- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).
 - `.github/workflows/skill-eval.yml` — routing + quality evals (requires Azure OpenAI secrets).

@@ -8,12 +8,15 @@ set -euo pipefail
 #
 # Env overrides:
 #   REPO_URL   (default: https://github.com/HolmesGPT/holmesgpt.git)
-#   BRANCH     (default: master)
+#   REF        (default: pinned commit below; accepts a SHA, tag, or branch name)
 #
 # Requirements: wget or curl; unzip or Python 3 (zipfile) for extraction.
 
 REPO_URL=${REPO_URL:-https://github.com/HolmesGPT/holmesgpt.git}
-BRANCH=${BRANCH:-master}
+# Pinned upstream commit (master @ 2026-08-05). The harness EXECUTES each case's
+# before_test/after_test shell blocks, so an unpinned ref would let upstream
+# changes alter what runs here. To bump: review the upstream diff, update REF.
+REF=${REF:-10b772be5412f7d51ec19293b055a0bf8b981072}
 BASE_DIR=$(cd "$(dirname "$0")/.." && pwd)
 VENDOR_DIR="$BASE_DIR/vendor"
 TARGET_DIR="$VENDOR_DIR/holmesgpt"
@@ -21,10 +24,11 @@ FIXTURES_REL="tests/llm/fixtures/test_ask_holmes"
 
 mkdir -p "$VENDOR_DIR"
 
-# Construct ZIP URL from repo URL (strip trailing .git if present)
+# Construct ZIP URL from repo URL (strip trailing .git if present).
+# archive/<ref>.zip resolves SHAs, tags, and branch names alike.
 REPO_BASE=${REPO_URL%.git}
-ZIP_URL="$REPO_BASE/archive/refs/heads/${BRANCH}.zip"
-ZIP_PATH="$VENDOR_DIR/holmesgpt-${BRANCH}.zip"
+ZIP_URL="$REPO_BASE/archive/${REF}.zip"
+ZIP_PATH="$VENDOR_DIR/holmesgpt-${REF}.zip"
 TMP_DIR="$VENDOR_DIR/_extract_$$"
 
 # Clean tmp dir if exists
