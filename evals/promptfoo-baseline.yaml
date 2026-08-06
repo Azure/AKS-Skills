@@ -25,6 +25,7 @@ tests:
   - file://tests/aks-automatic-readiness/quality-tests.yaml
   - file://tests/aks-cluster-setup/quality-tests.yaml
   - file://tests/aks-network-capture/quality-tests.yaml
+  - file://tests/aks-known-issues/quality-tests.yaml
 
 defaultTest:
   options:
