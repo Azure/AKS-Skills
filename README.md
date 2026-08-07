@@ -15,6 +15,7 @@ A "skill" is a folder with a `SKILL.md` (YAML front matter + guidance) plus opti
 | Skill | What it does |
 | --- | --- |
 | [`aks-troubleshooting`](skills/aks-troubleshooting) | Root-cause live AKS incidents: pod crashes, node failures, DNS/networking, ingress, upgrades, spot/zone disruptions. Read-only, evidence-first. |
+| [`aks-known-issues`](skills/aks-known-issues) | Match a specific AKS error code or message to the documented cause and fix, with a Microsoft Learn citation. Deterministic lookup, not an investigation. |
 | [`aks-cost-optimization`](skills/aks-cost-optimization) | Reduce AKS spend: rightsizing, autoscaler tuning, spot pools, cost visibility, anomaly detection. |
 | [`aks-automatic-readiness`](skills/aks-automatic-readiness) | Assess workloads and clusters for AKS Automatic compatibility; generate fixes; guide migration. |
 | [`aks-gpu-inference`](skills/aks-gpu-inference) | Day-2 GPU and model-inference operations: scheduling/quota, KAITO Workspaces, GPU cost/scaling, DCGM observability. |
@@ -26,6 +27,7 @@ A "skill" is a folder with a `SKILL.md` (YAML front matter + guidance) plus opti
 Once installed, just describe the problem in natural language — the host agent picks the right skill by its description. For example:
 
 - *"A pod in my `payments` namespace is stuck in CrashLoopBackOff — investigate."* → `aks-troubleshooting`
+- *"My node pool create failed with `VMCannotFitEphemeralOSDisk` — is this a known issue, and how do I fix it?"* → `aks-known-issues`
 - *"My AKS bill jumped this month; help me rightsize and find idle nodes."* → `aks-cost-optimization`
 - *"Is my cluster ready to move to AKS Automatic? What needs to change?"* → `aks-automatic-readiness`
 - *"My GPU pod is Pending with 'Insufficient nvidia.com/gpu' and the KAITO workspace never becomes ready."* → `aks-gpu-inference`

@@ -1,0 +1,59 @@
+# aks-known-issues trigger tests (routing)
+# Validates that prompts route (or do not route) to this skill.
+#
+# Run via promptfoo-routing.yaml using the router-provider, which returns a
+# skill id (e.g. "aks-known-issues") or "none". Assertions are deterministic
+# string equality — no LLM judge.
+#
+# The should-not cases are reciprocal boundary tests: a generic symptom with no
+# named error code must fall to aks-troubleshooting, not get grabbed here.
+
+- description: "A named node-image rejection should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "Node image upgrade fails: NodeImageVersion is not accepted, can only be the current version or 'latest'. Is this a known issue?"
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "VMCannotFitEphemeralOSDisk should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "My node pool create failed with VMCannotFitEphemeralOSDisk — what does that error mean and how do I fix it?"
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "LinkedAuthorizationFailed on cluster create should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS cluster creation fails with error code LinkedAuthorizationFailed referencing a linked network resource."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "Boundary: a generic CrashLoopBackOff with no error code must go to aks-troubleshooting, not aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "A pod in my cluster is stuck in CrashLoopBackOff — help me figure out why."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Boundary: an open-ended intermittent-timeout incident must go to aks-troubleshooting, not aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "We're seeing intermittent connection timeouts from some pods, no specific error, can you investigate?"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"

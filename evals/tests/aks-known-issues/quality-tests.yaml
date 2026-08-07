@@ -1,0 +1,52 @@
+# aks-known-issues quality tests
+# Validates that the skill turns a named error into the documented cause + fix,
+# with a citation, rather than generic advice.
+#
+# Assertion strategy:
+#   - icontains: deterministic keyword checks
+#   - g-eval: LLM-as-judge scoring 0-1 against criteria. The judge runs on a
+#     pinned deployment, separate from the model under test.
+#
+# Each test needs: description, vars (prompt + skill_path), assert.
+
+- description: "VMCannotFitEphemeralOSDisk gets the documented ephemeral-OS-disk fix, not generic advice"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "My AKS node pool create failed with VMCannotFitEphemeralOSDisk. What is this and how do I fix it?"
+  assert:
+    - type: icontains
+      value: "ephemeral"
+    - type: g-eval
+      value: "Response identifies this as an ephemeral OS disk sizing/validation issue (the OS disk does not fit the VM SKU's cache/temp storage) and gives the documented fix — use a VM SKU with a larger cache, reduce the OS disk size, or set the OS disk type to Managed — noting the disk can't be changed in place. It must not give generic 'check your logs' advice."
+      threshold: 0.8
+
+- description: "LinkedAuthorizationFailed points at the LINKED resource scope, not just the primary resource"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "Cluster creation fails with LinkedAuthorizationFailed and mentions a linked network resource. Help me resolve it."
+  assert:
+    - type: icontains
+      value: "role assignment"
+    - type: g-eval
+      value: "Response explains the cluster identity (managed identity or service principal) lacks the required permission on the LINKED resource named in the error, and recommends granting the specific action at the linked resource scope and verifying propagation — not merely checking the primary cluster resource."
+      threshold: 0.8
+
+- description: "A snapshot-pinned node image rejection gets the --node-image-only fix"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "Node pool image update rejected: 'NodeImageVersion is not accepted, can only be current version or latest'. This pool was created from a snapshot. How do I fix it?"
+  assert:
+    - type: icontains
+      value: "node-image-only"
+    - type: g-eval
+      value: "Response recognizes the pool is pinned to a snapshot node image and recommends upgrading to the latest supported image with 'az aks nodepool upgrade --node-image-only' (without --snapshot-id), and notes node images can't be downgraded. It should not suggest editing the version string arbitrarily."
+      threshold: 0.8
