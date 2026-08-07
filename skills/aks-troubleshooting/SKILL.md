@@ -3,14 +3,14 @@ name: aks-troubleshooting
 license: MIT
 metadata:
   author: Microsoft
-  version: "1.0.0"
+  version: "1.0.1"
   openclaw:
     emoji: "☸️"
     requires:
       anyBins:
         - kubectl
         - az
-description: "Debug and root-cause live Azure Kubernetes Service (AKS) cluster incidents: pod crashes, node failures, DNS/networking, ingress/load-balancer errors, network policy, upgrade failures, and spot/zone disruptions. Runs a read-only, evidence-first investigation using the AKS MCP tools, az, and kubectl, and produces a structured incident report. WHEN: CrashLoopBackOff, OOMKilled, ImagePullBackOff, node NotReady, pod Pending, DNS resolution failure, 502/503 from ingress, connectivity timeout, upgrade stuck, cordon/drain failure, spot eviction, SNAT exhaustion, expired certificate, 'investigate my AKS cluster'. DO NOT USE FOR: packet-level capture (use aks-network-capture); GPU or model-serving issues (use aks-gpu-inference); creating or provisioning a cluster (use aks-cluster-setup); cost/rightsizing (use aks-cost-optimization)."
+description: "Debug and root-cause live Azure Kubernetes Service (AKS) cluster incidents: pod crashes, node failures, DNS/networking, ingress/load-balancer errors, network policy, upgrade failures, and spot/zone disruptions. Runs a read-only, evidence-first investigation using the AKS MCP tools, az, and kubectl, and produces a structured incident report. WHEN: CrashLoopBackOff, OOMKilled, ImagePullBackOff, node NotReady, pod Pending, DNS resolution failure, 502/503 from ingress, connectivity timeout, upgrade stuck, cordon/drain failure, spot eviction, SNAT exhaustion, expired certificate, 'investigate my AKS cluster'. DO NOT USE FOR: packet-level capture (use aks-network-capture); GPU or model-serving issues (use aks-gpu-inference); creating or provisioning a cluster (use aks-cluster-setup); cost/rightsizing (use aks-cost-optimization); a named, documented AKS error code or message with a known signature — e.g. VMCannotFitEphemeralOSDisk, LinkedAuthorizationFailed, NodePoolMcVersionIncompatible, a vmssCSE exit code (use aks-known-issues); generic, open-ended upgrade or cluster investigation with no specific error code stays here."
 ---
 
 # AKS Troubleshooting
