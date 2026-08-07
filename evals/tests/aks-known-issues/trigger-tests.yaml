@@ -88,6 +88,16 @@
     - type: equals
       value: "aks-known-issues"
 
+- description: "AKS ZonalAllocationFailed should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node-pool scale failed with code ZonalAllocationFailed: Allocation failed. We do not have sufficient capacity for the requested VM size in this zone."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
 - description: "AKS OverconstrainedAllocationRequest should route to aks-known-issues"
   metadata:
     skill: aks-known-issues

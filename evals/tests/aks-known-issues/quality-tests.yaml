@@ -145,6 +145,22 @@
       value: "Response explains that the listed combination is too restrictive and recommends relaxing a listed constraint or selecting another SKU, zone, region, or node pool. Because no proximity placement group is present, it must not assert that a PPG caused the failure."
       threshold: 0.8
 
+- description: "ZonalAllocationFailed remains distinct from AllocationFailed"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool scale failed with code ZonalAllocationFailed: Allocation failed. We do not have sufficient capacity for the requested VM size in this zone. There is no proximity placement group."
+  assert:
+    - type: icontains
+      value: "ZonalAllocationFailed"
+    - type: icontains
+      value: "zonalallocation-allocationfailed-error"
+    - type: g-eval
+      value: "Response preserves the exact ZonalAllocationFailed code rather than classifying it as the distinct AllocationFailed code. It identifies insufficient capacity for the requested VM size in that zone and recommends another SKU, zone, region, or node pool. It must not use the internal-error AllocationFailed remediation, assert a proximity placement group cause when none exists, or recommend upgrade-only maxUnavailable for this scale operation."
+      threshold: 0.8
+
 - description: "AllocationFailed follows the full nested message"
   metadata:
     skill: aks-known-issues
@@ -185,10 +201,8 @@
   assert:
     - type: icontains
       value: "zonalallocation-allocationfailed-error"
-    - type: not-icontains
-      value: "maxUnavailable"
     - type: g-eval
-      value: "Response identifies an explicit placement-capacity failure and recommends retrying or using another SKU, zone, region, or node pool. Because this is a scale operation, it must not recommend upgrade-only maxUnavailable guidance or claim quota exhaustion."
+      value: "Response identifies an explicit placement-capacity failure and recommends retrying or using another SKU, zone, region, or node pool. Because this is a scale operation, it must not recommend using maxUnavailable; it may accurately mention that maxUnavailable applies only to upgrades. It must not claim quota exhaustion."
       threshold: 0.8
 
 - description: "A non-AKS exit 50 is outside the catalog boundary"
