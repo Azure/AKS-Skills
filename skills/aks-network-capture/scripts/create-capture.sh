@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # create-capture.sh — Create bounded, distributed packet-capture Jobs on AKS nodes.
 #
-# Safe-by-construction rewrite modelled on Microsoft Retina
+# Safe-by-construction implementation modelled on Microsoft Retina
 # (pkg/capture/provider/network_capture_unix.go, crd_to_job.go):
 #   1. Every user input is validated against a strict allowlist before use.
 #   2. The BPF filter never touches a shell: it is validated (no flag tokens,
@@ -9,20 +9,19 @@
 #      compile-checked in-pod with `tcpdump -d`, and handed to tcpdump as a single
 #      trailing argv element. There is no `eval` and no shell string interpolation
 #      of user data into a command.
-#   3. The capture pod is scoped, not `privileged`: NET_ADMIN + NET_RAW (+ SYS_ADMIN/
-#      SYS_CHROOT to run the node's own tcpdump via chroot, which mounts the node root
-#      read-write) + hostNetwork — effectively node-level access, but NOT privileged
-#      and NOT hostPID.
+#   3. The capture pod is scoped, not `privileged`: NET_ADMIN + NET_RAW and
+#      hostNetwork, with only the capture output directory mounted from the node.
+#      The node root is never mounted and hostPID is never enabled.
 #   4. The container image is pinned by digest to Microsoft Container Registry.
 #
 # NOTE: packet capture on live nodes cannot be exercised in CI. Run the live-cluster
 # smoke test in tests/ before relying on this in production (see SKILL.md).
 set -euo pipefail
 
-# Pinned MCR debug base (verified digest). busybox provides sh/chroot/tar; the
-# capture uses the NODE's tcpdump via `chroot /host`, so no third-party tools image
-# and no Docker Hub pull are required.
-CAPTURE_IMAGE_DEFAULT="mcr.microsoft.com/cbl-mariner/busybox:2.0@sha256:e4fb4d51fc9b70d6cdc1ce66a0af02ab40554d2ca632e1d188fabc760e432fdd"
+# Microsoft Retina's network-tool image contains tcpdump and archive tooling.
+# The multi-architecture v1.2.3 manifest is pinned by digest.
+CAPTURE_IMAGE_DEFAULT="mcr.microsoft.com/containernetworking/retina-shell:v1.2.3@sha256:c7dfe8e0c0dc7fa28e4cfbad04ade270c3051c42a5495488d4d897b49fb3366f"
+CONFIGMAP_NAME="network-capture-scripts"
 
 CAPTURE_NAME=""
 DURATION="60s"
@@ -49,7 +48,7 @@ Target selection (choose one mode):
   --node-names <n1,n2>         Comma-separated node names
   --pod-selector <key=val>     Pod label selector (resolves to the pods' host nodes)
   --pod-names <p1,p2>          Comma-separated pod names (with --namespace)
-  --namespace <string>         Namespace for pod selection (default: default)
+  --namespace <string>         Namespace for target pods and capture Jobs (default: default)
 
 Capture configuration:
   --duration <Ns|Nm|Nh>        Capture duration (default: 60s, max: ${MAX_DURATION_SECONDS}s)
@@ -66,7 +65,9 @@ EOF
 die() { echo "Error: $*" >&2; exit 1; }
 
 # --- strict validators (allowlist, never denylist) ---
-valid_rfc1123() { printf '%s' "$1" | grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'; }
+valid_rfc1123() {
+  [ "${#1}" -le 63 ] && printf '%s' "$1" | grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+}
 valid_label_selector() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._/=,-]+$'; }
 valid_duration() { printf '%s' "$1" | grep -Eq '^[0-9]+[smh]$'; }
 valid_uint() { printf '%s' "$1" | grep -Eq '^[0-9]+$'; }
@@ -127,6 +128,9 @@ valid_rfc1123 "$NAMESPACE" || die "--namespace must be RFC 1123"
 validate_filter "$TCPDUMP_FILTER"
 
 command -v kubectl >/dev/null 2>&1 || die "kubectl not found on PATH"
+kubectl get configmap "$CONFIGMAP_NAME" -n "$NAMESPACE" \
+  -o go-template='{{ index .data "run-capture.sh" }}' 2>/dev/null | grep -q . \
+  || die "ConfigMap '$CONFIGMAP_NAME' not found in namespace '$NAMESPACE'; run setup-capture-configmap.sh $NAMESPACE first"
 
 # --- resolve target nodes and (for pod modes) the pod IPs to narrow the filter ---
 POD_IP_FILTER=""
@@ -179,17 +183,36 @@ fi
 TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
 echo "Creating capture '$CAPTURE_NAME' on ${#TARGET_NODES[@]} node(s): ${TARGET_NODES[*]}"
 
+declare -a CREATED_JOBS=()
+cleanup_partial_jobs() {
+  local status=$?
+  trap - EXIT
+  if [ "$status" -ne 0 ] && [ "${#CREATED_JOBS[@]}" -gt 0 ]; then
+    echo "Capture Job creation failed; removing partially created Jobs" >&2
+    kubectl delete jobs -n "$NAMESPACE" "${CREATED_JOBS[@]}" --ignore-not-found >/dev/null 2>&1 \
+      || echo "Warning: failed to remove one or more partially created Jobs" >&2
+  fi
+  exit "$status"
+}
+trap cleanup_partial_jobs EXIT
+
 # --- render one Job per node ---
-# The container command is a FIXED script (no user data in its text). All user values
-# reach the pod only through env: entries whose values were validated above. The filter
-# is compile-checked in-pod with `tcpdump -d` and passed to tcpdump as ONE trailing arg.
+# The container command is a fixed ConfigMap script. All user values reach the pod only
+# through env entries whose values were validated above. The filter is compile-checked
+# in-pod and passed to tcpdump as one trailing argument.
 for node in "${TARGET_NODES[@]}"; do
-  node_slug="$(printf '%s' "$node" | tr '._' '--' | cut -c1-40)"
+  node_slug="$(printf '%s' "$node" | tr '._' '--' | cut -c1-40 | sed 's/-*$//')"
+  capture_slug="$(printf '%s' "$CAPTURE_NAME" | cut -c1-20 | sed 's/-*$//')"
+  node_prefix="$(printf '%s' "$node_slug" | cut -c1-12 | sed 's/-*$//')"
+  node_checksum="$(printf '%s' "$node" | cksum | awk '{print $1}')"
+  job_name="${capture_slug}-${node_prefix}-${node_checksum}"
+  CREATED_JOBS+=("$job_name")
   kubectl apply -f - <<EOF
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ${CAPTURE_NAME}-${node_slug}
+  name: ${job_name}
+  namespace: ${NAMESPACE}
   labels: { app: aks-network-capture, capture-id: "${CAPTURE_NAME}", capture-node: "${node_slug}" }
 spec:
   ttlSecondsAfterFinished: 3600
@@ -207,10 +230,12 @@ spec:
         image: "${CAPTURE_IMAGE}"
         securityContext:
           privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           runAsUser: 0
           capabilities:
             drop: ["ALL"]
-            add: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_CHROOT"]
+            add: ["NET_ADMIN", "NET_RAW"]
         env:
         - { name: PCAP_FILTER, value: "${EFFECTIVE_FILTER}" }
         - { name: CAPTURE_DURATION, value: "${DUR_SECONDS}" }
@@ -218,41 +243,28 @@ spec:
         - { name: OUT_DIR, value: "${OUTPUT_BASE}" }
         - { name: STAMP, value: "${TIMESTAMP}" }
         - { name: NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          set -eu
-          OUT="\${OUT_DIR}/capture-\${NODE_NAME}-\${STAMP}.pcap"
-          mkdir -p "\${OUT_DIR}"
-          # Compile-check the filter without capturing or executing anything.
-          if [ -n "\${PCAP_FILTER}" ]; then
-            chroot /host tcpdump -d "\${PCAP_FILTER}" >/dev/null \
-              || { echo "invalid BPF filter"; exit 2; }
-          fi
-          # Build a fixed argv; the filter is a single trailing element, never a shell string.
-          set -- tcpdump -i any -w "\${OUT}"
-          [ "\${PACKET_SIZE}" -gt 0 ] && set -- "\$@" -s "\${PACKET_SIZE}"
-          [ -n "\${PCAP_FILTER}" ] && set -- "\$@" "\${PCAP_FILTER}"
-          echo "capturing for \${CAPTURE_DURATION}s on \${NODE_NAME}: \$*"
-          timeout "\${CAPTURE_DURATION}" chroot /host "\$@" || echo "tcpdump exit \$?"
-          tar -C "\${OUT_DIR}" -czf "\${OUT_DIR}/capture-\${NODE_NAME}-\${STAMP}.tar.gz" \
-            "capture-\${NODE_NAME}-\${STAMP}.pcap" && rm -f "\${OUT}"
-          echo "bundle: \${OUT_DIR}/capture-\${NODE_NAME}-\${STAMP}.tar.gz"
+        command: ["/bin/sh", "/capture-scripts/run-capture.sh"]
         volumeMounts:
-        - { name: hostroot, mountPath: /host }
+        - { name: capture-output, mountPath: "${OUTPUT_BASE}" }
+        - { name: capture-scripts, mountPath: /capture-scripts, readOnly: true }
       volumes:
-      - name: hostroot
-        hostPath: { path: /, type: Directory }
+      - name: capture-output
+        hostPath: { path: "${OUTPUT_BASE}", type: DirectoryOrCreate }
+      - name: capture-scripts
+        configMap:
+          name: ${CONFIGMAP_NAME}
+          defaultMode: 0555
 EOF
   echo "  job created for node: $node"
 done
+trap - EXIT
 
 cat <<EOF
 
 Capture started. Monitor and retrieve:
-  kubectl get jobs -l capture-id=${CAPTURE_NAME} -w
-  kubectl logs  -l capture-id=${CAPTURE_NAME} -f
-  ./scripts/retrieve-captures.sh --name ${CAPTURE_NAME}
+  kubectl get jobs -n ${NAMESPACE} -l capture-id=${CAPTURE_NAME} -w
+  kubectl logs -n ${NAMESPACE} -l capture-id=${CAPTURE_NAME} -f
+  ./scripts/retrieve-captures.sh --name ${CAPTURE_NAME} --namespace ${NAMESPACE}
 
 Bundles are written to ${OUTPUT_BASE} on each node.
 EOF
