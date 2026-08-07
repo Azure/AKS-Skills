@@ -68,7 +68,11 @@
  *                          api.openai.com. Default: https://api.openai.com/v1.
  *                          This is how you evaluate a non-frontier, local, or
  *                          disconnected model against the skills; set EVAL_MODEL
- *                          to the served model name.
+ *                          to the served model name. Treated as explicit local
+ *                          intent during auto-detection: it wins over ambient
+ *                          AZURE_OPENAI_API_KEY/-ENDPOINT so a self-hosted target
+ *                          isn't silently overridden by an Azure resource that
+ *                          happens to be configured in the same environment.
  *
  * Prefer Entra over keys. CI should obtain a token via OIDC federated
  * credentials (azure/login with id-token: write, then
@@ -111,9 +115,19 @@ function detectBackend() {
     backend = forced;
   } else if (process.env.FOUNDRY_ENDPOINT && foundryCredential()) {
     backend = 'foundry';
+  } else if (process.env.OPENAI_BASE_URL) {
+    // An explicitly set OPENAI_BASE_URL is unambiguous local/self-hosted intent
+    // (a vLLM/llama.cpp/Ollama server or gateway on a dev box or CI runner), so
+    // it must outrank ambient Azure credentials. AZURE_OPENAI_API_KEY/-ENDPOINT
+    // are frequently present in an environment for unrelated reasons (a shared
+    // CI runner, a devcontainer default); if Azure won here, a user who set
+    // OPENAI_BASE_URL to reach their local model would be silently redirected
+    // to Azure — a confusing 404 at best, or a run scored against the wrong
+    // model at worst.
+    backend = 'openai';
   } else if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT) {
     backend = 'azure';
-  } else if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL) {
+  } else if (process.env.OPENAI_API_KEY) {
     backend = 'openai';
   } else if (process.env.GITHUB_MODELS_TOKEN) {
     backend = 'github';

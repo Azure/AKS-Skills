@@ -65,22 +65,23 @@ The mock tier proves the agent can *investigate*, not just route — without any
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `EVAL_PROVIDER` | No | Explicit backend override: `foundry` \| `azure` \| `openai` \| `github`. Takes precedence over every auto-detection rule below, including `OPENAI_BASE_URL`. Auto-detected if unset. |
 | `AZURE_OPENAI_API_KEY` | Yes* | Azure OpenAI API key |
 | `AZURE_OPENAI_ENDPOINT` | Yes* | Full endpoint URL (e.g. `https://my-resource.openai.azure.com`) — base URL only, no path suffix |
 | `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set. Optional when `OPENAI_BASE_URL` points at a keyless self-hosted server. |
-| `OPENAI_BASE_URL` | No | Point the `openai` backend at any OpenAI-compatible endpoint instead of `api.openai.com` — a self-hosted or local model server (llama.cpp / vLLM / Ollama) or a gateway. Default: `https://api.openai.com/v1`. |
-| `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5`). Set if your deployment is named differently, or to the model your local server serves. |
+| `OPENAI_BASE_URL` | No | Point the `openai` backend at any OpenAI-compatible endpoint instead of `api.openai.com` — a self-hosted or local model server (llama.cpp / vLLM / Ollama) or a gateway. Default: `https://api.openai.com/v1`. Setting this is treated as explicit local/OpenAI-compatible intent during auto-detection: it selects the `openai` backend even if Azure credentials also happen to be present in the environment. |
+| `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5` for `azure`/`api.openai.com`). Set this for a custom `OPENAI_BASE_URL` server such as vLLM that requires a `model` field in the request body — servers that infer the model from what they have loaded (e.g. some llama.cpp/Ollama setups) can omit it. |
 
-*Either Azure OpenAI or OpenAI credentials must be provided.
+*Either Azure OpenAI or OpenAI credentials must be provided, unless `EVAL_PROVIDER=openai` with `OPENAI_BASE_URL` set to a keyless endpoint.
 
 ### Evaluating a local or self-hosted model
 
-To measure how well the skills perform on a non-frontier, local, or disconnected model, point the `openai` backend at any OpenAI-compatible server — no Azure or OpenAI credentials needed:
+To measure how well the skills perform on a non-frontier, local, or disconnected model, point the `openai` backend at any OpenAI-compatible server — no Azure or OpenAI credentials needed. Setting `OPENAI_BASE_URL` is enough for auto-detection to pick the `openai` backend (it wins over ambient Azure credentials); set `EVAL_PROVIDER=openai` too if you want that choice to be explicit and provider-independent regardless of what else is configured in the shell:
 
 ```bash
 # e.g. a local llama.cpp / vLLM / Ollama server exposing /v1/chat/completions
 export OPENAI_BASE_URL="http://localhost:8080/v1"
-export EVAL_MODEL="my-local-model"      # the name the server serves
+export EVAL_MODEL="my-local-model"      # set for servers (e.g. vLLM) that require a model field
 # OPENAI_API_KEY is optional for a keyless local server
 
 npm run eval            # quality
