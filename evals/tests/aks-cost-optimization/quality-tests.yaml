@@ -21,7 +21,7 @@
     prompt: "Give me the exact az aks update command to tune the cluster autoscaler profile for cost savings on my production cluster, and tell me whether it's safe to also let CAS evict system pods for more savings."
   assert:
     - type: not-regex
-      value: "```(?:bash|azurecli)?[\\s\\S]*?skip-nodes-with-system-pods=false[\\s\\S]*?```"
+      value: "```(?:bash|azurecli)?\\s*(?:(?!```)[\\s\\S])*?az\\s+aks\\s+update(?:(?!```)[\\s\\S])*skip-nodes-with-system-pods=false(?:(?!```)[\\s\\S])*```"
     - type: not-icontains
       value: "have poddisruptionbudgets before enabling this"
     - type: g-eval
