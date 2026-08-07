@@ -54,7 +54,7 @@ Packet capture requires elevated node access, so these scripts are built to be s
 ./scripts/retrieve-captures.sh --name dns-debug
 ```
 
-`create-capture.sh` targeting flags: `--node-selector`, `--node-names`, `--pod-selector`, `--pod-names` (with `--namespace`). The same namespace contains the ConfigMap and capture Jobs; pass it to `retrieve-captures.sh --namespace` as well. Capture flags: `--duration` (max 30m), `--packet-size`, `--tcpdump-filter`. The filter must be a plain BPF expression — no flags, no shell metacharacters.
+`create-capture.sh` targeting flags: `--node-selector`, `--node-names`, `--pod-selector`, `--pod-names` (with `--namespace`). The same namespace contains the ConfigMap and capture Jobs; pass it to `retrieve-captures.sh --namespace` as well. Creation prints the run ID; pass `--run-id` during retrieval when a capture name has multiple runs. Capture flags: `--duration` (max 30m), `--packet-size`, `--tcpdump-filter`. The filter must be a plain BPF expression — no flags, no shell metacharacters.
 
 ## Azure-side analysis (AKS)
 

@@ -82,17 +82,68 @@ cat > "$MOCK_BIN/kubectl" <<'EOF'
 #!/bin/sh
 case "${KUBECTL_MODE:-manifest}:$1:$2" in
   manifest:get:configmap)
-    printf '%s' "runner"
+    cat "$MOCK_RUNNER_SCRIPT"
     exit 0
     ;;
-  manifest:apply:-f)
+  manifest:create:-f)
     cat > "$MANIFEST_OUT"
+    printf '%s' "mock-capture-job"
+    ;;
+  selector-empty:get:configmap)
+    cat "$MOCK_RUNNER_SCRIPT"
+    ;;
+  selector-empty:get:pods)
+    exit 0
+    ;;
+  selector-empty:create:-f)
+    printf '%s\n' "$*" >> "$JOB_CALL_LOG"
+    cat >/dev/null
+    ;;
+  selector-no-ip:get:configmap)
+    cat "$MOCK_RUNNER_SCRIPT"
+    ;;
+  selector-no-ip:get:pods)
+    printf 'pending-pod|node-one|\n'
+    ;;
+  selector-no-ip:create:-f)
+    printf '%s\n' "$*" >> "$JOB_CALL_LOG"
+    cat >/dev/null
+    ;;
+  selector-mixed:get:configmap)
+    cat "$MOCK_RUNNER_SCRIPT"
+    ;;
+  selector-mixed:get:pods)
+    printf 'ready-pod|node-one|10.0.0.10,\npending-pod|node-two|\n'
+    ;;
+  selector-mixed:create:-f)
+    printf '%s\n' "$*" >> "$JOB_CALL_LOG"
+    cat >/dev/null
+    ;;
+  create-fail:get:configmap)
+    cat "$MOCK_RUNNER_SCRIPT"
+    ;;
+  create-fail:create:-f)
+    cat > "$MANIFEST_OUT"
+    exit 17
+    ;;
+  create-fail:delete:jobs)
+    printf '%s\n' "$*" >> "$DELETE_LOG"
+    ;;
+  stale-configmap:get:configmap)
+    printf '%s\n' '#!/bin/sh' ': "${STAMP:?STAMP is required}"'
+    ;;
+  stale-configmap:create:-f)
+    printf '%s\n' "$*" >> "$JOB_CALL_LOG"
+    cat >/dev/null
     ;;
   retrieval:get:jobs)
     printf '%s' "cleanup-test-node-one"
     ;;
   retrieval:get:job)
-    printf '%s' "node-one"
+    case "$*" in
+      *RUN_ID*) printf '%s' "20260807-120000-111111111111111111111111" ;;
+      *) printf '%s' "node-one" ;;
+    esac
     ;;
   retrieval:get:pods)
     printf '%s' "cleanup-test-node-one-pod"
@@ -101,7 +152,7 @@ case "${KUBECTL_MODE:-manifest}:$1:$2" in
     printf '%s' "Succeeded"
     ;;
   retrieval:create:-f)
-    cat >/dev/null
+    cat > "$RETRIEVAL_MANIFEST"
     printf '%s' "retrieve-cleanup-test-node-one-abc12"
     ;;
   retrieval:wait:*)
@@ -110,6 +161,43 @@ case "${KUBECTL_MODE:-manifest}:$1:$2" in
   retrieval:delete:*)
     printf '%s\n' "$*" >> "$DELETE_LOG"
     ;;
+  retrieval-scope:get:jobs)
+    printf '%s' "scope-test-node-one"
+    ;;
+  retrieval-scope:get:job)
+    case "$*" in
+      *RUN_ID*) printf '%s' "20260807-120000-222222222222222222222222" ;;
+      *) printf '%s' "node-one" ;;
+    esac
+    ;;
+  retrieval-scope:get:pods)
+    printf '%s' "scope-test-node-one-pod"
+    ;;
+  retrieval-scope:get:pod)
+    printf '%s' "Succeeded"
+    ;;
+  retrieval-scope:create:-f)
+    cat > "$RETRIEVAL_MANIFEST"
+    printf '%s' "retrieve-scope-test-node-one-def34"
+    ;;
+  retrieval-scope:wait:*)
+    exit 0
+    ;;
+  retrieval-scope:cp:*)
+    printf '%s\n' "$*" >> "$SCOPE_LOG"
+    destination="$5"
+    mkdir -p "$(dirname "$destination")"
+    printf 'bundle-data' > "$destination"
+    ;;
+  retrieval-scope:exec:*)
+    printf '%s\n' "$*" >> "$SCOPE_LOG"
+    ;;
+  retrieval-scope:delete:*)
+    printf '%s\n' "$*" >> "$SCOPE_LOG"
+    ;;
+  retrieval-ambiguous:get:jobs)
+    printf '20260807-120000-aaaaaaaaaaaaaaaaaaaaaaaa\n20260807-120001-bbbbbbbbbbbbbbbbbbbbbbbb\n'
+    ;;
   *)
     echo "unexpected kubectl call: $*" >&2
     exit 97
@@ -117,9 +205,15 @@ case "${KUBECTL_MODE:-manifest}:$1:$2" in
 esac
 EOF
 chmod +x "$MOCK_BIN/kubectl"
+export MOCK_RUNNER_SCRIPT="$RUN_SCRIPT"
+cat > "$MOCK_BIN/od" <<'EOF'
+#!/bin/sh
+printf '%s\n' "${RUN_TOKEN_OVERRIDE:-0123456789abcdef01234567}"
+EOF
+chmod +x "$MOCK_BIN/od"
 
 if KUBECTL_MODE=manifest MANIFEST_OUT="$MANIFEST" PATH="$MOCK_BIN:$PATH" \
-  "$CREATE_SCRIPT" --name render-test --node-names node-one --duration 5s \
+  "$CREATE_SCRIPT" --name render-test --node-names node.one --duration 5s \
   --tcpdump-filter "udp port 53" >/dev/null 2>&1; then
   pass "render capture Job without a cluster"
 else
@@ -131,15 +225,21 @@ assert_contains "digest-pinned MCR image" \
 assert_contains "capabilities are NET_ADMIN and NET_RAW only" \
   'add: ["NET_ADMIN", "NET_RAW"]' "$MANIFEST"
 assert_contains "dedicated output hostPath uses DirectoryOrCreate" \
-  'hostPath: { path: "/var/log/aks-network-captures", type: DirectoryOrCreate }' "$MANIFEST"
+  'hostPath: { path: "/var/log/aks-network-captures/render-test/' "$MANIFEST"
 assert_contains "output hostPath is mounted at the capture path" \
-  'mountPath: "/var/log/aks-network-captures"' "$MANIFEST"
+  'mountPath: "/var/log/aks-network-captures/render-test/' "$MANIFEST"
 assert_contains "fixed capture runner is invoked without shell -c" \
   'command: ["/bin/sh", "/capture-scripts/run-capture.sh"]' "$MANIFEST"
 assert_contains "setup deploys the fixed capture runner" \
   '--from-file=run-capture.sh=' "$SCRIPTS/setup-capture-configmap.sh"
 assert_contains "BPF expression is passed through one env value" \
   'name: PCAP_FILTER, value: "udp port 53"' "$MANIFEST"
+assert_contains "capture identity is passed to the runner" \
+  'name: CAPTURE_ID, value: "render-test"' "$MANIFEST"
+assert_contains "run identity is passed to the runner" \
+  'name: RUN_ID, value: "' "$MANIFEST"
+assert_contains "valid DNS-subdomain node names are preserved" \
+  'nodeName: "node.one"' "$MANIFEST"
 assert_not_contains "no SYS_ADMIN capability" "SYS_ADMIN" "$MANIFEST"
 assert_not_contains "no SYS_CHROOT capability" "SYS_CHROOT" "$MANIFEST"
 assert_not_contains "no hostPID" "hostPID:" "$MANIFEST"
@@ -153,6 +253,109 @@ if [ "$filter_count" -eq 1 ]; then
   pass "BPF expression is absent from command text"
 else
   fail "BPF expression is absent from command text"
+fi
+
+FIRST_MANIFEST="$TEST_ROOT/job-first.yaml"
+SECOND_MANIFEST="$TEST_ROOT/job-second.yaml"
+KUBECTL_MODE=manifest MANIFEST_OUT="$FIRST_MANIFEST" PATH="$MOCK_BIN:$PATH" \
+  RUN_TOKEN_OVERRIDE=111111111111111111111111 \
+  "$CREATE_SCRIPT" --name collision-test --node-names node-one --duration 5s >/dev/null 2>&1
+KUBECTL_MODE=manifest MANIFEST_OUT="$SECOND_MANIFEST" PATH="$MOCK_BIN:$PATH" \
+  RUN_TOKEN_OVERRIDE=222222222222222222222222 \
+  "$CREATE_SCRIPT" --name collision-test --node-names node-one --duration 5s >/dev/null 2>&1
+first_job="$(awk '/^  generateName: /{print $2; exit}' "$FIRST_MANIFEST")"
+second_job="$(awk '/^  generateName: /{print $2; exit}' "$SECOND_MANIFEST")"
+if [ -n "$first_job" ] && [ -n "$second_job" ] && [ "$first_job" != "$second_job" ]; then
+  pass "same-second reruns receive collision-safe Job names"
+else
+  fail "same-second reruns receive collision-safe Job names"
+fi
+
+echo
+echo "== target selection and ownership tests =="
+
+STALE_JOB_CALL_LOG="$TEST_ROOT/stale-configmap-jobs.log"
+if stale_out="$(KUBECTL_MODE=stale-configmap JOB_CALL_LOG="$STALE_JOB_CALL_LOG" \
+  PATH="$MOCK_BIN:$PATH" "$CREATE_SCRIPT" --name stale-runner \
+  --node-names node-one 2>&1)"; then
+  fail "stale capture runner ConfigMap is rejected"
+else
+  case "$stale_out" in
+    *"ConfigMap 'network-capture-scripts' is stale"*) pass "stale capture runner ConfigMap is rejected" ;;
+    *) fail "stale capture runner fails with setup guidance" ;;
+  esac
+fi
+if [ -s "$STALE_JOB_CALL_LOG" ]; then
+  fail "stale capture runner renders no Job"
+else
+  pass "stale capture runner renders no Job"
+fi
+
+JOB_CALL_LOG="$TEST_ROOT/selector-jobs.log"
+if KUBECTL_MODE=selector-empty JOB_CALL_LOG="$JOB_CALL_LOG" PATH="$MOCK_BIN:$PATH" \
+  "$CREATE_SCRIPT" --name empty-selector --pod-selector "app=missing" >/dev/null 2>&1; then
+  fail "empty pod selector is rejected"
+else
+  pass "empty pod selector is rejected"
+fi
+if [ -s "$JOB_CALL_LOG" ]; then
+  fail "empty pod selector renders no Job"
+else
+  pass "empty pod selector renders no Job"
+fi
+
+EXPLICIT_EMPTY_JOB_LOG="$TEST_ROOT/explicit-empty-selector-jobs.log"
+if KUBECTL_MODE=selector-empty JOB_CALL_LOG="$EXPLICIT_EMPTY_JOB_LOG" PATH="$MOCK_BIN:$PATH" \
+  "$CREATE_SCRIPT" --name explicit-empty --pod-selector "" >/dev/null 2>&1; then
+  fail "explicitly empty pod selector is rejected"
+else
+  pass "explicitly empty pod selector is rejected"
+fi
+if [ -s "$EXPLICIT_EMPTY_JOB_LOG" ]; then
+  fail "explicitly empty pod selector renders no Job"
+else
+  pass "explicitly empty pod selector renders no Job"
+fi
+
+NO_IP_JOB_CALL_LOG="$TEST_ROOT/no-ip-selector-jobs.log"
+if KUBECTL_MODE=selector-no-ip JOB_CALL_LOG="$NO_IP_JOB_CALL_LOG" PATH="$MOCK_BIN:$PATH" \
+  "$CREATE_SCRIPT" --name no-ip-selector --pod-selector "app=pending" >/dev/null 2>&1; then
+  fail "pod selector without assigned IPs is rejected"
+else
+  pass "pod selector without assigned IPs is rejected"
+fi
+if [ -s "$NO_IP_JOB_CALL_LOG" ]; then
+  fail "pod selector without assigned IPs renders no Job"
+else
+  pass "pod selector without assigned IPs renders no Job"
+fi
+
+MIXED_JOB_CALL_LOG="$TEST_ROOT/mixed-selector-jobs.log"
+if KUBECTL_MODE=selector-mixed JOB_CALL_LOG="$MIXED_JOB_CALL_LOG" PATH="$MOCK_BIN:$PATH" \
+  "$CREATE_SCRIPT" --name mixed-selector --pod-selector "app=mixed" >/dev/null 2>&1; then
+  fail "mixed ready and pending pod selection is rejected"
+else
+  pass "mixed ready and pending pod selection is rejected"
+fi
+if [ -s "$MIXED_JOB_CALL_LOG" ]; then
+  fail "mixed ready and pending pod selection renders no Job"
+else
+  pass "mixed ready and pending pod selection renders no Job"
+fi
+
+FAILED_CREATE_MANIFEST="$TEST_ROOT/create-fail.yaml"
+FAILED_CREATE_DELETE_LOG="$TEST_ROOT/create-fail-delete.log"
+if KUBECTL_MODE=create-fail MANIFEST_OUT="$FAILED_CREATE_MANIFEST" \
+  DELETE_LOG="$FAILED_CREATE_DELETE_LOG" PATH="$MOCK_BIN:$PATH" \
+  "$CREATE_SCRIPT" --name prior-run --node-names node-one --duration 5s >/dev/null 2>&1; then
+  fail "pre-existing Job creation collision remains attributable"
+else
+  pass "pre-existing Job creation collision remains attributable"
+fi
+if [ -s "$FAILED_CREATE_DELETE_LOG" ]; then
+  fail "failed Job creation does not delete an earlier run"
+else
+  pass "failed Job creation does not delete an earlier run"
 fi
 
 echo
@@ -200,17 +403,18 @@ exec "$REAL_TAR" "$@"
 EOF
 chmod +x "$MOCK_BIN/tcpdump" "$MOCK_BIN/timeout" "$MOCK_BIN/tar"
 
-SUCCESS_DIR="$TEST_ROOT/success"
+SUCCESS_DIR="$TEST_ROOT/artifacts/capture-alpha"
 if success_out="$(PATH="$MOCK_BIN:$PATH" REAL_TAR="$REAL_TAR" TIMEOUT_EXPIRED=1 OUT_DIR="$SUCCESS_DIR" \
-  NODE_NAME=node-one STAMP=20260807-120000 CAPTURE_DURATION=5 PACKET_SIZE=0 \
+  CAPTURE_ID=capture-alpha NODE_NAME=node-one RUN_ID=20260807-120000-111111111111111111111111 \
+  CAPTURE_DURATION=5 PACKET_SIZE=0 \
   PCAP_FILTER="udp port 53" "$RUN_SCRIPT" 2>&1)"; then
   pass "capture runner creates an archive in the mounted output directory"
 else
   fail "capture runner creates an archive in the mounted output directory"
 fi
-SUCCESS_BUNDLE="$SUCCESS_DIR/capture-node-one-20260807-120000.tar.gz"
+SUCCESS_BUNDLE="$SUCCESS_DIR/capture-capture-alpha-node-one-20260807-120000-111111111111111111111111.tar.gz"
 if [ -s "$SUCCESS_BUNDLE" ] \
-  && "$REAL_TAR" -tzf "$SUCCESS_BUNDLE" | grep -q '^capture-node-one-20260807-120000\.pcap$'; then
+  && "$REAL_TAR" -tzf "$SUCCESS_BUNDLE" | grep -q '^capture-capture-alpha-node-one-20260807-120000-111111111111111111111111\.pcap$'; then
   pass "archive contains the non-empty pcap"
 else
   fail "archive contains the non-empty pcap"
@@ -220,9 +424,21 @@ case "$success_out" in
   *) fail "success is reported only after archive creation" ;;
 esac
 
+SECOND_CAPTURE_DIR="$TEST_ROOT/artifacts/capture-beta"
+if PATH="$MOCK_BIN:$PATH" REAL_TAR="$REAL_TAR" TIMEOUT_EXPIRED=1 OUT_DIR="$SECOND_CAPTURE_DIR" \
+  CAPTURE_ID=capture-beta NODE_NAME=node-one RUN_ID=20260807-120000-111111111111111111111111 \
+  CAPTURE_DURATION=5 PACKET_SIZE=0 PCAP_FILTER="" "$RUN_SCRIPT" >/dev/null 2>&1 \
+  && [ -s "$SECOND_CAPTURE_DIR/capture-capture-beta-node-one-20260807-120000-111111111111111111111111.tar.gz" ] \
+  && [ ! -e "$SUCCESS_DIR/capture-capture-beta-node-one-20260807-120000-111111111111111111111111.tar.gz" ]; then
+  pass "concurrent captures with the same node and run time remain isolated"
+else
+  fail "concurrent captures with the same node and run time remain isolated"
+fi
+
 TCPDUMP_FAIL_DIR="$TEST_ROOT/tcpdump-fail"
 if tcpdump_fail_out="$(PATH="$MOCK_BIN:$PATH" REAL_TAR="$REAL_TAR" TCPDUMP_FAIL=1 \
-  OUT_DIR="$TCPDUMP_FAIL_DIR" NODE_NAME=node-one STAMP=20260807-120001 \
+  OUT_DIR="$TCPDUMP_FAIL_DIR" CAPTURE_ID=capture-fail NODE_NAME=node-one \
+  RUN_ID=20260807-120001-111111111111111111111111 \
   CAPTURE_DURATION=5 PACKET_SIZE=0 PCAP_FILTER="" "$RUN_SCRIPT" 2>&1)"; then
   fail "tcpdump failure fails the capture runner"
 else
@@ -232,7 +448,7 @@ case "$tcpdump_fail_out" in
   *"bundle:"*) fail "tcpdump failure does not print success" ;;
   *) pass "tcpdump failure does not print success" ;;
 esac
-if [ -e "$TCPDUMP_FAIL_DIR/capture-node-one-20260807-120001.tar.gz" ]; then
+if [ -e "$TCPDUMP_FAIL_DIR/capture-capture-fail-node-one-20260807-120001-111111111111111111111111.tar.gz" ]; then
   fail "tcpdump failure does not create a bundle"
 else
   pass "tcpdump failure does not create a bundle"
@@ -240,7 +456,8 @@ fi
 
 EMPTY_PCAP_DIR="$TEST_ROOT/empty-pcap"
 if empty_pcap_out="$(PATH="$MOCK_BIN:$PATH" REAL_TAR="$REAL_TAR" TIMEOUT_EXPIRED=1 TCPDUMP_EMPTY=1 \
-  OUT_DIR="$EMPTY_PCAP_DIR" NODE_NAME=node-one STAMP=20260807-120003 \
+  OUT_DIR="$EMPTY_PCAP_DIR" CAPTURE_ID=capture-empty NODE_NAME=node-one \
+  RUN_ID=20260807-120003-111111111111111111111111 \
   CAPTURE_DURATION=5 PACKET_SIZE=0 PCAP_FILTER="" "$RUN_SCRIPT" 2>&1)"; then
   fail "timeout without a non-empty pcap fails the capture runner"
 else
@@ -253,7 +470,8 @@ esac
 
 TAR_FAIL_DIR="$TEST_ROOT/tar-fail"
 if tar_fail_out="$(PATH="$MOCK_BIN:$PATH" REAL_TAR="$REAL_TAR" TAR_FAIL=1 \
-  OUT_DIR="$TAR_FAIL_DIR" NODE_NAME=node-one STAMP=20260807-120002 \
+  OUT_DIR="$TAR_FAIL_DIR" CAPTURE_ID=capture-tar-fail NODE_NAME=node-one \
+  RUN_ID=20260807-120002-111111111111111111111111 \
   CAPTURE_DURATION=5 PACKET_SIZE=0 PCAP_FILTER="" "$RUN_SCRIPT" 2>&1)"; then
   fail "archive failure fails the capture runner"
 else
@@ -263,7 +481,7 @@ case "$tar_fail_out" in
   *"bundle:"*) fail "archive failure does not print success" ;;
   *) pass "archive failure does not print success" ;;
 esac
-if [ -e "$TAR_FAIL_DIR/capture-node-one-20260807-120002.tar.gz" ]; then
+if [ -e "$TAR_FAIL_DIR/capture-capture-tar-fail-node-one-20260807-120002-111111111111111111111111.tar.gz" ]; then
   fail "archive failure does not leave a success bundle"
 else
   pass "archive failure does not leave a success bundle"
@@ -273,17 +491,67 @@ echo
 echo "== retrieval cleanup regression test =="
 
 DELETE_LOG="$TEST_ROOT/delete.log"
-if KUBECTL_MODE=retrieval DELETE_LOG="$DELETE_LOG" PATH="$MOCK_BIN:$PATH" \
-  "$RETRIEVE_SCRIPT" --name cleanup-test --workspace-dir "$TEST_ROOT/workspace" \
+RETRIEVAL_MANIFEST="$TEST_ROOT/retrieval-fail.yaml"
+if KUBECTL_MODE=retrieval DELETE_LOG="$DELETE_LOG" RETRIEVAL_MANIFEST="$RETRIEVAL_MANIFEST" \
+  PATH="$MOCK_BIN:$PATH" \
+  "$RETRIEVE_SCRIPT" --name cleanup-test \
+  --run-id 20260807-120000-111111111111111111111111 \
+  --workspace-dir "$TEST_ROOT/workspace" \
   >/dev/null 2>&1; then
   fail "retrieval wait failure remains attributable"
 else
   pass "retrieval wait failure remains attributable"
 fi
-assert_contains "all retrieval pods are deleted by capture label after failure" \
-  "delete pods -n default -l capture-id=cleanup-test,role=retrieval --ignore-not-found" "$DELETE_LOG"
+assert_contains "owned retrieval pod is deleted after failure" \
+  "delete pod retrieve-cleanup-test-node-one-abc12 -n default --ignore-not-found" "$DELETE_LOG"
 assert_contains "capture Jobs are deleted after retrieval failure" \
-  "delete jobs -n default -l capture-id=cleanup-test --ignore-not-found" "$DELETE_LOG"
+  "delete jobs -n default cleanup-test-node-one --ignore-not-found" "$DELETE_LOG"
+assert_not_contains "retrieval cleanup does not use a capture-wide Job selector" \
+  "delete jobs -n default -l capture-id=cleanup-test" "$DELETE_LOG"
+assert_contains "retrieval mounts only the requested capture directory" \
+  "path: /var/log/aks-network-captures/cleanup-test/20260807-120000-111111111111111111111111" "$RETRIEVAL_MANIFEST"
+
+SCOPE_LOG="$TEST_ROOT/retrieval-scope.log"
+SCOPE_MANIFEST="$TEST_ROOT/retrieval-scope.yaml"
+SCOPE_WORKSPACE="$TEST_ROOT/scope-workspace"
+if KUBECTL_MODE=retrieval-scope SCOPE_LOG="$SCOPE_LOG" RETRIEVAL_MANIFEST="$SCOPE_MANIFEST" \
+  PATH="$MOCK_BIN:$PATH" "$RETRIEVE_SCRIPT" --name scope-test \
+  --run-id 20260807-120000-222222222222222222222222 \
+  --workspace-dir "$SCOPE_WORKSPACE" >/dev/null 2>&1; then
+  pass "scoped retrieval succeeds with the exact current bundle"
+else
+  fail "scoped retrieval succeeds with the exact current bundle"
+fi
+assert_contains "retrieval copies only the requested run bundle" \
+  "cp -n default retrieve-scope-test-node-one-def34:/capture-output/capture-scope-test-node-one-20260807-120000-222222222222222222222222.tar.gz" "$SCOPE_LOG"
+assert_not_contains "retrieval does not copy the shared capture directory" \
+  ":/capture-output/." "$SCOPE_LOG"
+assert_contains "retrieval deletes only the requested run artifacts" \
+  "capture-scope-test-node-one-20260807-120000-222222222222222222222222.tar.gz capture-scope-test-node-one-20260807-120000-222222222222222222222222.pcap" "$SCOPE_LOG"
+assert_not_contains "retrieval does not touch a stale capture id" "stale-capture" "$SCOPE_LOG"
+assert_not_contains "retrieval cleanup uses no artifact wildcard" "*" "$SCOPE_LOG"
+assert_contains "scoped retrieval mounts only its capture id" \
+  "path: /var/log/aks-network-captures/scope-test/20260807-120000-222222222222222222222222" "$SCOPE_MANIFEST"
+
+if invalid_run_out="$(KUBECTL_MODE=retrieval-ambiguous PATH="$MOCK_BIN:$PATH" \
+  "$RETRIEVE_SCRIPT" --name reused-name --run-id malformed 2>&1)"; then
+  fail "malformed retrieval run identity is rejected"
+else
+  case "$invalid_run_out" in
+    *"--run-id has an invalid format"*) pass "malformed retrieval run identity is rejected" ;;
+    *) fail "malformed retrieval run identity fails during input validation" ;;
+  esac
+fi
+
+if ambiguous_out="$(KUBECTL_MODE=retrieval-ambiguous PATH="$MOCK_BIN:$PATH" \
+  "$RETRIEVE_SCRIPT" --name reused-name --workspace-dir "$TEST_ROOT/ambiguous" 2>&1)"; then
+  fail "ambiguous same-name runs require explicit selection"
+else
+  case "$ambiguous_out" in
+    *"multiple capture runs found"*) pass "ambiguous same-name runs require explicit selection" ;;
+    *) fail "ambiguous same-name runs fail with an attributable error" ;;
+  esac
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "All capture security and regression tests passed."; exit 0
