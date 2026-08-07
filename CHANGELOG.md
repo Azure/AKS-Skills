@@ -10,9 +10,9 @@ All notable changes to AKS Skills are recorded here. Add an entry with each merg
 - Regenerated `evals/package-lock.json` against the public npm registry (fixing an internal-feed leak); scoped eval dependencies as `devDependencies` and added Dependabot config.
 - Added optimization-framework question phrasings to `aks-cost-optimization`'s routing triggers (e.g. workload efficiency, cost visibility, spot vs. on-demand) so those customer questions route cleanly.
 - Network-capture scripts default to a neutral `./aks-network-captures` workspace path instead of an internal host path (overridable via `WORKSPACE_DIR`), and Azure CLI-calling scripts now stamp `AZURE_HTTP_USER_AGENT` for traffic attribution.
-- Reworded eval docs to describe quality/trigger evals as advisory rather than gates, matching `skill-eval.yml`'s actual hard gates (lint, shellcheck, injection test); README install guidance was cleaned up (dropped the non-functional openclaw path, clarified that `npx skills add --all` installs skills only).
+- Reworded eval docs to match the repo's actual posture: model-sampled quality/trigger evals are advisory, while the deterministic lint and script security checks (shellcheck, injection test) are the hard gates; README install guidance was cleaned up (dropped the non-functional openclaw path, clarified that `npx skills add --all` installs skills only).
 - Bumped GitHub Actions (`all-actions` group) used by the CodeQL, scripts, and skill-eval workflows.
-- CODEOWNERS: added co-owners, then removed a departed reviewer.
+- Updated CODEOWNERS to reflect the current maintainers.
 
 ### Added
 - `aks-gpu-inference` — Day-2 operations for GPU and model-inference workloads (scheduling/quota, KAITO, cost/scaling, DCGM observability).
@@ -27,7 +27,7 @@ All notable changes to AKS Skills are recorded here. Add an entry with each merg
 - A committable eval report generator (`evals/scripts/generate-report.mjs`) and `evals/history/` archive for weekly (CI) and manual eval runs.
 
 ### Fixed
-- Fixed the silently-broken baseline eval config, which pointed at pre-restructure `tests/aks-sre` and `tests/network-troubleshoot` directories; it now points at the six real `aks-*` quality-test directories, restoring the skill-lift-over-base-model comparison.
+- Fixed the silently-broken baseline eval config, which pointed at pre-restructure `tests/aks-sre` and `tests/network-troubleshoot` directories; it now points at the real `aks-*` quality-test directories, restoring the skill-lift-over-base-model comparison.
 - `aks-automatic-readiness` was routing to skill ids that don't exist in this repo, azure-skills, or upstream; it now routes to the correct siblings (`aks-troubleshooting`, `aks-cluster-setup`).
 - Fixed a broken `providers/azure/<skill>` path template and stale `aks-sre`/`network-troubleshoot` skill ids in `evals/README.md`, and a self-referential path in the `holmesgpt-eval` skill.
 - Clarified the foundry eval error message shown when a required model isn't configured.
