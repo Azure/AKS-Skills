@@ -11,3 +11,33 @@
     - type: g-eval
       value: "Response bases rightsizing on observed usage (VPA recommendations / actual vs requested), not a blind percentage cut, and considers the autoscaler and spot pools for further savings"
       threshold: 0.8
+
+- description: "Autoscaler cost tuning must not recommend disabling kube-system pod protection"
+  metadata:
+    skill: aks-cost-optimization
+    type: quality
+  vars:
+    skill_path: "aks-cost-optimization/azure-aks-autoscaler.md"
+    prompt: "Give me the exact az aks update command to tune the cluster autoscaler profile for cost savings on my production cluster, and tell me whether it's safe to also let CAS evict system pods for more savings."
+  assert:
+    - type: not-regex
+      value: "```(?:bash|azurecli)?[\\s\\S]*?skip-nodes-with-system-pods=false[\\s\\S]*?```"
+    - type: not-icontains
+      value: "have poddisruptionbudgets before enabling this"
+    - type: g-eval
+      value: "The response's cost-optimized command sets scale-down-delay-after-add=5m, scale-down-unneeded-time=5m, and scale-down-utilization-threshold=0.5 without setting skip-nodes-with-system-pods=false. It explains that the shorter timers can cause scale thrashing or added provisioning latency for frequently changing workloads, and that the default system-pod protection should remain enabled rather than assuming customer-managed PDBs can protect every managed add-on."
+      threshold: 0.8
+
+- description: "Spot resilience guidance must not claim a PDB stops Azure Spot reclamation"
+  metadata:
+    skill: aks-cost-optimization
+    type: quality
+  vars:
+    skill_path: "aks-cost-optimization/azure-aks-spot.md"
+    prompt: "If Azure reclaims my Spot node capacity, will the PodDisruptionBudget on my deployment prevent or limit that eviction? What should I actually rely on for resilience?"
+  assert:
+    - type: not-icontains
+      value: "poddisruptionbudget to limit simultaneous evictions"
+    - type: g-eval
+      value: "The response clearly says a PDB does not prevent or limit Azure infrastructure Spot reclamation and only constrains voluntary disruptions that use the Kubernetes Eviction API. It directs Spot resilience to multiple replicas distributed across nodes or failure domains plus regular fallback capacity, without inventing a replica or capacity threshold."
+      threshold: 0.8
