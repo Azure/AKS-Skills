@@ -50,3 +50,167 @@
     - type: g-eval
       value: "Response recognizes the pool is pinned to a snapshot node image and recommends upgrading to the latest supported image with 'az aks nodepool upgrade --node-image-only' (without --snapshot-id), and notes node images can't be downgraded. It should not suggest editing the version string arbitrarily."
       threshold: 0.8
+
+- description: "AKS vmssCSE exit 50 gets outbound-connectivity remediation only"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node provisioning failed: VMExtensionProvisioningError, vmssCSE command terminated with exit status=50 and ERR_OUTBOUND_CONN_FAIL. What is the documented fix?"
+  assert:
+    - type: icontains
+      value: "outbound"
+    - type: icontains
+      value: "mcr.microsoft.com"
+    - type: icontains
+      value: "vmextensionerror-outboundconnfail"
+    - type: g-eval
+      value: "Response maps AKS CSE exit 50 to failure obtaining node-provisioning packages over outbound connectivity, recommends testing mcr.microsoft.com:443 and inspecting firewall/proxy/NSG/UDR plus required AKS FQDN rules, and cites Microsoft Learn. It must not map exit 50 to API-server connectivity or API-server DNS lookup."
+      threshold: 0.8
+
+- description: "AKS vmssCSE exit 51 stays an API-server connectivity failure"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool scale failed with VMExtensionError_K8SAPIServerConnFail and vmssCSE exit status 51. What is the documented fix?"
+  assert:
+    - type: icontains
+      value: "443"
+    - type: icontains
+      value: "vmextensionerror-k8sapiserverconnfail"
+    - type: g-eval
+      value: "Response maps AKS CSE exit 51 to the node failing to connect to the AKS API-server endpoint on TCP 443, recommends testing that endpoint and checking NSG/UDR/firewall/proxy/authorized-IP/private-endpoint/TLS controls, and cites Microsoft Learn. It must not diagnose an API-server DNS lookup failure."
+      threshold: 0.8
+
+- description: "AKS vmssCSE exit 52 stays an API-server DNS lookup failure"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS create failed with VMExtensionError_K8SAPIServerDNSLookupFail and vmssCSE ExitCode 52. What is the documented fix?"
+  assert:
+    - type: icontains
+      value: "nslookup"
+    - type: icontains
+      value: "vmextensionerror-k8sapiserverdnslookupfail"
+    - type: g-eval
+      value: "Response maps AKS CSE exit 52 to failure resolving the cluster API-server FQDN, recommends testing that FQDN and checking DNS port 53 and forwarders, conditionally adding private-zone links/records only for a private cluster, and cites Microsoft Learn. It must not turn this into generic pod/CoreDNS troubleshooting or API-server TCP connectivity."
+      threshold: 0.8
+
+- description: "A bare VMExtensionProvisioningError does not get an invented root cause"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "My AKS deployment says only VMExtensionProvisioningError. What is the root cause?"
+  assert:
+    - type: g-eval
+      value: "Response says VMExtensionProvisioningError alone is only an outer wrapper and requests the nested CSE error or a vmssCSE/CSE exit code, full message, and AKS operation context before diagnosing. It must not arbitrarily choose outbound connectivity, API-server connectivity, or DNS as the cause."
+      threshold: 0.8
+
+- description: "SkuNotAvailable stays distinct from quota exhaustion"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool create failed with SkuNotAvailable for Standard_D8s_v5 in eastus zone 1. How should I respond?"
+  assert:
+    - type: icontains
+      value: "list-skus"
+    - type: not-icontains
+      value: "quota exceeded"
+    - type: icontains
+      value: "error-sku-not-available"
+    - type: g-eval
+      value: "Response explains the SKU is unavailable for this subscription and placement, checks restrictions with az vm list-skus, and offers another size, zone, region, or a SKU request. It must not claim this code proves quota exhaustion or that list-skus guarantees real-time capacity."
+      threshold: 0.8
+
+- description: "OverconstrainedAllocationRequest follows the named constraints"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool scale failed with OverconstrainedAllocationRequest. The message lists Standard_D4s_v5, zone 2, accelerated networking, and ephemeral OS disk. There is no proximity placement group."
+  assert:
+    - type: icontains
+      value: "zonalallocation-allocationfailed-error"
+    - type: g-eval
+      value: "Response explains that the listed combination is too restrictive and recommends relaxing a listed constraint or selecting another SKU, zone, region, or node pool. Because no proximity placement group is present, it must not assert that a PPG caused the failure."
+      threshold: 0.8
+
+- description: "AllocationFailed follows the full nested message"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool create failed with: AllocationFailed: The VM allocation failed due to an internal error. Please retry later or try deploying to a different location."
+  assert:
+    - type: icontains
+      value: "zonalallocation-allocationfailed-error"
+    - type: g-eval
+      value: "Response follows the documented internal-error message and recommends retrying later or another location. It must not recast this exact message as proven capacity or quota exhaustion, and it must not recommend upgrade-only maxUnavailable guidance for a create operation."
+      threshold: 0.8
+
+- description: "Capacity-form AllocationFailed uses placement and upgrade-specific guidance"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool upgrade returned AllocationFailed: We do not have sufficient capacity for the requested VM size in this region. What should I do?"
+  assert:
+    - type: icontains
+      value: "zonalallocation-allocationfailed-error"
+    - type: icontains
+      value: "maxUnavailable"
+    - type: g-eval
+      value: "Response identifies an explicit placement-capacity failure, recommends retrying or using another SKU, zone, region, or node pool, and may recommend maxUnavailable because this is an upgrade. It cites the Microsoft Learn AKS allocation guidance and does not claim quota exhaustion."
+      threshold: 0.8
+
+- description: "Capacity-form AllocationFailed avoids upgrade-only advice during scale"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "AKS node-pool scale returned AllocationFailed: We do not have sufficient capacity for the requested VM size in this region. This is not an upgrade."
+  assert:
+    - type: icontains
+      value: "zonalallocation-allocationfailed-error"
+    - type: not-icontains
+      value: "maxUnavailable"
+    - type: g-eval
+      value: "Response identifies an explicit placement-capacity failure and recommends retrying or using another SKU, zone, region, or node pool. Because this is a scale operation, it must not recommend upgrade-only maxUnavailable guidance or claim quota exhaustion."
+      threshold: 0.8
+
+- description: "A non-AKS exit 50 is outside the catalog boundary"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "A standalone Linux VM setup script exited 50. It is not an AKS VM, vmssCSE, or Kubernetes resource. Diagnose it."
+  assert:
+    - type: g-eval
+      value: "Response declines to apply the AKS CSE exit-50 mapping because the failure lacks AKS vmssCSE context and says this should not route to an AKS skill. It must not claim an AKS outbound-connectivity root cause."
+      threshold: 0.8
+
+- description: "An AKS workload exit 50 is not an AKS CSE exit 50"
+  metadata:
+    skill: aks-known-issues
+    type: quality
+  vars:
+    skill_path: "aks-known-issues/SKILL.md"
+    prompt: "An init container in an AKS pod exited 50. Node provisioning succeeded and there is no vmssCSE or VM extension error. Is this the documented outbound CSE failure?"
+  assert:
+    - type: g-eval
+      value: "Response says no: numeric exit 50 is deterministic only in AKS vmssCSE/CSE provisioning context. It routes this workload failure to aks-troubleshooting and must not claim the documented VMExtensionError_OutboundConnFail cause."
+      threshold: 0.8
