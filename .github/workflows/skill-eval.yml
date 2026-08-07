@@ -38,6 +38,10 @@ jobs:
         working-directory: evals
         run: npm run lint
 
+      - name: Lint self-test (CRLF checkout parity)
+        working-directory: evals
+        run: npm run lint:selftest
+
       - name: Cache promptfoo results
         uses: actions/cache@v6
         with:

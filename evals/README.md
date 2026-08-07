@@ -164,6 +164,12 @@ npm run eval:view         # compare scores side-by-side
 
 Compare g-eval scores between skill-loaded and baseline to quantify skill value. The baseline is not a pass/fail gate — it's a reporting metric.
 
+## holmesgpt-eval (internal harness — not a registered skill)
+
+`evals/holmesgpt-eval/` benchmarks the current agent against the public eval fixtures from [HolmesGPT](https://github.com/HolmesGPT/holmesgpt). It uses the SKILL.md format because the harness instructions are consumed by the agent at eval time — but it is **not part of the skill inventory**: `plugin.json` registers skills from `./skills/` only, the router never presents it, and `lint-skills.js` does not walk it. Any SKILL.md outside `skills/` is an internal fixture, per the [skill contract](../docs/skill-contract.md). (The files do still travel in the plugin payload — the marketplace packages the repo root — which is one more reason the fixture fetch below is pinned.)
+
+`holmesgpt-eval/scripts/fetch_fixtures.sh` fetches the fixtures pinned to an upstream commit. The pin is a supply-chain control, not just reproducibility: fixture cases contain `before_test`/`after_test` shell blocks that the harness executes. To move the pin, review the upstream diff and update `REF` in the script.
+
 ## CI/CD
 
 The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:

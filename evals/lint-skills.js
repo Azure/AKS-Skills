@@ -21,6 +21,14 @@ const path = require('path');
 
 const SKILLS_DIR = path.resolve(process.argv[2] || path.join(__dirname, '..', 'skills'));
 
+/**
+ * Read a text file with line endings normalized to LF. Windows checkouts
+ * materialize CRLF; lint must report the same results on every platform.
+ */
+function readText(filePath) {
+  return fs.readFileSync(filePath, 'utf-8').replace(/\r\n?/g, '\n');
+}
+
 let errors = [];
 let warnings = [];
 let skillCount = 0;
@@ -100,7 +108,7 @@ function checkScripts(skillDir) {
   const scripts = fs.readdirSync(scriptsDir).filter(f => f.endsWith('.sh') || f.endsWith('.py'));
   for (const script of scripts) {
     const filePath = path.join(scriptsDir, script);
-    const firstLine = fs.readFileSync(filePath, 'utf-8').split('\n')[0];
+    const firstLine = readText(filePath).split('\n')[0];
     if (!firstLine.startsWith('#!')) {
       addWarning(filePath, 'Script missing shebang (#!/bin/bash or #!/usr/bin/env python3)');
     }
@@ -182,7 +190,7 @@ for (const skillDir of skillFolders) {
   const folderName = path.basename(skillDir);
 
   // Read and parse
-  const content = fs.readFileSync(skillMdPath, 'utf-8');
+  const content = readText(skillMdPath);
   const frontMatter = parseFrontMatter(content);
 
   if (!frontMatter) {

@@ -27,6 +27,7 @@ Scripts get extra scrutiny because they run against customer clusters:
 ```bash
 cd evals && npm ci
 node lint-skills.js                                 # front matter, coverage, coaching lint
+node lint-skills.test.js                            # lint self-test (CRLF checkout parity)
 find ../skills -name '*.sh' -exec shellcheck -S warning {} +
 bash tests/aks-network-capture/injection.test.sh    # script security regression
 npm run eval && npm run eval:trigger                 # quality + routing (needs Azure OpenAI env)
