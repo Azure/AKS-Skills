@@ -43,10 +43,12 @@ See [references/inspektor-gadget.md](references/inspektor-gadget.md).
 
 Use the affected pod; do not create a test pod or change DNS, NetworkPolicy, NSG, route, or firewall configuration without explicit approval.
 
-### Ordered read-only evidence
+### Mandatory ordered read-only evidence
+
+A DNS diagnosis is incomplete until every step below is collected, or the inability to collect it is recorded. Do not skip resolver inputs, a query through kube-dns, direct upstream behavior, or the CoreDNS-to-upstream UDP/TCP 53 network path.
 
 ```bash
-# 1. Preserve the affected pod resolver inputs: nameserver, search, and options
+# 1. Preserve and explicitly inspect every nameserver, search suffix, and option
 kubectl exec <affected-pod> -n <ns> -- cat /etc/resolv.conf
 
 # 2. Check the kube-dns Service, backends, CoreDNS pods, logs, and config
@@ -60,24 +62,82 @@ kubectl logs -n kube-system -l k8s-app=kube-dns \
 kubectl get configmap coredns -n kube-system -o yaml
 kubectl get configmap -n kube-system
 
-# 3. From the affected pod, compare cluster DNS with each custom upstream
-# forwarder named in the CoreDNS configuration, if the pod already has a DNS
-# client. Do not install packages or create a test pod without approval.
+# 3. Prove CoreDNS query health through the kube-dns ClusterIP, then compare
+# direct UDP and TCP 53 behavior for every configured upstream forwarder.
+# Use clients already present in the affected pod; do not install packages.
 kubectl exec <affected-pod> -n <ns> -- \
   nslookup <failing-fqdn> <kube-dns-cluster-ip>
 kubectl exec <affected-pod> -n <ns> -- \
-  nslookup <failing-fqdn> <custom-forwarder-ip>
+  dig +notcp +time=<timeout-seconds> +tries=<attempt-count> \
+  @<custom-forwarder-ip> <failing-fqdn>
+kubectl exec <affected-pod> -n <ns> -- \
+  dig +tcp +time=<timeout-seconds> +tries=<attempt-count> \
+  @<custom-forwarder-ip> <failing-fqdn>
 
-# 4. Preserve NetworkPolicy evidence for both UDP and TCP 53
+# 4. Preserve policy plus the node-NIC NSG/route path used by each CoreDNS pod
 kubectl get networkpolicy -n <ns> -o yaml
 kubectl get networkpolicy -n kube-system -o yaml
+kubectl get pods -n kube-system -l k8s-app=kube-dns \
+  -o custom-columns='POD:.metadata.name,POD_IP:.status.podIP,NODE:.spec.nodeName'
+NODE_RESOURCE_GROUP=$(az aks show \
+  --resource-group <cluster-resource-group> \
+  --name <cluster-name> \
+  --query nodeResourceGroup -o tsv)
+COREDNS_PROVIDER_ID=$(kubectl get node <coredns-node> \
+  -o jsonpath='{.spec.providerID}')
+COREDNS_POOL=$(kubectl get node <coredns-node> \
+  -o jsonpath='{.metadata.labels.agentpool}')
+COREDNS_VMSS_NAME=$(printf '%s\n' "$COREDNS_PROVIDER_ID" |
+  awk -F'/virtualMachineScaleSets/' '{print $2}' | cut -d/ -f1)
+COREDNS_INSTANCE_ID=${COREDNS_PROVIDER_ID##*/}
+COREDNS_NODE_NIC_ID=$(az vmss nic list-vm-nics \
+  --resource-group "$NODE_RESOURCE_GROUP" \
+  --vmss-name "$COREDNS_VMSS_NAME" \
+  --instance-id "$COREDNS_INSTANCE_ID" \
+  --query '[0].id' -o tsv)
+COREDNS_NODE_SUBNET_ID=$(az network nic show \
+  --ids "$COREDNS_NODE_NIC_ID" \
+  --query 'ipConfigurations[0].subnet.id' -o tsv)
+COREDNS_POD_SUBNET_ID=$(az aks nodepool show \
+  --resource-group <cluster-resource-group> \
+  --cluster-name <cluster-name> \
+  --name "$COREDNS_POOL" \
+  --query podSubnetId -o tsv)
+COREDNS_SOURCE_SUBNET_ID=${COREDNS_POD_SUBNET_ID:-$COREDNS_NODE_SUBNET_ID}
+
+# Effective node-NIC evidence, then explicit source-subnet NSG and UDR evidence
 az network nic list-effective-nsg \
-  --ids <affected-node-nic-id> -o json
+  --ids "$COREDNS_NODE_NIC_ID" -o json
 az network nic show-effective-route-table \
-  --ids <affected-node-nic-id> -o table
+  --ids "$COREDNS_NODE_NIC_ID" -o table
+COREDNS_SUBNET_NSG_ID=$(az network vnet subnet show \
+  --ids "$COREDNS_SOURCE_SUBNET_ID" \
+  --query networkSecurityGroup.id -o tsv)
+az network nsg show \
+  --ids "$COREDNS_SUBNET_NSG_ID" \
+  --query '{customOutbound:securityRules[?direction==`Outbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
+  -o json
+COREDNS_ROUTE_TABLE_ID=$(az network vnet subnet show \
+  --ids "$COREDNS_SOURCE_SUBNET_ID" \
+  --query routeTable.id -o tsv)
+az network route-table show \
+  --ids "$COREDNS_ROUTE_TABLE_ID" \
+  --query 'routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}' \
+  -o table
 ```
 
-Derive `<affected-node-nic-id>` from the affected pod and node as shown in [AKS to an External Azure Service](#aks-to-an-external-azure-service). Evaluate effective NSG rules for both UDP and TCP destination port 53. If the selected DNS route has a `VirtualAppliance` next hop, identify whether it is Azure Firewall or a custom NVA before inspecting that present firewall's DNS rules.
+Repeat these checks for each node hosting a CoreDNS pod. For Azure CNI Pod Subnet, `COREDNS_SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the CoreDNS node NIC subnet. If either NSG or route-table ID is empty, record that absence instead of running its dependent `show` command. Evaluate outbound rules and routes from the CoreDNS pod/node source to every configured upstream on both UDP and TCP destination port 53.
+
+If the selected route has a `VirtualAppliance` next hop, run the exact policy or classic network-rule collection commands in [Mandatory Firewall or NVA branch when traversed](#3-mandatory-firewall-or-nva-branch-when-traversed), then query the matching DNS decisions:
+
+```bash
+az monitor log-analytics query \
+  --workspace <log-analytics-workspace-id> \
+  --timespan <incident-start-utc>/<incident-end-utc> \
+  --analytics-query "union isfuzzy=true AZFWNetworkRule, AzureDiagnostics | where _ResourceId =~ '<firewall-resource-id>' | where (SourceIp in ('<coredns-pod-ip>','<coredns-node-ip>') and DestinationIp == '<custom-forwarder-ip>' and DestinationPort == 53 and Protocol in ('UDP','TCP')) or (Category == 'AzureFirewallNetworkRule' and (msg_s has '<coredns-pod-ip>' or msg_s has '<coredns-node-ip>') and msg_s has '<custom-forwarder-ip>' and msg_s has '53' and (msg_s has 'UDP' or msg_s has 'TCP')) | project TimeGenerated,Category,Action,Protocol,SourceIp,DestinationIp,DestinationPort,RuleCollection,Rule,msg_s"
+```
+
+For a custom NVA, collect equivalent network-rule and log evidence filtered to the same CoreDNS source, upstream destination, incident window, and UDP/TCP 53.
 
 If CoreDNS imports a custom ConfigMap, retrieve the named ConfigMap shown by the inventory before evaluating its forwarding rules. A successful direct query to a custom forwarder with a failed query through kube-dns points to CoreDNS configuration or service-path evidence; failure to reach the forwarder points to routing, NSG, firewall, or NetworkPolicy evidence.
 
