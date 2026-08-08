@@ -191,6 +191,9 @@ case "${KUBECTL_MODE:-manifest}:$1:$2" in
     ;;
   retrieval-scope:exec:*)
     printf '%s\n' "$*" >> "$SCOPE_LOG"
+    selected_dir="${NODE_CAPTURE_ROOT}/${SELECTED_RUN_ID}"
+    rm -f "${selected_dir}/${SELECTED_BUNDLE}" "${selected_dir}/${SELECTED_PCAP}"
+    rmdir "$selected_dir"
     ;;
   retrieval-scope:delete:*)
     printf '%s\n' "$*" >> "$SCOPE_LOG"
@@ -247,6 +250,7 @@ assert_not_contains "no privileged container" "privileged: true" "$MANIFEST"
 assert_not_contains "no node-root mount" "mountPath: /host" "$MANIFEST"
 assert_not_contains "no chroot command" "chroot" "$MANIFEST"
 assert_not_contains "no interactive flags" "-it" "$MANIFEST"
+assert_not_contains "capture runner does not require setuid capabilities" "-Z root" "$RUN_SCRIPT"
 
 filter_count="$(grep -Fc 'udp port 53' "$MANIFEST")"
 if [ "$filter_count" -eq 1 ]; then
@@ -509,29 +513,67 @@ assert_contains "capture Jobs are deleted after retrieval failure" \
 assert_not_contains "retrieval cleanup does not use a capture-wide Job selector" \
   "delete jobs -n default -l capture-id=cleanup-test" "$DELETE_LOG"
 assert_contains "retrieval mounts only the requested capture directory" \
-  "path: /var/log/aks-network-captures/cleanup-test/20260807-120000-111111111111111111111111" "$RETRIEVAL_MANIFEST"
+  "path: /var/log/aks-network-captures/cleanup-test" "$RETRIEVAL_MANIFEST"
 
 SCOPE_LOG="$TEST_ROOT/retrieval-scope.log"
 SCOPE_MANIFEST="$TEST_ROOT/retrieval-scope.yaml"
 SCOPE_WORKSPACE="$TEST_ROOT/scope-workspace"
+SELECTED_RUN_ID="20260807-120000-222222222222222222222222"
+SIBLING_RUN_ID="20260807-120001-333333333333333333333333"
+SELECTED_BUNDLE="capture-scope-test-node-one-${SELECTED_RUN_ID}.tar.gz"
+SELECTED_PCAP="capture-scope-test-node-one-${SELECTED_RUN_ID}.pcap"
+NODE_CAPTURE_ROOT="$TEST_ROOT/node-captures/scope-test"
+mkdir -p "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID" "$NODE_CAPTURE_ROOT/$SIBLING_RUN_ID"
+printf 'selected-bundle' > "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID/$SELECTED_BUNDLE"
+printf 'selected-pcap' > "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID/$SELECTED_PCAP"
+printf 'sibling-bundle' > "$NODE_CAPTURE_ROOT/$SIBLING_RUN_ID/sibling.tar.gz"
+export NODE_CAPTURE_ROOT SELECTED_RUN_ID SELECTED_BUNDLE SELECTED_PCAP
 if KUBECTL_MODE=retrieval-scope SCOPE_LOG="$SCOPE_LOG" RETRIEVAL_MANIFEST="$SCOPE_MANIFEST" \
   PATH="$MOCK_BIN:$PATH" "$RETRIEVE_SCRIPT" --name scope-test \
-  --run-id 20260807-120000-222222222222222222222222 \
+  --run-id "$SELECTED_RUN_ID" \
   --workspace-dir "$SCOPE_WORKSPACE" >/dev/null 2>&1; then
   pass "scoped retrieval succeeds with the exact current bundle"
 else
   fail "scoped retrieval succeeds with the exact current bundle"
 fi
 assert_contains "retrieval copies only the requested run bundle" \
-  "cp -n default retrieve-scope-test-node-one-def34:/capture-output/capture-scope-test-node-one-20260807-120000-222222222222222222222222.tar.gz" "$SCOPE_LOG"
+  "cp -n default retrieve-scope-test-node-one-def34:/capture-root/${SELECTED_RUN_ID}/${SELECTED_BUNDLE}" "$SCOPE_LOG"
 assert_not_contains "retrieval does not copy the shared capture directory" \
-  ":/capture-output/." "$SCOPE_LOG"
+  ":/capture-root/." "$SCOPE_LOG"
 assert_contains "retrieval deletes only the requested run artifacts" \
-  "capture-scope-test-node-one-20260807-120000-222222222222222222222222.tar.gz capture-scope-test-node-one-20260807-120000-222222222222222222222222.pcap" "$SCOPE_LOG"
+  "/capture-root/${SELECTED_RUN_ID} ${SELECTED_BUNDLE} ${SELECTED_PCAP}" "$SCOPE_LOG"
 assert_not_contains "retrieval does not touch a stale capture id" "stale-capture" "$SCOPE_LOG"
 assert_not_contains "retrieval cleanup uses no artifact wildcard" "*" "$SCOPE_LOG"
 assert_contains "scoped retrieval mounts only its capture id" \
-  "path: /var/log/aks-network-captures/scope-test/20260807-120000-222222222222222222222222" "$SCOPE_MANIFEST"
+  "path: /var/log/aks-network-captures/scope-test" "$SCOPE_MANIFEST"
+if [ ! -e "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID" ]; then
+  pass "retrieval removes the exact selected run directory"
+else
+  fail "retrieval removes the exact selected run directory"
+fi
+if [ -s "$NODE_CAPTURE_ROOT/$SIBLING_RUN_ID/sibling.tar.gz" ]; then
+  pass "retrieval preserves sibling run directories and files"
+else
+  fail "retrieval preserves sibling run directories and files"
+fi
+
+mkdir -p "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID"
+printf 'selected-bundle' > "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID/$SELECTED_BUNDLE"
+printf 'selected-pcap' > "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID/$SELECTED_PCAP"
+printf 'unexpected' > "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID/unexpected.txt"
+if KUBECTL_MODE=retrieval-scope SCOPE_LOG="$SCOPE_LOG" RETRIEVAL_MANIFEST="$SCOPE_MANIFEST" \
+  PATH="$MOCK_BIN:$PATH" "$RETRIEVE_SCRIPT" --name scope-test \
+  --run-id "$SELECTED_RUN_ID" \
+  --workspace-dir "$TEST_ROOT/unexpected-workspace" >/dev/null 2>&1; then
+  fail "unexpected run artifacts fail cleanup closed"
+else
+  pass "unexpected run artifacts fail cleanup closed"
+fi
+if [ -s "$NODE_CAPTURE_ROOT/$SELECTED_RUN_ID/unexpected.txt" ]; then
+  pass "fail-closed cleanup preserves unexpected run artifacts"
+else
+  fail "fail-closed cleanup preserves unexpected run artifacts"
+fi
 
 if invalid_run_out="$(KUBECTL_MODE=retrieval-ambiguous PATH="$MOCK_BIN:$PATH" \
   "$RETRIEVE_SCRIPT" --name reused-name --run-id malformed 2>&1)"; then

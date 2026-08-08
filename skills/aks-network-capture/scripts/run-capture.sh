@@ -49,7 +49,7 @@ if [ -n "$PCAP_FILTER" ]; then
   }
 fi
 
-set -- tcpdump -i any -w "$PCAP_PATH" -Z root
+set -- tcpdump -i any -w "$PCAP_PATH"
 [ "$PACKET_SIZE" -gt 0 ] && set -- "$@" -s "$PACKET_SIZE"
 [ -n "$PCAP_FILTER" ] && set -- "$@" "$PCAP_FILTER"
 

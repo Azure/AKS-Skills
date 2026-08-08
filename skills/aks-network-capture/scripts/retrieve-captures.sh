@@ -220,11 +220,11 @@ spec:
     command: ["sh", "-c", "sleep 300"]
     volumeMounts:
     - name: capture-output
-      mountPath: /capture-output
+      mountPath: /capture-root
   volumes:
   - name: capture-output
     hostPath:
-      path: ${OUTPUT_PATH}/${CAPTURE_NAME}/${RETRIEVE_RUN_ID}
+      path: ${OUTPUT_PATH}/${CAPTURE_NAME}
       type: Directory
 EOF
 )"
@@ -236,15 +236,16 @@ EOF
   
   echo "  Copying files from node to workspace..."
   BUNDLE_NAME="capture-${CAPTURE_NAME}-${NODE_NAME}-${RUN_ID}.tar.gz"
-  kubectl cp -n "$NAMESPACE" "${TEMP_POD_NAME}:/capture-output/${BUNDLE_NAME}" \
+  RUN_DIR="/capture-root/${RUN_ID}"
+  kubectl cp -n "$NAMESPACE" "${TEMP_POD_NAME}:${RUN_DIR}/${BUNDLE_NAME}" \
     "${CAPTURE_OUTPUT_DIR}/${BUNDLE_NAME}" -c retrieve
   [ -s "${CAPTURE_OUTPUT_DIR}/${BUNDLE_NAME}" ] \
     || die "expected non-empty capture bundle $BUNDLE_NAME was not copied"
   
-  echo "  Cleaning up capture files on node..."
+  echo "  Cleaning up capture files and run directory on node..."
   kubectl exec -n "$NAMESPACE" "${TEMP_POD_NAME}" -c retrieve -- sh -c \
-    'rm -f "/capture-output/$1" "/capture-output/$2"' sh \
-    "$BUNDLE_NAME" "capture-${CAPTURE_NAME}-${NODE_NAME}-${RUN_ID}.pcap"
+    'rm -f "$1/$2" "$1/$3" && rmdir "$1"' sh \
+    "$RUN_DIR" "$BUNDLE_NAME" "capture-${CAPTURE_NAME}-${NODE_NAME}-${RUN_ID}.pcap"
   
   echo "  Deleting retrieval pod..."
   kubectl delete pod "${TEMP_POD_NAME}" -n "$NAMESPACE" --ignore-not-found

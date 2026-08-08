@@ -27,7 +27,7 @@ Packet capture requires elevated node access, so these scripts are built to be s
 - **Scoped access, not `privileged`.** Capture pods use only `NET_ADMIN` + `NET_RAW` with `hostNetwork`. They mount only `/var/log/aks-network-captures` from the node, never the node root, and never enable `hostPID`.
 - **Pinned images.** Capture Jobs use Microsoft Retina's network-tool image from Microsoft Container Registry, pinned by digest; no Docker Hub, no `:latest`.
 
-> Not yet validated on a live cluster in CI. Before relying on distributed capture in production, run the live-cluster smoke test — `evals/tests/aks-network-capture/smoke-live-cluster.sh` — against a throwaway AKS cluster you control (it creates a short capture, retrieves it, and asserts a non-empty pcap came back).
+> The live-cluster smoke test is manual and is not run in CI. Before relying on distributed capture in production, run `evals/tests/aks-network-capture/smoke-live-cluster.sh` against an AKS cluster you control; it uses an isolated namespace, generates bounded same-node DNS traffic, retrieves the exact run, decodes packet records, and verifies Kubernetes plus host-artifact cleanup.
 
 ## Capture workflow
 
