@@ -11,5 +11,6 @@
   "license": "MIT",
   "keywords": ["aks", "kubernetes", "azure", "troubleshooting", "gpu", "inference", "cost", "devops"],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/claude-hooks.json"
 }
