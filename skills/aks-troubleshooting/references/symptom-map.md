@@ -21,13 +21,28 @@ Common causes: insufficient CPU/memory, node taints without tolerations, PVC pen
 ## Pod CrashLoopBackOff
 
 ```bash
-kubectl logs <pod> -n <ns> --all-containers
-kubectl logs <pod> -n <ns> --previous --all-containers
-kubectl describe pod <pod> -n <ns>         # Check exit codes and restart count
-kubectl get events -n <ns> --field-selector involvedObject.name=<pod>
+# Preserve the terminated container output before another restart replaces it
+kubectl logs <pod> -n <ns> --previous --all-containers=true --prefix
+
+# Then collect current output from every app and init container
+kubectl logs <pod> -n <ns> --all-containers=true --prefix
+
+# Preserve pod state, termination reason/exit code, restart count, and events
+kubectl describe pod <pod> -n <ns>
+kubectl get pod <pod> -n <ns> \
+  -o jsonpath='{range .status.initContainerStatuses[*]}init/{.name}{"\t"}{.restartCount}{"\t"}{.lastState.terminated.reason}{"\t"}{.lastState.terminated.exitCode}{"\n"}{end}{range .status.containerStatuses[*]}container/{.name}{"\t"}{.restartCount}{"\t"}{.lastState.terminated.reason}{"\t"}{.lastState.terminated.exitCode}{"\n"}{end}'
+kubectl get events -n <ns> \
+  --field-selector involvedObject.kind=Pod,involvedObject.name=<pod> \
+  --sort-by='.metadata.creationTimestamp'
 ```
 
-Common causes: missing env var / secret, config file not mounted, OOM (check exit code 137), dependency not reachable, liveness probe killing healthy startup.
+Distinguish the evidence before choosing a fix:
+
+- **Missing environment or Secret injection:** pod events report a missing Secret/key or `CreateContainerConfigError`, or the container log reports a required environment value is absent.
+- **Unmounted ConfigMap or configuration file:** pod events report `FailedMount`/`MountVolume.SetUp`, or the process starts and reports that the expected file path is absent. This is not the same as a missing environment value.
+- **OOM termination:** the terminated state reports `OOMKilled` or exit code `137`; compare limits and memory evidence.
+- **Unreachable dependency:** the application starts far enough to log DNS, timeout, refused-connection, TLS, or authentication errors for a named dependency.
+- **Probe-killed startup:** pod events show repeated startup/liveness probe failures and the termination/restart timeline follows those failures; distinguish a slow or invalid startup probe from an application crash.
 
 ---
 
