@@ -1,63 +1,59 @@
 # Node & Cluster Troubleshooting
 
-## Node NotReady
-
-### Mandatory minimum evidence
-
-A Node NotReady diagnosis is incomplete until this entire read-only block is collected, or the inability to collect an item is recorded. Start here before requesting privileged node access:
+## Node NotReady — executable evidence first
 
 ```bash
-# Kubernetes state, conditions, and node-scoped events
-kubectl get node <node-name> -o wide
-kubectl describe node <node-name>
-kubectl get node <node-name> \
+AKS_RG="<cluster-resource-group>"
+AKS_NAME="<cluster-name>"
+NODE="<node-name>"
+
+# Kubernetes description, conditions, and node-scoped events
+kubectl describe node "$NODE"
+kubectl get node "$NODE" \
   -o jsonpath='{range .status.conditions[*]}{.lastTransitionTime}{"\t"}{.type}{"\t"}{.status}{"\t"}{.reason}{"\t"}{.message}{"\n"}{end}'
 kubectl get events --all-namespaces \
-  --field-selector involvedObject.kind=Node,involvedObject.name=<node-name> \
+  --field-selector involvedObject.kind=Node,involvedObject.name="$NODE" \
   --sort-by='.metadata.creationTimestamp'
 
-# Identify the AKS node resource group, agent pool, VMSS, and instance
-NODE_RESOURCE_GROUP=$(az aks show \
-  --resource-group <cluster-resource-group> \
-  --name <cluster-name> \
+# AKS node resource group and Kubernetes node to VMSS instance mapping
+NODE_RG=$(az aks show \
+  --resource-group "$AKS_RG" \
+  --name "$AKS_NAME" \
   --query nodeResourceGroup -o tsv)
-AGENT_POOL=$(kubectl get node <node-name> \
+AGENT_POOL=$(kubectl get node "$NODE" \
   -o jsonpath='{.metadata.labels.agentpool}')
-PROVIDER_ID=$(kubectl get node <node-name> \
+PROVIDER_ID=$(kubectl get node "$NODE" \
   -o jsonpath='{.spec.providerID}')
-VMSS_NAME=$(printf '%s\n' "$PROVIDER_ID" |
+VMSS=$(printf '%s\n' "$PROVIDER_ID" |
   awk -F'/virtualMachineScaleSets/' '{print $2}' | cut -d/ -f1)
 INSTANCE_ID=${PROVIDER_ID##*/}
 
 printf 'nodeResourceGroup=%s\nagentPool=%s\nvmss=%s\ninstanceId=%s\n' \
-  "$NODE_RESOURCE_GROUP" "$AGENT_POOL" "$VMSS_NAME" "$INSTANCE_ID"
+  "$NODE_RG" "$AGENT_POOL" "$VMSS" "$INSTANCE_ID"
 
-# Confirm the pool and instance state
+# AKS pool state
 az aks nodepool show \
-  --resource-group <cluster-resource-group> \
-  --cluster-name <cluster-name> \
+  --resource-group "$AKS_RG" \
+  --cluster-name "$AKS_NAME" \
   --name "$AGENT_POOL" \
   --query '{provisioningState:provisioningState,powerState:powerState.code,nodeImageVersion:nodeImageVersion,orchestratorVersion:orchestratorVersion}' \
   -o yaml
-az vmss list-instances \
-  --resource-group "$NODE_RESOURCE_GROUP" \
-  --name "$VMSS_NAME" \
-  --query "[?instanceId=='$INSTANCE_ID'].{instanceId:instanceId,provisioningState:provisioningState,latestModelApplied:latestModelApplied}" \
-  -o table
 
-# Preserve the complete VMSS instance view, then isolate extension status
+# Exact VMSS instance view and extension statuses
 az vmss get-instance-view \
-  --resource-group "$NODE_RESOURCE_GROUP" \
-  --name "$VMSS_NAME" \
+  --resource-group "$NODE_RG" \
+  --name "$VMSS" \
   --instance-id "$INSTANCE_ID" \
   -o json
 az vmss get-instance-view \
-  --resource-group "$NODE_RESOURCE_GROUP" \
-  --name "$VMSS_NAME" \
+  --resource-group "$NODE_RG" \
+  --name "$VMSS" \
   --instance-id "$INSTANCE_ID" \
-  --query '{instanceStatuses:statuses,extensions:extensions[].{name:name,statuses:statuses,substatuses:substatuses}}' \
+  --query 'extensions[].{name:name,statuses:statuses,substatuses:substatuses}' \
   -o json
 ```
+
+This block is the minimum Node NotReady evidence. Collect it before narrowing the failure to kubelet, host, provisioning, pressure, or network causes.
 
 ### Privileged and service mutation boundary
 

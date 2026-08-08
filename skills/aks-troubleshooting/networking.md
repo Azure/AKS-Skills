@@ -163,22 +163,30 @@ See [references/inspektor-gadget.md](references/inspektor-gadget.md).
 
 ## AKS to an External Azure Service
 
-Use this path when a pod cannot reach Azure SQL or another Azure service. A diagnosis is incomplete until the source VMSS instance NIC, effective and subnet-associated NSGs, effective and configured routes, endpoint mode/DNS/reachability, and any present Firewall/NVA evidence are collected or marked unavailable.
-
-### 1. Mandatory source and subnet identity
+### Executable evidence first
 
 ```bash
+AKS_RG="<cluster-resource-group>"
+AKS_NAME="<cluster-name>"
+NS="<namespace>"
+POD="<affected-pod>"
+SQL_RG="<sql-resource-group>"
+SQL_SERVER="<sql-server-name>"
+PRIVATE_DNS_RG="<private-dns-resource-group>"
+INCIDENT_START="<incident-start-utc>"
+INCIDENT_END="<incident-end-utc>"
+
+# AKS network model and source VMSS instance NIC/subnet
 az aks show \
-  --resource-group <cluster-resource-group> \
-  --name <cluster-name> \
+  --resource-group "$AKS_RG" \
+  --name "$AKS_NAME" \
   --query '{nodeResourceGroup:nodeResourceGroup,networkPlugin:networkProfile.networkPlugin,networkPluginMode:networkProfile.networkPluginMode,networkPolicy:networkProfile.networkPolicy,networkDataplane:networkProfile.networkDataplane,outboundType:networkProfile.outboundType}' \
   -o yaml
-
 NODE_RESOURCE_GROUP=$(az aks show \
-  --resource-group <cluster-resource-group> \
-  --name <cluster-name> \
+  --resource-group "$AKS_RG" \
+  --name "$AKS_NAME" \
   --query nodeResourceGroup -o tsv)
-SOURCE_NODE=$(kubectl get pod <affected-pod> -n <ns> \
+SOURCE_NODE=$(kubectl get pod "$POD" -n "$NS" \
   -o jsonpath='{.spec.nodeName}')
 SOURCE_POOL=$(kubectl get node "$SOURCE_NODE" \
   -o jsonpath='{.metadata.labels.agentpool}')
@@ -195,149 +203,125 @@ NODE_NIC_ID=$(az vmss nic list-vm-nics \
 NODE_SUBNET_ID=$(az network nic show --ids "$NODE_NIC_ID" \
   --query 'ipConfigurations[0].subnet.id' -o tsv)
 POD_SUBNET_ID=$(az aks nodepool show \
-  --resource-group <cluster-resource-group> \
-  --cluster-name <cluster-name> \
+  --resource-group "$AKS_RG" \
+  --cluster-name "$AKS_NAME" \
   --name "$SOURCE_POOL" \
   --query podSubnetId -o tsv)
 SOURCE_SUBNET_ID=${POD_SUBNET_ID:-$NODE_SUBNET_ID}
-```
 
-For Azure CNI Pod Subnet, `SOURCE_SUBNET_ID` is the pod subnet. Otherwise it is the source node NIC subnet.
-
-### 2. Mandatory NSG, route-table, and next-hop evidence
-
-```bash
-# Effective rules applied to the source node NIC
+# Effective NIC rules/routes and explicit subnet NSG inbound/outbound rules
 az network nic list-effective-nsg \
   --ids "$NODE_NIC_ID" -o json
-
-# Explicit inbound and outbound rules on the source subnet-associated NSG
 SUBNET_NSG_ID=$(az network vnet subnet show \
   --ids "$SOURCE_SUBNET_ID" \
   --query networkSecurityGroup.id -o tsv)
-az network nsg show \
-  --ids "$SUBNET_NSG_ID" \
-  --query '{customInbound:securityRules[?direction==`Inbound`],customOutbound:securityRules[?direction==`Outbound`],defaultInbound:defaultSecurityRules[?direction==`Inbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
-  -o json
-
-# Effective routes plus configured UDRs and next-hop values
+if [ -n "$SUBNET_NSG_ID" ]; then
+  az network nsg show \
+    --ids "$SUBNET_NSG_ID" \
+    --query '{customInbound:securityRules[?direction==`Inbound`],customOutbound:securityRules[?direction==`Outbound`],defaultInbound:defaultSecurityRules[?direction==`Inbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
+    -o json
+fi
 az network nic show-effective-route-table \
   --ids "$NODE_NIC_ID" -o table
 ROUTE_TABLE_ID=$(az network vnet subnet show \
   --ids "$SOURCE_SUBNET_ID" \
   --query routeTable.id -o tsv)
-az network route-table show \
-  --ids "$ROUTE_TABLE_ID" \
-  --query '{disableBgpRoutePropagation:disableBgpRoutePropagation,routes:routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}}' \
-  -o json
-```
+if [ -n "$ROUTE_TABLE_ID" ]; then
+  az network route-table show \
+    --ids "$ROUTE_TABLE_ID" \
+    --query '{disableBgpRoutePropagation:disableBgpRoutePropagation,routes:routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}}' \
+    -o json
+fi
 
-If the source subnet has no associated NSG or route table, the corresponding ID is empty; record that absence instead of running the dependent `show` command. Evaluate the destination IP and port against both effective rules and explicit subnet inbound/outbound rules. In the route output, record the selected prefix, `nextHopType`, and `nextHopIpAddress`. `VirtualAppliance` identifies a UDR to an Azure Firewall or NVA; confirm the next-hop owner before inspecting its rules. `Internet`, `VirtualNetwork`, and `InterfaceEndpoint` represent different paths and must not be diagnosed as firewall paths.
+# Workload DNS/TCP evidence; use nc only when already present
+kubectl exec "$POD" -n "$NS" -- \
+  nslookup "$SQL_SERVER.database.windows.net"
+kubectl exec "$POD" -n "$NS" -- \
+  nc -vz -w <timeout-seconds> "$SQL_SERVER.database.windows.net" 1433
 
-### 3. Mandatory Firewall or NVA branch when traversed
-
-Inspect Azure Firewall only when the selected effective/UDR next hop identifies a deployed Azure Firewall:
-
-```bash
-az network firewall show \
-  --resource-group <firewall-resource-group> \
-  --name <firewall-name> \
-  --query '{provisioningState:provisioningState,firewallPolicy:firewallPolicy.id,privateIPs:ipConfigurations[].privateIPAddress}' \
-  -o yaml
-```
-
-If `firewallPolicy.id` is present, inspect the policy and each rule collection group:
-
-```bash
-az network firewall policy show \
-  --ids <firewall-policy-resource-id> -o yaml
-az network firewall policy rule-collection-group list \
-  --resource-group <firewall-policy-resource-group> \
-  --policy-name <firewall-policy-name> -o table
-az network firewall policy rule-collection-group show \
-  --resource-group <firewall-policy-resource-group> \
-  --policy-name <firewall-policy-name> \
-  --name <rule-collection-group-name> -o json
-```
-
-If `firewallPolicy.id` is absent, inspect the classic collections on that firewall:
-
-```bash
-az network firewall network-rule collection list \
-  --resource-group <firewall-resource-group> \
-  --firewall-name <firewall-name> -o json
-az network firewall application-rule collection list \
-  --resource-group <firewall-resource-group> \
-  --firewall-name <firewall-name> -o json
-az network firewall nat-rule collection list \
-  --resource-group <firewall-resource-group> \
-  --firewall-name <firewall-name> -o json
-```
-
-Preserve the Azure Firewall diagnostic destination and matching network/application rule decisions for the incident window:
-
-```bash
-FIREWALL_ID=$(az network firewall show \
-  --resource-group <firewall-resource-group> \
-  --name <firewall-name> --query id -o tsv)
-az monitor diagnostic-settings list \
-  --resource "$FIREWALL_ID" -o json
-az monitor log-analytics query \
-  --workspace <log-analytics-workspace-id> \
-  --timespan <incident-start-utc>/<incident-end-utc> \
-  --analytics-query "union isfuzzy=true AZFWNetworkRule, AZFWApplicationRule, AzureDiagnostics | where _ResourceId =~ '$FIREWALL_ID' | where isempty(Category) or Category in ('AzureFirewallNetworkRule','AzureFirewallApplicationRule') | project TimeGenerated,Category,Action,RuleCollection,Rule,msg_s,SourceIp,DestinationIp,DestinationPort,Fqdn"
-```
-
-For a custom NVA, preserve its selected route, health, vendor-specific network/application rule collections, and logs for the same incident window rather than substituting Azure Firewall commands.
-
-### 4. Mandatory endpoint mode, configuration, DNS, and reachability
-
-Always connect by `<server>.database.windows.net`; do not pin an Azure SQL gateway IP.
-
-```bash
-# DNS answer observed by the affected workload
-kubectl exec <affected-pod> -n <ns> -- \
-  nslookup <server>.database.windows.net
-kubectl exec <affected-pod> -n <ns> -- \
-  nc -vz -w <timeout-seconds> <server>.database.windows.net 1433
-
-# Public endpoint evidence
+# Azure SQL public endpoint, service endpoint/VNet rule, private endpoint/DNS
 az sql server show \
-  --resource-group <sql-resource-group> \
-  --name <server> \
+  --resource-group "$SQL_RG" \
+  --name "$SQL_SERVER" \
   --query '{publicNetworkAccess:publicNetworkAccess,minimalTlsVersion:minimalTlsVersion}' \
   -o yaml
 az sql server firewall-rule list \
-  --resource-group <sql-resource-group> \
-  --server <server> -o table
-
-# Service endpoint evidence
+  --resource-group "$SQL_RG" \
+  --server "$SQL_SERVER" -o table
 az network vnet subnet show \
   --ids "$SOURCE_SUBNET_ID" \
   --query '{serviceEndpoints:serviceEndpoints,routeTable:routeTable.id,networkSecurityGroup:networkSecurityGroup.id}' \
   -o yaml
 az sql server vnet-rule list \
-  --resource-group <sql-resource-group> \
-  --server <server> -o table
-
-# Private endpoint and private DNS evidence
+  --resource-group "$SQL_RG" \
+  --server "$SQL_SERVER" -o table
 SQL_SERVER_ID=$(az sql server show \
-  --resource-group <sql-resource-group> \
-  --name <server> --query id -o tsv)
+  --resource-group "$SQL_RG" \
+  --name "$SQL_SERVER" --query id -o tsv)
 az network private-endpoint-connection list \
   --id "$SQL_SERVER_ID" -o table
 az network private-dns zone show \
-  --resource-group <private-dns-resource-group> \
+  --resource-group "$PRIVATE_DNS_RG" \
   --name privatelink.database.windows.net -o yaml
 az network private-dns record-set a list \
-  --resource-group <private-dns-resource-group> \
+  --resource-group "$PRIVATE_DNS_RG" \
   --zone-name privatelink.database.windows.net -o table
 az network private-dns link vnet list \
-  --resource-group <private-dns-resource-group> \
+  --resource-group "$PRIVATE_DNS_RG" \
   --zone-name privatelink.database.windows.net -o table
+
+# Only when the selected next hop is an Azure Firewall
+FIREWALL_RG="<firewall-resource-group>"
+FIREWALL_NAME="<firewall-name>"
+FIREWALL_POLICY_RG="<firewall-policy-resource-group>"
+FIREWALL_POLICY_NAME="<firewall-policy-name>"
+LOG_WORKSPACE="<log-analytics-workspace-id>"
+az network firewall show \
+  --resource-group "$FIREWALL_RG" \
+  --name "$FIREWALL_NAME" \
+  --query '{provisioningState:provisioningState,firewallPolicy:firewallPolicy.id,privateIPs:ipConfigurations[].privateIPAddress}' \
+  -o yaml
+FIREWALL_ID=$(az network firewall show \
+  --resource-group "$FIREWALL_RG" \
+  --name "$FIREWALL_NAME" --query id -o tsv)
+FIREWALL_POLICY_ID=$(az network firewall show \
+  --resource-group "$FIREWALL_RG" \
+  --name "$FIREWALL_NAME" --query firewallPolicy.id -o tsv)
+if [ -n "$FIREWALL_POLICY_ID" ]; then
+  az network firewall policy show \
+    --ids "$FIREWALL_POLICY_ID" -o yaml
+  az network firewall policy rule-collection-group list \
+    --resource-group "$FIREWALL_POLICY_RG" \
+    --policy-name "$FIREWALL_POLICY_NAME" -o table
+  az network firewall policy rule-collection-group list \
+    --resource-group "$FIREWALL_POLICY_RG" \
+    --policy-name "$FIREWALL_POLICY_NAME" \
+    --query '[].name' -o tsv |
+  while IFS= read -r RULE_COLLECTION_GROUP; do
+    az network firewall policy rule-collection-group show \
+      --resource-group "$FIREWALL_POLICY_RG" \
+      --policy-name "$FIREWALL_POLICY_NAME" \
+      --name "$RULE_COLLECTION_GROUP" -o json
+  done
+else
+  az network firewall network-rule collection list \
+    --resource-group "$FIREWALL_RG" \
+    --firewall-name "$FIREWALL_NAME" -o json
+  az network firewall application-rule collection list \
+    --resource-group "$FIREWALL_RG" \
+    --firewall-name "$FIREWALL_NAME" -o json
+fi
+az monitor diagnostic-settings list \
+  --resource "$FIREWALL_ID" -o json
+az monitor log-analytics query \
+  --workspace "$LOG_WORKSPACE" \
+  --timespan "$INCIDENT_START/$INCIDENT_END" \
+  --analytics-query "union isfuzzy=true AZFWNetworkRule, AZFWApplicationRule, AzureDiagnostics | where _ResourceId =~ '$FIREWALL_ID' | where isempty(Category) or Category in ('AzureFirewallNetworkRule','AzureFirewallApplicationRule') | project TimeGenerated,Category,Action,RuleCollection,Rule,msg_s,SourceIp,DestinationIp,DestinationPort,Fqdn"
 ```
 
-- Run the `nc` check only if that client already exists in the affected pod. Otherwise preserve the application's connection error and mark the active probe unavailable; do not install packages or create a test pod.
+Fill the placeholders and run this read-only block before narrowing the failure. For Azure CNI Pod Subnet, `SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the node subnet. Empty NSG or route-table IDs mean no resource is associated. Inspect Firewall commands only when `VirtualAppliance` resolves to Azure Firewall; for an NVA, collect the equivalent selected route, network/application rules, and incident-window logs.
+
+- Run `nc` only if it already exists in the affected pod; do not install packages or create a test pod.
 - **Public endpoint:** the server FQDN resolves to a public address; evaluate SQL public network access/firewall rules and the cluster outbound path.
 - **Service endpoint:** the FQDN remains public, while the source subnet advertises `Microsoft.Sql` and the SQL server has a matching virtual network rule.
 - **Private endpoint:** the FQDN follows the `privatelink.database.windows.net` chain to the private endpoint IP; verify endpoint approval, the A record, the affected VNet link or conditional forwarder, and the effective route to that private IP.
