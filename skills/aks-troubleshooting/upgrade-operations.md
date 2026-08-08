@@ -2,9 +2,9 @@
 
 Use this guide when node image rotation, Kubernetes version changes, or node-pool upgrade settings appear to be the failure domain.
 
-## Stuck or Failed Upgrade: Complete Read-only Evidence
+## Stuck or Failed Upgrade: Mandatory Read-only Evidence
 
-Keep this sequence together so control-plane, node-pool, API compatibility, admission, and drain evidence describe the same failure window.
+A stuck-upgrade diagnosis is incomplete until every step below is collected, or the inability to collect it is recorded. Do not skip deprecated API, admission webhook, upgrade-path, PDB/drain/event, or current `maxSurge` evidence.
 
 ```bash
 # 1. Control-plane and node-pool state, versions, image, and current maxSurge
@@ -56,19 +56,27 @@ Interpret this evidence before selecting remediation:
 - `disruptionsAllowed: 0`, unhealthy replicas, long termination grace periods, and pod events can explain drain failure.
 - The reported `upgradeSettings.maxSurge` is the current configuration; choose any change from workload capacity, quota, subnet address, PDB, and availability evidence rather than a hard-coded percentage.
 
-## Approval-gated remediation
+## Mutation boundary: approval required
 
-The following actions mutate cluster or workload state and require explicit approval and an accepted change window:
+`az aks upgrade`, `az aks nodepool upgrade`, and `az aks nodepool update --max-surge` mutate cluster state. The signatures below classify the boundary; do not recommend or execute them unless the owner explicitly approves the target version or surge value and accepts the change window.
 
 ```bash
-# Upgrade an approved node image
+# Control-plane and cluster upgrade
+az aks upgrade \
+  --resource-group <cluster-resource-group> \
+  --name <cluster-name> \
+  --kubernetes-version <approved-version>
+
+# Node-pool version or image upgrade
 az aks nodepool upgrade \
   --resource-group <cluster-resource-group> \
   --cluster-name <cluster-name> \
   --name <nodepool-name> \
-  --node-image-only
+  --kubernetes-version <approved-version>
 
-# Change maxSurge to an owner-approved value supported by capacity evidence
+# Node-image-only upgrade uses the same mutating command with --node-image-only
+
+# Change maxSurge
 az aks nodepool update \
   --resource-group <cluster-resource-group> \
   --cluster-name <cluster-name> \

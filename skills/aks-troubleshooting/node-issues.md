@@ -2,9 +2,9 @@
 
 ## Node NotReady
 
-### Read-only evidence
+### Mandatory minimum evidence
 
-Collect Kubernetes and Azure infrastructure evidence before requesting node access:
+A Node NotReady diagnosis is incomplete until this entire read-only block is collected, or the inability to collect an item is recorded. Start here before requesting privileged node access:
 
 ```bash
 # Kubernetes state, conditions, and node-scoped events
@@ -59,6 +59,10 @@ az vmss get-instance-view \
   -o json
 ```
 
+### Privileged and service mutation boundary
+
+Kubelet/service inspection through privileged node access requires explicit approval after the mandatory block identifies a node-local evidence gap. Restarting kubelet, cordoning, draining, deleting, reimaging, or replacing a node are separate remediations and require explicit approval with workload, PodDisruptionBudget, and change-control impact understood. None is part of the default evidence path.
+
 **Condition decision tree:**
 
 | Condition | Value | Evidence boundary | Next investigation |
@@ -70,10 +74,6 @@ az vmss get-instance-view \
 | `NetworkUnavailable` | `True` | Review CNI pod state and logs plus node NIC routes and NSG evidence | Continue with [Networking Troubleshooting](networking.md) |
 
 Do not infer that a `Ready=False` condition requires a kubelet restart or node replacement. The Kubernetes condition reason, node events, VMSS provisioning state, and extension substatus determine the next branch.
-
-### Approval-gated escalation
-
-Privileged node access and kubelet inspection require explicit approval after the read-only sequence identifies a node-local evidence gap. Restarting kubelet, cordoning, draining, deleting, reimaging, or replacing a node are separate remediations and require explicit approval with workload, PodDisruptionBudget, and change-control impact understood. None is a prerequisite for the evidence sequence above.
 
 ---
 
