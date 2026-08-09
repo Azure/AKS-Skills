@@ -61,6 +61,7 @@ The skills are plain text with a deterministic `az`/`kubectl` fallback: they don
 - **Local / offline install.** No GitHub connection is needed at runtime. Clone the repo and point your host at the local copy — in Claude Code, `/plugin marketplace add <path-to-local-clone>` (the marketplace declares a local `source`), or point the agent directly at the local `skills/` folder. The install rows above that reference `Azure/AKS-Skills` or `npx skills add <url>` need network; the local path does not.
 - **Evaluate any model against the skills.** The eval harness can target any OpenAI-compatible endpoint — a hosted deployment or a local model server (llama.cpp, vLLM, Ollama) — by setting `OPENAI_BASE_URL` (and `EVAL_MODEL`). This is how you measure how well the skills perform on a smaller, self-hosted, or non-frontier model, not just frontier ones. See [evals/README.md](evals/README.md).
 - **Air-gapped clusters.** A few skills run debug/capture pods that pull images from `mcr.microsoft.com`. In a cluster with no registry egress, mirror those images into your private registry first.
+- **Product integration boundary.** Local/non-frontier model support makes the skill contract portable; it does not define a separate AKS troubleshooting experience or replace HolmesGPT. Runtime selection and reconnect handoff belong to the consuming product.
 
 ## Contributing
 
