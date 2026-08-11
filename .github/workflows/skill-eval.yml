@@ -42,6 +42,10 @@ jobs:
         working-directory: evals
         run: npm run lint:selftest
 
+      - name: Test llm-client backend auto-detection
+        working-directory: evals
+        run: npm test
+
       - name: Cache promptfoo results
         uses: actions/cache@v6
         with:

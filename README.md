@@ -53,6 +53,16 @@ For deployment/provisioning, also install [Azure Skills](https://github.com/micr
 - The **Azure MCP server** (`@azure/mcp`) is wired via [`.mcp.json`](.mcp.json); skills prefer the AKS MCP tools and fall back to `az`/`kubectl`.
 - Skills default to **read-only** operations and ask before making changes.
 
+## Disconnected, self-hosted, and non-frontier use
+
+The skills are plain text with a deterministic `az`/`kubectl` fallback: they don't require internet egress or a specific vendor API, so nothing structurally prevents running them against a smaller, self-hosted, or non-frontier model. Whether such a model actually *follows* a given skill reliably is a separate, empirical question — the skills aren't tuned or validated against non-frontier models today, and the eval harness below is the tool for measuring that gap, not a claim that it's already closed. If you're running in an air-gapped, sovereign, or self-hosted setup — for example a small local model in an Arc-based investigator — a few things already work today:
+
+- **No Azure MCP server required.** The [`.mcp.json`](.mcp.json) wiring is a convenience; every skill falls back to `az`/`kubectl`, so an agent with only the local CLIs still works. The MCP server is **pinned to an exact `@azure/mcp` version** (not `@latest`), so a disconnected host can pre-cache that one package — or skip it entirely and rely on the fallback.
+- **Local / offline install.** No GitHub connection is needed at runtime. Clone the repo and point your host at the local copy — in Claude Code, `/plugin marketplace add <path-to-local-clone>` (the marketplace declares a local `source`), or point the agent directly at the local `skills/` folder. The install rows above that reference `Azure/AKS-Skills` or `npx skills add <url>` need network; the local path does not.
+- **Evaluate any model against the skills.** The eval harness can target any OpenAI-compatible endpoint — a hosted deployment or a local model server (llama.cpp, vLLM, Ollama) — by setting `OPENAI_BASE_URL` (and `EVAL_MODEL`). This is how you measure how well the skills perform on a smaller, self-hosted, or non-frontier model, not just frontier ones. See [evals/README.md](evals/README.md).
+- **Air-gapped clusters.** A few skills run debug/capture pods that pull images from `mcr.microsoft.com`. In a cluster with no registry egress, mirror those images into your private registry first.
+- **Product integration boundary.** Local/non-frontier model support makes the skill contract portable; it does not define a separate AKS troubleshooting experience or replace HolmesGPT. Runtime selection and reconnect handoff belong to the consuming product.
+
 ## Contributing
 
 Contributions are welcome. AKS Skills accepts **deep, AKS-specific Day-2 operational knowledge and AKS-specific design opinions** — not generic Azure provisioning, generic Kubernetes any model already knows, or cross-resource workflows (those belong in Azure Skills). Every skill must meet the [Skill Contract](docs/skill-contract.md). See [CONTRIBUTING.md](CONTRIBUTING.md).

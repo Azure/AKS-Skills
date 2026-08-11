@@ -60,7 +60,19 @@
  *                          models that do not accept API keys.
  *   FOUNDRY_API_KEY        Key auth, where the deployment allows it.
  *   AZURE_OPENAI_API_KEY   + AZURE_OPENAI_ENDPOINT for the azure backend.
- *   OPENAI_API_KEY         for the openai backend.
+ *   OPENAI_API_KEY         for the openai backend (optional when OPENAI_BASE_URL
+ *                          points at a keyless self-hosted server).
+ *   OPENAI_BASE_URL        Point the openai backend at any OpenAI-compatible
+ *                          endpoint — a self-hosted or local model server
+ *                          (llama.cpp / vLLM / Ollama) or a gateway — instead of
+ *                          api.openai.com. Default: https://api.openai.com/v1.
+ *                          This is how you evaluate a non-frontier, local, or
+ *                          disconnected model against the skills; set EVAL_MODEL
+ *                          to the served model name. Treated as explicit local
+ *                          intent during auto-detection: it wins over ambient
+ *                          AZURE_OPENAI_API_KEY/-ENDPOINT so a self-hosted target
+ *                          isn't silently overridden by an Azure resource that
+ *                          happens to be configured in the same environment.
  *
  * Prefer Entra over keys. CI should obtain a token via OIDC federated
  * credentials (azure/login with id-token: write, then
@@ -76,7 +88,7 @@
 const ANTHROPIC_VERSION = '2023-06-01';
 const AZURE_API_VERSION = '2024-12-01-preview';
 const GITHUB_MODELS_URL = 'https://models.github.ai/inference/chat/completions';
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
 // Foundry's v1 surface keeps the model out of the URL, so one endpoint serves
 // every deployment. Override if the resource is pinned to a different version.
@@ -103,6 +115,16 @@ function detectBackend() {
     backend = forced;
   } else if (process.env.FOUNDRY_ENDPOINT && foundryCredential()) {
     backend = 'foundry';
+  } else if (process.env.OPENAI_BASE_URL) {
+    // An explicitly set OPENAI_BASE_URL is unambiguous local/self-hosted intent
+    // (a vLLM/llama.cpp/Ollama server or gateway on a dev box or CI runner), so
+    // it must outrank ambient Azure credentials. AZURE_OPENAI_API_KEY/-ENDPOINT
+    // are frequently present in an environment for unrelated reasons (a shared
+    // CI runner, a devcontainer default); if Azure won here, a user who set
+    // OPENAI_BASE_URL to reach their local model would be silently redirected
+    // to Azure — a confusing 404 at best, or a run scored against the wrong
+    // model at worst.
+    backend = 'openai';
   } else if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT) {
     backend = 'azure';
   } else if (process.env.OPENAI_API_KEY) {
@@ -114,7 +136,8 @@ function detectBackend() {
       error:
         'No LLM credentials configured. Set FOUNDRY_ENDPOINT plus ' +
         'FOUNDRY_ACCESS_TOKEN or FOUNDRY_API_KEY (recommended), or ' +
-        'AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, or OPENAI_API_KEY, or ' +
+        'AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT, or OPENAI_API_KEY ' +
+        '(or OPENAI_BASE_URL for a self-hosted OpenAI-compatible endpoint), or ' +
         'GITHUB_MODELS_TOKEN for local development.',
     };
   }
@@ -212,15 +235,28 @@ function buildRequest(backend, system, user, model) {
   }
 
   if (backend === 'openai') {
+    const base = (process.env.OPENAI_BASE_URL || OPENAI_DEFAULT_BASE_URL).replace(/\/$/, '');
+    const isDefault = base === OPENAI_DEFAULT_BASE_URL;
     const key = process.env.OPENAI_API_KEY;
-    if (!key) {
-      return { error: 'EVAL_PROVIDER=openai requires OPENAI_API_KEY.' };
+    // api.openai.com requires a key; a custom base URL — a self-hosted or local
+    // OpenAI-compatible server (llama.cpp / vLLM / Ollama) or a gateway — is often
+    // keyless, so only require a key for the default endpoint.
+    if (isDefault && !key) {
+      return {
+        error:
+          'EVAL_PROVIDER=openai requires OPENAI_API_KEY, or set OPENAI_BASE_URL ' +
+          'to a self-hosted OpenAI-compatible endpoint.',
+      };
     }
+    const headers = { 'Content-Type': 'application/json' };
+    if (key) headers.Authorization = `Bearer ${key}`;
     return {
       protocol: 'openai',
-      url: OPENAI_URL,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: openAiBody(model || 'gpt-5', system, user),
+      url: `${base}/chat/completions`,
+      headers,
+      // Default to gpt-5 only for api.openai.com; for a custom endpoint pass the
+      // model through as-is (EVAL_MODEL) so the server serves the model it loaded.
+      body: openAiBody(isDefault ? (model || 'gpt-5') : model, system, user),
     };
   }
 
