@@ -1,0 +1,115 @@
+name: Autogen Evals
+
+# Maintainer toggle (workflow_dispatch): generate CANDIDATE quality + trigger/routing
+# tests for a skill from its SKILL.md + references/, gate them against a bare-model
+# baseline, and publish them as a downloadable ARTIFACT for human review.
+# Does NOT open a PR and does NOT modify the repo.
+#
+# Cost note: the baseline gate makes real LLM calls per candidate (skill-vs-baseline +
+# judge), so this is opt-in and manual by design — it is not a watcher. Reuses the
+# same AZURE_OPENAI_* secrets as skill-eval.yml. Set `dry_run: true` to exercise the
+# plumbing (scaffold + render + artifact) with no LLM spend.
+
+on:
+  workflow_dispatch:
+    inputs:
+      skill:
+        description: 'Skill directory name (e.g. aks-known-issues, aks-sre)'
+        required: true
+        type: string
+      min:
+        description: 'Minimum quality candidates to propose'
+        required: false
+        default: '4'
+        type: string
+      max:
+        description: 'Maximum quality candidates to propose'
+        required: false
+        default: '8'
+        type: string
+      dry_run:
+        description: 'Skip LLM calls (emit fixed samples) to test plumbing only'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read          # only reads the repo; never writes or opens PRs
+
+jobs:
+  autogen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Resolve skill paths
+        id: resolve
+        env:
+          SKILL: ${{ inputs.skill }}
+        run: |
+          set -euo pipefail
+          SKILL_MD=$(find skills -type f -name SKILL.md | grep -E "/${SKILL}/SKILL.md$" | head -1 || true)
+          if [ -z "$SKILL_MD" ]; then
+            echo "::error::No SKILL.md found for skill '${SKILL}' under skills/**"
+            exit 1
+          fi
+          echo "skill_md=$SKILL_MD" >> "$GITHUB_OUTPUT"
+          echo "skill_path=${SKILL_MD#skills/}" >> "$GITHUB_OUTPUT"
+          echo "Resolved: $SKILL_MD (skill_path=${SKILL_MD#skills/})"
+
+      - name: Scaffold candidates
+        working-directory: evals/autogen
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_VERSION: ${{ vars.AZURE_OPENAI_API_VERSION || '2025-01-01-preview' }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL || 'gpt-5' }}
+          SKILL_MD: ${{ steps.resolve.outputs.skill_md }}
+          SKILL_PATH: ${{ steps.resolve.outputs.skill_path }}
+          SKILL: ${{ inputs.skill }}
+          MIN: ${{ inputs.min }}
+          MAX: ${{ inputs.max }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          DRY=''; [ "$DRY_RUN" = 'true' ] && DRY='--dry-run'
+          node scaffold-eval.mjs \
+            --skill "../../$SKILL_MD" --skill-path "$SKILL_PATH" --system "$SKILL" \
+            --min "$MIN" --max "$MAX" \
+            --out "/tmp/$SKILL.candidates.json" $DRY
+
+      - name: Gate + render candidate tests
+        working-directory: evals/autogen
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_VERSION: ${{ vars.AZURE_OPENAI_API_VERSION || '2025-01-01-preview' }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL || 'gpt-5' }}
+          SKILL_MD: ${{ steps.resolve.outputs.skill_md }}
+          SKILL: ${{ inputs.skill }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          DRY=''; [ "$DRY_RUN" = 'true' ] && DRY='--dry-run'
+          OUTDIR="$GITHUB_WORKSPACE/autogen-out/$SKILL"
+          mkdir -p "$OUTDIR"
+          node baseline-gate.mjs \
+            --candidates "/tmp/$SKILL.candidates.json" \
+            --skill "../../$SKILL_MD" \
+            --out "$OUTDIR/quality-tests.autogen.yaml" \
+            --trigger-out "$OUTDIR/trigger-tests.autogen.yaml" \
+            --wiring-out "$OUTDIR/autogen-wiring.md" \
+            --report "$OUTDIR/gate-report.json" $DRY
+
+      - name: Upload candidate evals
+        uses: actions/upload-artifact@v4
+        with:
+          name: autogen-${{ inputs.skill }}-${{ github.run_id }}
+          path: autogen-out/${{ inputs.skill }}/
+          if-no-files-found: warn

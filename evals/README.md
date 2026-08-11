@@ -136,6 +136,49 @@ stimuli:
 
 For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade the trajectory with `tool-calls` (required + disallowed), `tool-call-count`, and a `prompt` rubric. See `tests/aks-troubleshooting/eval.yaml` for a complete example.
 
+## Autogen — draft eval coverage from a SKILL.md
+
+`evals/autogen/` can propose the quality + trigger tests above instead of hand-writing them. It reads a skill's **full authoring context** (SKILL.md *and* its `references/*.md`), asks the model to propose behavior tests and routing cases, then filters them through a bare-model **baseline gate** — keeping only tests the skill's presence actually flips from fail→pass (no tautological tests any vague answer would satisfy). Output matches the golden shape above, tagged `provenance: autogen`.
+
+**It produces *candidates for review*, not truth.** A maintainer vets them, merges with any hand-written cases, and wires them in. Generated files use an `.autogen.yaml` suffix so they never clobber curated tests.
+
+### Maintainer toggle (recommended)
+
+Run the **Autogen Evals** workflow from the Actions tab (`workflow_dispatch`), passing a skill directory name (e.g. `aks-known-issues`). It generates candidates and publishes them as a downloadable **artifact** (`autogen-<skill>-<run_id>`, on the run page) containing:
+
+- `quality-tests.autogen.yaml` — behavior tests kept by the gate
+- `trigger-tests.autogen.yaml` — routing positives + reciprocal boundary near-misses
+- `autogen-wiring.md` — the promptfoo wiring lines to add once vetted
+- `gate-report.json` — per-candidate keep/drop decisions, scores, and margins
+
+The workflow only **reads** the repo (`contents: read`) — it never writes or opens a PR. Download the artifact, review it, drop the YAML into `evals/tests/<skill>/`, rename the `.autogen.yaml` files to the curated `quality-tests.yaml` / `trigger-tests.yaml` (merging with any hand-written cases), apply the wiring, and open the PR yourself.
+
+The gate makes real LLM calls per candidate, so this is **opt-in and manual by design** — it is not a background watcher. It reuses the same `AZURE_OPENAI_*` secrets as `skill-eval.yml`. Set `dry_run: true` to exercise the pipeline with no LLM spend (emits fixed samples).
+
+### Local run
+
+```bash
+cd evals/autogen                        # zero npm deps — node built-ins only
+export AZURE_OPENAI_API_KEY="your-key"
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+
+# 1. Propose candidates from the skill bundle
+node scaffold-eval.mjs \
+  --skill ../../skills/<skill>/SKILL.md \
+  --skill-path <skill>/SKILL.md --system <skill> \
+  --out /tmp/<skill>.candidates.json          # add --dry-run for a no-LLM smoke test
+
+# 2. Gate + render the candidate YAML (+ wiring)
+node baseline-gate.mjs \
+  --candidates /tmp/<skill>.candidates.json \
+  --skill ../../skills/<skill>/SKILL.md \
+  --out ../tests/<skill>/quality-tests.autogen.yaml \
+  --trigger-out ../tests/<skill>/trigger-tests.autogen.yaml \
+  --wiring-out ../tests/<skill>/autogen-wiring.md
+```
+
+Then review, rename the `.autogen.yaml` files into the curated `quality-tests.yaml` / `trigger-tests.yaml`, and apply the wiring. The generator is a portable copy of the private `aks-skills-eval-lab` tooling — see `evals/autogen/README.md` for internals.
+
 ## Configs
 
 | Config | What it tests | Provider | Assertions | Gate |
