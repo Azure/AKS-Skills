@@ -20,7 +20,7 @@
   "devDependencies": {
     "@microsoft/vally": "^0.6.0",
     "@microsoft/vally-cli": "^0.6.0",
-    "js-yaml": "^4.3.1",
+    "js-yaml": "^5.2.3",
     "promptfoo": "^0.121.20"
   },
   "overrides": {
