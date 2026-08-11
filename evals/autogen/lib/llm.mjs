@@ -9,7 +9,7 @@
 // The Azure body intentionally sends only { messages } (no temperature /
 // max_tokens) to match the provider and stay compatible with gpt-5.
 
-const AZURE_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
+export const AZURE_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
 
 /**
  * Resolve credentials from the environment.

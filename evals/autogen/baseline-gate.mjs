@@ -24,7 +24,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { chat, parseJsonLoose, resolveCreds } from "./lib/llm.mjs";
+import { chat, parseJsonLoose, resolveCreds, AZURE_API_VERSION } from "./lib/llm.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -78,8 +78,11 @@ async function judge({ prompt, answer, rubric, creds }) {
   ].join("\n");
   const { text } = await chat({ system: JUDGE_SYSTEM, user, creds });
   const parsed = parseJsonLoose(text);
-  const score = Number(parsed.score);
-  return { score: Number.isFinite(score) ? score : 0, reason: parsed.reason ?? "" };
+  const raw = Number(parsed.score);
+  // The judge contract is a score in [0,1]; clamp anything out of range so a
+  // malformed response (e.g. 2 or -1) can't inflate the margin / calibration.
+  const score = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0;
+  return { score, reason: parsed.reason ?? "" };
 }
 
 function keywordsPass(answer, keywords) {
@@ -219,7 +222,7 @@ async function main() {
   const creds = dry ? null : resolveCreds();
   const judgePin = {
     model: dry ? "dry-run" : creds.model,
-    apiVersion: process.env.AZURE_OPENAI_API_VERSION || "default",
+    apiVersion: dry ? "dry-run" : AZURE_API_VERSION,
     at: new Date().toISOString(),
   };
 
@@ -292,14 +295,15 @@ async function main() {
   // Trigger tests + wiring are deterministic — render them straight through.
   const triggers = spec.triggers ?? { positives: [], boundaries: [] };
   const triggerCount = (triggers.positives?.length ?? 0) + (triggers.boundaries?.length ?? 0);
-  const triggerOut = path.resolve(
-    args["trigger-out"] ?? outPath.replace(/\.autogen-tests\.yaml$/, ".autogen-trigger-tests.yaml")
-  );
+  // Derive distinct sibling names from --out regardless of its extension, so a
+  // custom --out can never make these defaults collide with the quality YAML.
+  const outBase = /\.autogen-tests\.yaml$/.test(outPath)
+    ? outPath.replace(/\.autogen-tests\.yaml$/, "")
+    : outPath.replace(/\.[^./]+$/, "");
+  const triggerOut = path.resolve(args["trigger-out"] ?? `${outBase}.autogen-trigger-tests.yaml`);
   fs.writeFileSync(triggerOut, renderTriggerYaml(spec.system, triggers));
 
-  const wiringOut = path.resolve(
-    args["wiring-out"] ?? outPath.replace(/\.autogen-tests\.yaml$/, ".wiring.md")
-  );
+  const wiringOut = path.resolve(args["wiring-out"] ?? `${outBase}.wiring.md`);
   fs.writeFileSync(wiringOut, renderWiring(spec.system));
 
   if (args.report) {

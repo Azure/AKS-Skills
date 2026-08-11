@@ -122,7 +122,7 @@ async function main() {
   let raw, triggers;
   if (args["dry-run"]) {
     raw = DRY_RUN_SAMPLE;
-    triggers = DRY_RUN_TRIGGERS;
+    triggers = args["no-triggers"] ? { positives: [], boundaries: [] } : DRY_RUN_TRIGGERS;
   } else {
     const template = fs
       .readFileSync(path.join(__dirname, "prompts", "quality.md"), "utf8")

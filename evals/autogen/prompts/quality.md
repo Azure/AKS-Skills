@@ -12,11 +12,15 @@ Return ONLY a JSON array (no prose, no code fences). Each element:
 {
   "description": "<short, specific test name>",
   "prompt": "<a realistic user question this skill should handle well>",
-  "keywords": ["<lowercase substring>", "..."],   // 0–3 deterministic icontains checks; may be empty
+  "keywords": ["<lowercase substring>", "..."],
   "rubric": "<a single criterion describing what a GOOD answer must do>",
-  "threshold": 0.9                                  // g-eval pass bar, 0.8–0.95
+  "threshold": 0.9
 }
 ```
+
+Field notes (do NOT include these as comments in your JSON):
+- `keywords`: 0–3 deterministic `icontains` checks; may be empty `[]`.
+- `threshold`: the g-eval pass bar, between 0.8 and 0.95.
 
 ## Before you write tests: find the skill's edge
 
