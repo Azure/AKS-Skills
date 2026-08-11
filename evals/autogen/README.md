@@ -1,7 +1,7 @@
 # autogen — candidate eval generator
 
 Machine-drafts promptfoo quality + trigger tests for a skill from its `SKILL.md`
-and `references/*.md`, so eval coverage scales as skills grow. Output is a set of
+and `references/*` (Markdown + YAML), so eval coverage scales as skills grow. Output is a set of
 **candidates for human review** (tagged `provenance: autogen`), never an auto-merge.
 
 This is a portable, vendored copy of the generator developed in the private
@@ -13,8 +13,8 @@ lab or the author's environment. **Zero npm dependencies** — Node built-ins on
 | File | Role |
 |------|------|
 | `scaffold-eval.mjs` | Step 1. Bundles the skill (`skill-context.mjs`) and asks the model to propose quality test cases + routing/trigger cases. Writes `candidates.json`. |
-| `baseline-gate.mjs` | Step 2. For each candidate, scores the prompt **with** vs **without** the skill; keeps only tests the skill flips fail→pass, auto-calibrates a g-eval threshold, and renders the YAML + a wiring snippet. |
-| `skill-context.mjs` | Bundles `SKILL.md` + sibling `references/*.md` under a character budget (cost guard) so tests are grounded in the whole skill, not just SKILL.md. |
+| `baseline-gate.mjs` | Step 2. For each candidate, scores the prompt **with** vs **without** the skill (using **SKILL.md only**, matching `evals/providers/skill-provider.js`); keeps only tests the skill flips fail→pass, auto-calibrates a g-eval threshold, and renders the YAML + a wiring snippet. |
+| `skill-context.mjs` | Bundles `SKILL.md` + sibling `references/*.md` and `*.yaml` under a character budget (cost guard) so the **generation** step is grounded in the whole skill. |
 | `prompts/quality.md` | Prompt for proposing behavior (quality) tests. |
 | `prompts/trigger.md` | Prompt for routing positives + reciprocal boundary near-misses (expected route pulled from the skill's DO-NOT-USE-FOR section). |
 | `lib/llm.mjs` | Minimal Azure OpenAI / OpenAI chat client. Credentials come from env at runtime. |

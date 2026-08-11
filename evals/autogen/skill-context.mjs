@@ -1,12 +1,17 @@
 // skill-context.mjs — load a skill's full authoring context for autogen.
 //
-// A SKILL.md is only half the skill: its `references/*.md` files carry the
-// error tables, command catalogs, and Azure-specific detail that the tests
-// should be grounded in. Generating (and gating) against SKILL.md alone means
-// any test that hinges on a reference gets scored as a "skill gap" and dropped.
+// A SKILL.md is only half the skill: its `references/*` files (Markdown and
+// YAML) carry the error tables, command catalogs, constraint specs, and
+// Azure-specific detail that candidate tests should be grounded in. Proposing
+// candidates from SKILL.md alone misses that distinctive edge, so this loader
+// bundles SKILL.md + references for the *generation* step (scaffold-eval.mjs).
 //
-// This loader bundles SKILL.md + sibling references/*.md into one string, with
-// a hard character budget so a large reference set can't blow up prompt cost.
+// NOTE: the gate (baseline-gate.mjs) scores candidates against SKILL.md ONLY,
+// to match the eval harness (evals/providers/skill-provider.js). A candidate
+// that truly depends on a reference is therefore dropped by the gate — correct,
+// since it would also fail in promptfoo until the provider loads references.
+//
+// A hard character budget keeps a large reference set from blowing up cost.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -26,7 +31,7 @@ export function parseSkillName(skillContent) {
 }
 
 /**
- * Bundle a skill's SKILL.md with its sibling references/*.md files.
+ * Bundle a skill's SKILL.md with its sibling references/*.md and *.yaml files.
  *
  * @param {string} skillFile  path to SKILL.md
  * @param {object} [opts]
@@ -46,7 +51,7 @@ export function loadSkillBundle(skillFile, opts = {}) {
   if (fs.existsSync(refDir) && fs.statSync(refDir).isDirectory()) {
     const refs = fs
       .readdirSync(refDir)
-      .filter((f) => f.toLowerCase().endsWith(".md"))
+      .filter((f) => /\.(md|ya?ml)$/i.test(f))
       .sort();
     for (const f of refs) {
       const p = path.join(refDir, f);

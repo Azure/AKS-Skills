@@ -25,7 +25,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chat, parseJsonLoose, resolveCreds } from "./lib/llm.mjs";
-import { loadSkillBundle } from "./skill-context.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -52,8 +51,11 @@ const SKILL_SYSTEM = (skill) =>
     skill,
   ].join("\n");
 
-// Deliberately minimal — represents "no skill" competence for the baseline.
-const BASELINE_SYSTEM = "You are a helpful assistant.";
+// Mirror evals/providers/baseline-provider.js so the gate's "no skill" baseline
+// matches the harness that will actually run these tests — otherwise the margin
+// is measured against a weaker baseline and candidates get over-kept.
+const BASELINE_SYSTEM =
+  "You are a helpful assistant with expertise in Azure Kubernetes Service (AKS) and Kubernetes operations.";
 
 const JUDGE_SYSTEM = [
   "You are a strict evaluator. Given a user prompt, an assistant answer, and a",
@@ -207,8 +209,12 @@ async function main() {
     process.exit(2);
   }
   const spec = JSON.parse(fs.readFileSync(path.resolve(args.candidates), "utf8"));
-  const bundle = loadSkillBundle(path.resolve(args.skill));
-  const skillContent = bundle.text;
+  // Mirror evals/providers/skill-provider.js: load ONLY SKILL.md as skill
+  // context so the gate's fail→pass decision matches the harness that runs
+  // these tests. (scaffold-eval.mjs still generates from the full reference
+  // bundle; a candidate that truly needs a reference simply won't clear this
+  // gate — which is correct, since it would also fail in promptfoo today.)
+  const skillContent = fs.readFileSync(path.resolve(args.skill), "utf8");
   const dry = !!args["dry-run"];
   const creds = dry ? null : resolveCreds();
   const judgePin = {
@@ -216,12 +222,6 @@ async function main() {
     apiVersion: process.env.AZURE_OPENAI_API_VERSION || "default",
     at: new Date().toISOString(),
   };
-  if (!dry && bundle.files.length > 1) {
-    console.log(
-      `bundle: SKILL.md + ${bundle.files.length - 1} reference file(s)` +
-        (bundle.truncated ? " (truncated at cost budget)" : "")
-    );
-  }
 
   const results = [];
   for (const c of spec.candidates) {
