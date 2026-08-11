@@ -44,3 +44,27 @@
   assert:
     - type: equals
       value: "none"
+
+# Reciprocal boundary tests: aks-known-issues owns named/documented error
+# codes and messages, including upgrade-specific ones; aks-troubleshooting
+# keeps generic, open-ended upgrade investigation with no stable signature.
+
+- description: "Boundary: an upgrade failure naming NodePoolMcVersionIncompatible must go to aks-known-issues, not aks-troubleshooting"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+  vars:
+    prompt: "My node pool upgrade is blocked with error NodePoolMcVersionIncompatible — what does that mean?"
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "Boundary: a generic stuck upgrade with no error code stays with aks-troubleshooting"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+  vars:
+    prompt: "My AKS cluster upgrade has been stuck for an hour with no error code shown, can you investigate?"
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
