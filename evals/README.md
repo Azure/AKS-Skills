@@ -215,3 +215,7 @@ npm run eval:trigger -- --filter-metadata skill=aks-network-capture
 npm run eval -- --filter-pattern "CrashLoopBackOff"
 npm run eval:trigger -- --filter-pattern "Egress"
 ```
+
+Manual `Skill Evaluation` workflow runs apply the `skill` input to the quality,
+routing, baseline, and retry passes. Pull-request runs continue to evaluate every
+skill.
