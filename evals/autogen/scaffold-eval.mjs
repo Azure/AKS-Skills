@@ -19,11 +19,37 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { chat, parseJsonLoose } from "./lib/llm.mjs";
 import { loadSkillBundle } from "./skill-context.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Drop duplicate items by a normalized key (case-insensitive, trimmed).
+function dedupeBy(items, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (const it of items) {
+    const k = String(keyFn(it)).trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(it);
+  }
+  return out;
+}
+
+// The registered skill IDs are the subdirectory names of the skills/ root that
+// holds this skill (skills/<id>/SKILL.md). Boundary route targets must be one of
+// these (plus the router's "none"); anything else is a hallucinated route.
+function registeredSkillIds(skillFile) {
+  const root = path.resolve(path.dirname(skillFile), "..");
+  const ids = new Set(["none"]);
+  for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+    if (d.isDirectory()) ids.add(d.name);
+  }
+  return ids;
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -82,22 +108,32 @@ function validateCandidate(c, i) {
 }
 
 // Normalize the trigger generation into { positives:[str], boundaries:[{prompt,expected}] }.
-// Boundaries whose `expected` is missing or equal to this skill are dropped —
-// a boundary that routes back to us is not a boundary.
-function validateTriggers(raw, skillName) {
+// Boundaries are dropped when: missing prompt/expected, expected routes back to
+// this skill (not a boundary), or expected is not a registered skill ID (a
+// hallucinated route). Positives and boundary prompts are de-duplicated.
+function validateTriggers(raw, skillName, knownSkills) {
   const out = { positives: [], boundaries: [] };
   if (!raw || typeof raw !== "object") return out;
+  const positives = [];
   for (const p of Array.isArray(raw.positives) ? raw.positives : []) {
-    if (typeof p === "string" && p.trim()) out.positives.push(p.trim());
+    if (typeof p === "string" && p.trim()) positives.push(p.trim());
   }
+  out.positives = dedupeBy(positives, (p) => p);
+
+  const boundaries = [];
   for (const b of Array.isArray(raw.boundaries) ? raw.boundaries : []) {
     if (!b || typeof b !== "object") continue;
     const prompt = typeof b.prompt === "string" ? b.prompt.trim() : "";
     const expected = typeof b.expected === "string" ? b.expected.trim() : "";
     if (!prompt || !expected) continue;
     if (skillName && expected === skillName) continue;
-    out.boundaries.push({ prompt, expected });
+    if (knownSkills && knownSkills.size && !knownSkills.has(expected)) {
+      console.warn(`  drop boundary → unknown route target "${expected}": ${prompt}`);
+      continue;
+    }
+    boundaries.push({ prompt, expected });
   }
+  out.boundaries = dedupeBy(boundaries, (b) => b.prompt);
   return out;
 }
 
@@ -109,14 +145,20 @@ async function main() {
   }
   const min = Number(args.min ?? 4);
   const max = Number(args.max ?? 8);
+  if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) {
+    throw new Error(`invalid --min/--max: need 1 <= min <= max (got min=${args.min}, max=${args.max})`);
+  }
   const skillFile = path.resolve(args.skill);
   const bundle = loadSkillBundle(skillFile);
   const skillName = bundle.name || args.system;
-  if (bundle.files.length > 1) {
-    console.log(
-      `bundle: SKILL.md + ${bundle.files.length - 1} reference file(s)` +
-        (bundle.truncated ? " (truncated at cost budget)" : "")
-    );
+  const knownSkills = registeredSkillIds(skillFile);
+  console.log(
+    `bundle: ${bundle.files.length} file(s) loaded ` +
+      `(SKILL.md + ${bundle.files.length - 1} reference file(s))`
+  );
+  if (bundle.omitted.length) {
+    console.log(`bundle: ${bundle.omitted.length} file(s) omitted at cost budget:`);
+    for (const f of bundle.omitted) console.log(`  - ${path.relative(process.cwd(), f)}`);
   }
 
   let raw, triggers;
@@ -138,13 +180,21 @@ async function main() {
         .readFileSync(path.join(__dirname, "prompts", "trigger.md"), "utf8")
         .replaceAll("{{SKILL_NAME}}", skillName);
       const tResp = await chat({ system: triggerTemplate, user: bundle.text });
-      triggers = validateTriggers(parseJsonLoose(tResp.text), skillName);
+      triggers = validateTriggers(parseJsonLoose(tResp.text), skillName, knownSkills);
     }
   }
 
   if (!Array.isArray(raw)) throw new Error("model did not return a JSON array of candidates");
-  const candidates = raw.map(validateCandidate);
-  if (args["dry-run"]) triggers = validateTriggers(triggers, skillName);
+  let candidates = dedupeBy(raw.map(validateCandidate), (c) => c.prompt);
+  if (candidates.length > max) candidates = candidates.slice(0, max);
+  // Fail closed on too few candidates. Dry-run is a plumbing smoke test that
+  // intentionally emits a single fixed sample, so it is exempt from the floor.
+  if (!args["dry-run"] && candidates.length < min) {
+    throw new Error(
+      `only ${candidates.length} valid quality candidate(s) after validation/dedupe; need >= ${min}`
+    );
+  }
+  if (args["dry-run"]) triggers = validateTriggers(triggers, skillName, knownSkills);
 
   const out = {
     system: args.system,
@@ -152,6 +202,12 @@ async function main() {
     skillPath: args["skill-path"],
     provenance: "autogen",
     generatedAt: new Date().toISOString(),
+    context: {
+      files: bundle.files,
+      omitted: bundle.omitted,
+      truncated: bundle.truncated,
+      sha256: crypto.createHash("sha256").update(bundle.text).digest("hex"),
+    },
     candidates,
     triggers,
   };
