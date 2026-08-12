@@ -35,6 +35,7 @@ NAMESPACE="default"
 TCPDUMP_FILTER=""
 PACKET_SIZE="0"
 OUTPUT_BASE="/var/log/aks-network-captures"   # fixed base dir; not user-settable
+CAPTURE_MOUNT_PATH="/capture-output"           # fixed container path for the per-run hostPath
 CAPTURE_IMAGE="$CAPTURE_IMAGE_DEFAULT"
 MAX_DURATION_SECONDS=1800                      # hard cap (matches Retina's pod grace)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -288,13 +289,13 @@ spec:
         - { name: PCAP_FILTER, value: "${EFFECTIVE_FILTER}" }
         - { name: CAPTURE_DURATION, value: "${DUR_SECONDS}" }
         - { name: PACKET_SIZE, value: "${PACKET_SIZE}" }
-        - { name: OUT_DIR, value: "${CAPTURE_OUTPUT_PATH}" }
+        - { name: OUT_DIR, value: "${CAPTURE_MOUNT_PATH}" }
         - { name: CAPTURE_ID, value: "${CAPTURE_NAME}" }
         - { name: RUN_ID, value: "${RUN_ID}" }
         - { name: NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }
         command: ["/bin/sh", "/capture-scripts/run-capture.sh"]
         volumeMounts:
-        - { name: capture-output, mountPath: "${CAPTURE_OUTPUT_PATH}" }
+        - { name: capture-output, mountPath: "${CAPTURE_MOUNT_PATH}" }
         - { name: capture-scripts, mountPath: /capture-scripts, readOnly: true }
       volumes:
       - name: capture-output

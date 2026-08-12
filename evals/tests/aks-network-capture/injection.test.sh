@@ -229,8 +229,10 @@ assert_contains "capabilities are NET_ADMIN and NET_RAW only" \
   'add: ["NET_ADMIN", "NET_RAW"]' "$MANIFEST"
 assert_contains "dedicated output hostPath uses DirectoryOrCreate" \
   'hostPath: { path: "/var/log/aks-network-captures/render-test/' "$MANIFEST"
-assert_contains "output hostPath is mounted at the capture path" \
-  'mountPath: "/var/log/aks-network-captures/render-test/' "$MANIFEST"
+assert_contains "output hostPath uses a fixed in-container mount point" \
+  'mountPath: "/capture-output"' "$MANIFEST"
+assert_contains "runner writes to the fixed in-container mount point" \
+  'name: OUT_DIR, value: "/capture-output"' "$MANIFEST"
 assert_contains "fixed capture runner is invoked without shell -c" \
   'command: ["/bin/sh", "/capture-scripts/run-capture.sh"]' "$MANIFEST"
 assert_contains "setup deploys the fixed capture runner" \
