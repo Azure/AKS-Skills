@@ -25,11 +25,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chat, parseJsonLoose, resolveCreds, AZURE_API_VERSION } from "./lib/llm.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GENERATOR = { name: "baseline-gate.mjs", version: "1.0.0" };
+
+// Best-effort repository commit SHA so a gate report is bound to the exact source
+// tree it graded. Falls back to the CI-provided SHA, then null.
+function repoCommit() {
+  try {
+    return execSync("git rev-parse HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
+  } catch {
+    return process.env.GITHUB_SHA || null;
+  }
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -70,6 +81,12 @@ const JUDGE_SYSTEM = [
   'Return ONLY JSON: {"score": <0..1>, "reason": "<one sentence>"}.',
 ].join("\n");
 
+// The judge contract: a score that is a finite JSON NUMBER in [0,1]. Exported so
+// the fail-closed decision can be checked deterministically without an LLM call.
+export function scoreIsValid(s) {
+  return typeof s === "number" && Number.isFinite(s) && s >= 0 && s <= 1;
+}
+
 async function judge({ prompt, answer, rubric, creds }) {
   const user = [
     `# User prompt`,
@@ -83,19 +100,14 @@ async function judge({ prompt, answer, rubric, creds }) {
   ].join("\n");
   const { text } = await chat({ system: JUDGE_SYSTEM, user, creds });
   const parsed = parseJsonLoose(text);
-  const raw = Number(parsed.score);
-  // Fail closed: the judge contract is a score in [0,1]. A missing, non-numeric,
-  // or out-of-range score is treated as INVALID (valid:false) rather than coerced
-  // to 0 or clamped to 1 — otherwise malformed evidence silently inflates the
-  // margin/calibration and can keep or drop the wrong candidate. The caller drops
-  // any candidate whose judge score is invalid.
-  const valid =
-    parsed.score !== undefined &&
-    parsed.score !== null &&
-    Number.isFinite(raw) &&
-    raw >= 0 &&
-    raw <= 1;
-  return { score: valid ? raw : null, reason: parsed.reason ?? "", valid };
+  // Fail closed: the judge contract is a score that is a finite JSON NUMBER in
+  // [0,1]. Anything else — missing, null, boolean, string, NaN, out of range — is
+  // INVALID (valid:false), never coerced. `Number(false)` is 0 and `Number("x")`
+  // is NaN; coercing either would let malformed evidence silently drive the
+  // margin/keep decision. The caller drops any candidate with an invalid score.
+  const s = parsed.score;
+  const valid = scoreIsValid(s);
+  return { score: valid ? s : null, reason: parsed.reason ?? "", valid };
 }
 
 function keywordsPass(answer, keywords) {
@@ -103,31 +115,18 @@ function keywordsPass(answer, keywords) {
   return (keywords ?? []).every((k) => lc.includes(String(k).toLowerCase()));
 }
 
-// --- Lever 2: margin-based, auto-calibrated keep decision --------------------
-// A single fixed pass bar (0.9) throws away a candidate's strongest signal:
-// the *gap* between the skill answer and the no-skill baseline. A test where
-// skill=0.85 and baseline=0.40 is highly discriminating (margin 0.45) yet a
-// 0.9 bar drops it. Instead we keep on margin, then calibrate a committed
-// threshold that sits safely between baseline and skill.
+// --- Lever 2: margin-based keep decision against a FIXED committed threshold ---
+// A single fixed pass bar throws away a candidate's strongest signal: the *gap*
+// between the skill answer and the no-skill baseline. So the keep decision is
+// margin-based. But the committed g-eval threshold must NOT be fitted to the same
+// run's judge scores that selected the candidate — deriving the bar from those
+// scores is circular (it guarantees a pass). Instead we commit a FIXED authoring
+// bar and keep a candidate only if the skill clears it AND the baseline fails it,
+// each by the SAFETY margin. Fixed bar + straddle test = no same-sample fitting.
 const SAFETY = 0.1; // robustness buffer against g-eval run-to-run noise
-const MIN_MARGIN = 2 * SAFETY; // 0.2 — need room for a threshold in the band
+const MIN_MARGIN = 2 * SAFETY; // 0.2 — skill must clear baseline by a real gap
 const MIN_SKILL = 0.7; // floor on skill answer quality (else it's a skill gap)
-const THRESHOLD_CAP = 0.9; // don't commit a bar stronger than the original ceiling
-const THRESHOLD_FLOOR = 0.8; // authoring contract is 0.80–0.95; a calibrated bar
-// below this means the skill can't reliably support a real threshold — quarantine
-// the candidate as a skill gap instead of lowering the bar to make it "pass".
-
-const roundTo05 = (x) => Math.round(x * 20) / 20;
-const clamp = (x, lo, hi) => Math.min(Math.max(x, lo), hi);
-
-// Place the committed g-eval threshold just below the skill score (strongest
-// bar the skill reliably clears), but never below baseline+SAFETY, never above
-// the cap. Rounded to a clean 0.05 step.
-function calibrateThreshold(skillScore, baselineScore) {
-  const hi = roundTo05(skillScore - SAFETY);
-  const lo = roundTo05(baselineScore + SAFETY);
-  return clamp(Math.max(hi, lo), lo, THRESHOLD_CAP);
-}
+const COMMITTED_THRESHOLD = 0.8; // fixed authoring-contract bar (0.80–0.95 min)
 
 function yamlStr(s) {
   // JSON double-quoted scalars are valid YAML double-quoted scalars.
@@ -262,7 +261,11 @@ async function main() {
     console.error("error: --candidates and --skill are required");
     process.exit(2);
   }
-  const spec = JSON.parse(fs.readFileSync(path.resolve(args.candidates), "utf8"));
+  const candidatesPath = path.resolve(args.candidates);
+  const candidatesText = fs.readFileSync(candidatesPath, "utf8");
+  const spec = JSON.parse(candidatesText);
+  const candidatesSha256 = crypto.createHash("sha256").update(candidatesText).digest("hex");
+  const contextTruncated = !!(spec.context && spec.context.truncated);
   // Mirror evals/providers/skill-provider.js: load ONLY SKILL.md as skill
   // context so the gate's fail→pass decision matches the harness that runs
   // these tests. (scaffold-eval.mjs still generates from the full reference
@@ -300,17 +303,21 @@ async function main() {
     let verdict;
     let margin = null;
     let kwOk = null;
-    let calibratedThreshold = c.threshold;
+    let committedThreshold = COMMITTED_THRESHOLD;
 
     const judgeValid = withSkill.valid && baseline.valid;
     if (!judgeValid) {
-      // B1: fail closed on malformed judge evidence — never coerce/clamp.
+      // R1: fail closed on malformed judge evidence — never coerce/clamp.
       verdict = "drop: judge returned invalid/missing score (fail-closed)";
     } else {
       kwOk = dry ? true : keywordsPass(withSkill.answer, c.keywords);
       margin = withSkill.score - baseline.score;
       const discriminating = margin >= MIN_MARGIN;
       const skillStrong = withSkill.score >= MIN_SKILL;
+      // R3: fixed-bar straddle test — NOT fitted to this sample. The skill must
+      // clear the committed threshold and the baseline must fail it, each by SAFETY.
+      const skillClears = withSkill.score >= COMMITTED_THRESHOLD + SAFETY;
+      const baselineFails = baseline.score <= COMMITTED_THRESHOLD - SAFETY;
 
       if (!kwOk) {
         verdict = "drop: skill answer missing required keyword(s)";
@@ -321,25 +328,24 @@ async function main() {
         )} < ${MIN_SKILL}) — skill gap, not promotable`;
       } else if (!discriminating) {
         verdict = `drop: not discriminating (margin ${margin.toFixed(2)} < ${MIN_MARGIN})`;
+      } else if (!skillClears || !baselineFails) {
+        // Not separable at the fixed committed bar with the safety margin: the
+        // skill can't reliably clear it, or the baseline also clears it.
+        quarantined = true;
+        verdict =
+          `quarantine: not separable at committed threshold ${COMMITTED_THRESHOLD.toFixed(2)} ` +
+          `(need skill ≥ ${(COMMITTED_THRESHOLD + SAFETY).toFixed(2)} and baseline ≤ ` +
+          `${(COMMITTED_THRESHOLD - SAFETY).toFixed(2)}) — skill gap, not promotable`;
       } else {
-        const t = calibrateThreshold(withSkill.score, baseline.score);
-        if (t < THRESHOLD_FLOOR) {
-          // B3: don't lower the bar below the authoring floor to force a pass.
-          quarantined = true;
-          verdict = `quarantine: calibrated threshold ${t.toFixed(
-            2
-          )} < floor ${THRESHOLD_FLOOR} — skill gap, not promotable`;
-        } else {
-          calibratedThreshold = t;
-          kept = true;
-          verdict = `keep (threshold ${t.toFixed(2)})`;
-        }
+        committedThreshold = COMMITTED_THRESHOLD;
+        kept = true;
+        verdict = `keep (threshold ${COMMITTED_THRESHOLD.toFixed(2)})`;
       }
     }
 
     results.push({
       description: c.description,
-      threshold: calibratedThreshold,
+      threshold: committedThreshold,
       proposedThreshold: c.threshold,
       withSkillScore: withSkill.score,
       baselineScore: baseline.score,
@@ -353,7 +359,7 @@ async function main() {
       baselineAnswer: baseline.answer,
       skillReason: withSkill.reason,
       baselineReason: baseline.reason,
-      candidate: { ...c, threshold: calibratedThreshold },
+      candidate: { ...c, threshold: committedThreshold },
     });
   }
 
@@ -389,16 +395,30 @@ async function main() {
     // audit and reproduce why each candidate was kept — answers, judge reasons,
     // skill SHA, the generation context manifest, generator identity, dry state.
     const skillSha256 = crypto.createHash("sha256").update(skillContent).digest("hex");
+    // R4: a report is promotable only if it is a real (non-dry) run AND the
+    // generation bundle was NOT truncated — truncation means mandatory reference
+    // material (e.g. a constraint spec) was omitted, so the tests aren't fully
+    // grounded and must not be promoted regardless of per-candidate verdicts.
+    const promotable = !dry && !contextTruncated;
+    const notPromotableReason = dry
+      ? "dry-run"
+      : contextTruncated
+        ? "generation context truncated — mandatory reference material omitted at cost budget"
+        : null;
     const report = {
       system: spec.system,
       generator: GENERATOR,
+      scaffold: spec.generator ?? null,
       dryRun: dry,
-      promotable: !dry,
+      promotable,
+      notPromotableReason,
       source: {
+        repoCommit: repoCommit(),
         skillPath: spec.skillPath,
         skillFile: path.resolve(args.skill),
         skillSha256,
-        candidatesFile: path.resolve(args.candidates),
+        candidatesFile: candidatesPath,
+        candidatesSha256,
         generatedAt: spec.generatedAt ?? null,
         context: spec.context ?? null,
       },
@@ -412,10 +432,15 @@ async function main() {
   }
 
   const fmt = (x) => (typeof x === "number" ? x.toFixed(2) : "n/a");
+  const promoteNote = dry
+    ? " (DRY-RUN — not promotable)"
+    : contextTruncated
+      ? " (context truncated — not promotable)"
+      : "";
   console.log(
     `gate: ${kept.length}/${results.length} kept` +
       (quarantinedCount ? `, ${quarantinedCount} quarantined` : "") +
-      (dry ? " (DRY-RUN — not promotable)" : "") +
+      promoteNote +
       ` → ${outPath}` +
       `\ntriggers: ${triggerCount} → ${triggerOut}` +
       `\nwiring → ${wiringOut}` +
@@ -431,7 +456,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err.message);
-  process.exit(1);
-});
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}

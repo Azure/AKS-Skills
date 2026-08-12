@@ -54,9 +54,16 @@ jobs:
           SKILL: ${{ inputs.skill }}
         run: |
           set -euo pipefail
-          SKILL_MD=$(find skills -type f -name SKILL.md | grep -E "/${SKILL}/SKILL.md$" | head -1 || true)
-          if [ -z "$SKILL_MD" ]; then
-            echo "::error::No SKILL.md found for skill '${SKILL}' under skills/**"
+          # Treat the input as an EXACT skill slug, never a regex. Reject anything
+          # that isn't a lowercase-hyphen slug so inputs like ".*" can't select an
+          # arbitrary skill, then resolve the one exact path.
+          if ! printf '%s' "$SKILL" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'; then
+            echo "::error::Invalid skill slug '${SKILL}' (expected e.g. aks-known-issues)"
+            exit 1
+          fi
+          SKILL_MD="skills/${SKILL}/SKILL.md"
+          if [ ! -f "$SKILL_MD" ]; then
+            echo "::error::No SKILL.md at ${SKILL_MD}"
             exit 1
           fi
           echo "skill_md=$SKILL_MD" >> "$GITHUB_OUTPUT"

@@ -20,6 +20,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const DEFAULT_MAX_CHARS = 20000; // ~5k tokens — cost guard for the bundle
 const BUNDLE_SEP = "\n\n---\n\n";
@@ -49,18 +50,21 @@ export function parseSkillName(skillContent) {
  * @param {string} skillFile  path to SKILL.md
  * @param {object} [opts]
  * @param {number} [opts.maxChars]  hard cap on the combined bundle size
- * @returns {{ text: string, name: string|null, files: string[], omitted: string[], truncated: boolean }}
+ * @returns {{ text: string, name: string|null, files: {path: string, sha256: string}[], omitted: string[], truncated: boolean }}
  */
 export function loadSkillBundle(skillFile, opts = {}) {
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   const abs = path.resolve(skillFile);
   const skillContent = fs.readFileSync(abs, "utf8");
   const name = parseSkillName(skillContent);
+  const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
   // SKILL.md is the core and is always included (even if it alone exceeds budget).
+  // Each included file carries its own content hash so the manifest binds the
+  // generated tests to the exact bytes they were grounded in.
   const skillBlock = `# SKILL.md\n\n${skillContent.trim()}`;
   const parts = [skillBlock];
-  const files = [abs];
+  const files = [{ path: abs, sha256: sha(skillContent) }];
   const omitted = [];
   let size = skillBlock.length;
 
@@ -84,14 +88,14 @@ export function loadSkillBundle(skillFile, opts = {}) {
   }
 
   for (const { label, p } of refs) {
-    const body = fs.readFileSync(p, "utf8").trim();
-    const block = `# reference: ${label}\n\n${body}`;
+    const raw = fs.readFileSync(p, "utf8");
+    const block = `# reference: ${label}\n\n${raw.trim()}`;
     if (size + BUNDLE_SEP.length + block.length > maxChars) {
       omitted.push(path.resolve(p)); // record, keep scanning for smaller files
       continue;
     }
     parts.push(block);
-    files.push(path.resolve(p));
+    files.push({ path: path.resolve(p), sha256: sha(raw) });
     size += BUNDLE_SEP.length + block.length;
   }
 

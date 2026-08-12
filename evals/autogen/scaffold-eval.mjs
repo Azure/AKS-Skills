@@ -20,11 +20,23 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chat, parseJsonLoose } from "./lib/llm.mjs";
 import { loadSkillBundle } from "./skill-context.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCAFFOLD = { name: "scaffold-eval.mjs", version: "1.0.0" };
+
+// Best-effort repository commit SHA so a generated candidate set is bound to the
+// exact source tree. Falls back to the CI-provided SHA, then null.
+function repoCommit() {
+  try {
+    return execSync("git rev-parse HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
+  } catch {
+    return process.env.GITHUB_SHA || null;
+  }
+}
 
 // Drop duplicate items by a normalized key (case-insensitive, trimmed).
 function dedupeBy(items, keyFn) {
@@ -42,11 +54,13 @@ function dedupeBy(items, keyFn) {
 // The registered skill IDs are the subdirectory names of the skills/ root that
 // holds this skill (skills/<id>/SKILL.md). Boundary route targets must be one of
 // these (plus the router's "none"); anything else is a hallucinated route.
-function registeredSkillIds(skillFile) {
+export function registeredSkillIds(skillFile) {
   const root = path.resolve(path.dirname(skillFile), "..");
   const ids = new Set(["none"]);
   for (const d of fs.readdirSync(root, { withFileTypes: true })) {
-    if (d.isDirectory()) ids.add(d.name);
+    // A directory only counts as a registered skill if it actually contains a
+    // SKILL.md — an empty or placeholder directory is NOT a valid route target.
+    if (d.isDirectory() && fs.existsSync(path.join(root, d.name, "SKILL.md"))) ids.add(d.name);
   }
   return ids;
 }
@@ -108,33 +122,53 @@ function validateCandidate(c, i) {
 }
 
 // Normalize the trigger generation into { positives:[str], boundaries:[{prompt,expected}] }.
-// Boundaries are dropped when: missing prompt/expected, expected routes back to
-// this skill (not a boundary), or expected is not a registered skill ID (a
-// hallucinated route). Positives and boundary prompts are de-duplicated.
-function validateTriggers(raw, skillName, knownSkills) {
-  const out = { positives: [], boundaries: [] };
-  if (!raw || typeof raw !== "object") return out;
-  const positives = [];
-  for (const p of Array.isArray(raw.positives) ? raw.positives : []) {
-    if (typeof p === "string" && p.trim()) positives.push(p.trim());
+// Shape and targets are STRICT and fail-closed: a present-but-malformed field, a
+// blank/typeless entry, or a boundary routing to an UNREGISTERED skill throws
+// (nonzero exit) rather than being silently coerced/dropped — emitting a bad
+// routing target or hiding a broken generation is worse than failing the run.
+// The only silent drops are redundancies: duplicate prompts and boundaries that
+// route back to this same skill (which are not boundaries at all).
+export function validateTriggers(raw, skillName, knownSkills) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("triggers: expected an object { positives, boundaries }");
   }
-  out.positives = dedupeBy(positives, (p) => p);
+  if (raw.positives !== undefined && !Array.isArray(raw.positives)) {
+    throw new Error("triggers.positives must be an array of strings");
+  }
+  if (raw.boundaries !== undefined && !Array.isArray(raw.boundaries)) {
+    throw new Error("triggers.boundaries must be an array of {prompt, expected}");
+  }
+  const positives = [];
+  for (const p of raw.positives ?? []) {
+    if (typeof p !== "string" || !p.trim()) {
+      throw new Error(`triggers.positives: every entry must be a non-empty string (got ${JSON.stringify(p)})`);
+    }
+    positives.push(p.trim());
+  }
 
   const boundaries = [];
-  for (const b of Array.isArray(raw.boundaries) ? raw.boundaries : []) {
-    if (!b || typeof b !== "object") continue;
+  for (const b of raw.boundaries ?? []) {
+    if (!b || typeof b !== "object" || Array.isArray(b)) {
+      throw new Error("triggers.boundaries: every entry must be an object {prompt, expected}");
+    }
     const prompt = typeof b.prompt === "string" ? b.prompt.trim() : "";
     const expected = typeof b.expected === "string" ? b.expected.trim() : "";
-    if (!prompt || !expected) continue;
+    if (!prompt || !expected) {
+      throw new Error(`triggers.boundaries: entry missing prompt/expected (${JSON.stringify(b)})`);
+    }
+    // Routing back to this same skill is not a boundary — drop as redundant.
     if (skillName && expected === skillName) continue;
-    if (knownSkills && knownSkills.size && !knownSkills.has(expected)) {
-      console.warn(`  drop boundary → unknown route target "${expected}": ${prompt}`);
-      continue;
+    // A boundary MUST route to a registered skill (a directory with a real
+    // SKILL.md). An unregistered target is a hallucinated route: fail closed.
+    if (!knownSkills || !knownSkills.size || !knownSkills.has(expected)) {
+      throw new Error(`triggers.boundaries: unregistered route target "${expected}" (${prompt})`);
     }
     boundaries.push({ prompt, expected });
   }
-  out.boundaries = dedupeBy(boundaries, (b) => b.prompt);
-  return out;
+  return {
+    positives: dedupeBy(positives, (p) => p),
+    boundaries: dedupeBy(boundaries, (b) => b.prompt),
+  };
 }
 
 async function main() {
@@ -201,8 +235,10 @@ async function main() {
     skillName,
     skillPath: args["skill-path"],
     provenance: "autogen",
+    generator: SCAFFOLD,
     generatedAt: new Date().toISOString(),
     context: {
+      repoCommit: repoCommit(),
       files: bundle.files,
       omitted: bundle.omitted,
       truncated: bundle.truncated,
@@ -221,7 +257,9 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(err.message);
-  process.exit(1);
-});
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}
