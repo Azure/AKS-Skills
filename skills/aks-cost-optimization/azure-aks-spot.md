@@ -56,13 +56,12 @@ Pods that tolerate Spot but don't require it (no `nodeSelector` or required node
 ## Workload Toleration (add to Deployment YAML)
 
 ```yaml
+# Omit nodeSelector/required node affinity so regular nodes remain a fallback.
 tolerations:
 - key: "kubernetes.azure.com/scalesetpriority"
   operator: "Equal"
   value: "spot"
   effect: "NoSchedule"
-nodeSelector:
-  kubernetes.azure.com/scalesetpriority: spot
 ```
 
 ## Suitability

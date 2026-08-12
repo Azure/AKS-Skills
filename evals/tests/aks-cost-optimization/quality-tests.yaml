@@ -36,8 +36,25 @@
     skill_path: "aks-cost-optimization/azure-aks-spot.md"
     prompt: "If Azure reclaims my Spot node capacity, will the PodDisruptionBudget on my deployment prevent or limit that eviction? What should I actually rely on for resilience?"
   assert:
-    - type: not-icontains
-      value: "poddisruptionbudget to limit simultaneous evictions"
+    - type: javascript
+      value: |
+        (output) => {
+          const sentences = output.split(/(?<=[.!?])\s+|\r?\n+/);
+          const mentionsPdb = /\b(?:poddisruptionbudget|pdb)s?\b/i;
+          const mentionsSpot = /\bspot\b/i;
+          const mentionsReclamation = /\b(?:reclaim|evict|deallocat|delet)\w*\b/i;
+          const claimsControl = /\b(?:prevent|protect|limit|block|stop|honou?r|respect|constrain)\w*\b/i;
+          const negatesControl = /\b(?:does?\s+not|do\s+not|cannot|can't|won't|never|no\s+effect)\b/i;
+          const explicitlyVoluntary = /\bvoluntary\b|\beviction\s+api\b/i;
+          return !sentences.some((sentence) =>
+            mentionsPdb.test(sentence)
+            && mentionsSpot.test(sentence)
+            && mentionsReclamation.test(sentence)
+            && claimsControl.test(sentence)
+            && !negatesControl.test(sentence)
+            && !explicitlyVoluntary.test(sentence)
+          );
+        }
     - type: g-eval
       value: "The response clearly says a PDB does not prevent or limit Azure infrastructure Spot reclamation and only constrains voluntary disruptions that use the Kubernetes Eviction API. It directs Spot resilience to multiple replicas distributed across nodes or failure domains plus regular fallback capacity, without inventing a replica or capacity threshold."
       threshold: 0.8

@@ -4,28 +4,47 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
-import yaml from 'js-yaml';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const evalRoot = path.resolve(testDir, '../..');
-const qualityTests = yaml.load(
-  fs.readFileSync(path.join(testDir, 'quality-tests.yaml'), 'utf8'),
+const qualityTestSource = fs.readFileSync(
+  path.join(testDir, 'quality-tests.yaml'),
+  'utf8',
 );
-const autoscalerTest = qualityTests.find(
-  ({ description }) => description
-    === 'Autoscaler cost tuning must not recommend disabling kube-system pod protection',
+
+function testSection(description) {
+  const marker = `- description: "${description}"`;
+  const start = qualityTestSource.indexOf(marker);
+  assert.notEqual(start, -1, `Missing quality test: ${description}`);
+  const next = qualityTestSource.indexOf('\n- description: "', start + marker.length);
+  return qualityTestSource.slice(start, next === -1 ? undefined : next);
+}
+
+const autoscalerSection = testSection(
+  'Autoscaler cost tuning must not recommend disabling kube-system pod protection',
 );
-const fencedCommandAssertion = autoscalerTest.assert.find(
-  ({ type }) => type === 'javascript',
+const fencedCommandAssertion = autoscalerSection.match(
+  /- type: javascript\r?\n\s+value: "(file:\/\/[^"]+)"/,
 );
-assert.match(fencedCommandAssertion.value, /^file:\/\//);
+assert.ok(fencedCommandAssertion, 'Missing autoscaler JavaScript assertion');
 const assertionPath = path.resolve(
   evalRoot,
-  fencedCommandAssertion.value.slice('file://'.length),
+  fencedCommandAssertion[1].slice('file://'.length),
 );
 const { default: assertNoUnsafeAutoscalerCommand } = await import(
   pathToFileURL(assertionPath)
 );
+const spotSection = testSection(
+  'Spot resilience guidance must not claim a PDB stops Azure Spot reclamation',
+);
+const spotPdbAssertion = spotSection.match(
+  /- type: javascript\r?\n\s+value: \|\r?\n((?: {8}.*(?:\r?\n|$))+)/,
+);
+assert.ok(spotPdbAssertion, 'Missing inline Spot PDB JavaScript assertion');
+const spotPdbAssertionSource = spotPdbAssertion[1].replace(/^ {8}/gm, '').trim();
+const assertNoInvalidSpotPdbClaim = Function(
+  `"use strict"; return (${spotPdbAssertionSource});`,
+)();
 
 test('safe caveat between separate command blocks passes', () => {
   const response = `Use the cost-optimized profile:
@@ -69,4 +88,57 @@ az aks update \\
 \`\`\``;
 
   assert.equal(assertNoUnsafeAutoscalerCommand(response).pass, false);
+});
+
+test('unsafe PowerShell command with backtick continuations fails', () => {
+  const response = `Apply this profile:
+
+\`\`\`powershell
+az aks update \`
+  --cluster-autoscaler-profile \`
+    scale-down-delay-after-add=5m \`
+    skip-nodes-with-system-pods=false
+\`\`\``;
+
+  assert.equal(assertNoUnsafeAutoscalerCommand(response).pass, false);
+});
+
+test('unsafe pwsh command with backtick continuations fails', () => {
+  const response = `Apply this profile:
+
+\`\`\`pwsh
+Az AKS Update \`
+  --cluster-autoscaler-profile \`
+    scale-down-unneeded-time=5m \`
+    SKIP-NODES-WITH-SYSTEM-PODS=false
+\`\`\``;
+
+  assert.equal(assertNoUnsafeAutoscalerCommand(response).pass, false);
+});
+
+test('valid PDB guidance for voluntary drains passes', () => {
+  const response = [
+    'Use a PodDisruptionBudget to limit simultaneous evictions during voluntary drains.',
+    'A PDB does not prevent Azure Spot reclamation.',
+  ].join(' ');
+
+  assert.equal(assertNoInvalidSpotPdbClaim(response), true);
+});
+
+test('valid Eviction API guidance for Spot workloads passes', () => {
+  const response = 'A PDB can limit Eviction API disruptions during a voluntary drain of Spot-backed workloads.';
+
+  assert.equal(assertNoInvalidSpotPdbClaim(response), true);
+});
+
+test('claim that a PDB limits Azure Spot reclamation fails', () => {
+  const response = 'Use a PodDisruptionBudget to limit simultaneous evictions during Azure Spot reclamation.';
+
+  assert.equal(assertNoInvalidSpotPdbClaim(response), false);
+});
+
+test('claim that a PDB limits eviction when Azure reclaims Spot nodes fails', () => {
+  const response = 'A PDB limits evictions when Azure reclaims Spot nodes.';
+
+  assert.equal(assertNoInvalidSpotPdbClaim(response), false);
 });

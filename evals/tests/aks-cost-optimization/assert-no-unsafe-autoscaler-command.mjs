@@ -1,4 +1,12 @@
-const SHELL_LANGUAGES = new Set(['', 'bash', 'azurecli', 'sh', 'shell']);
+const SHELL_LANGUAGES = new Set([
+  '',
+  'azurecli',
+  'bash',
+  'powershell',
+  'pwsh',
+  'sh',
+  'shell',
+]);
 const UNSAFE_SETTING = 'skip-nodes-with-system-pods=false';
 
 function stripShellComment(line) {
@@ -88,7 +96,7 @@ function shellCommands(block) {
     .split(/\r?\n/)
     .map(stripShellComment)
     .join('\n')
-    .replace(/\\\s*\n/g, ' ');
+    .replace(/(?:\\|`)\s*\n/g, ' ');
 
   return splitShellCommands(uncommented);
 }
@@ -101,8 +109,8 @@ export default function assertNoUnsafeAutoscalerCommand(output) {
     if (!SHELL_LANGUAGES.has(language)) continue;
 
     const hasUnsafeCommand = shellCommands(block).some(
-      (command) => /\baz\s+aks\s+update\b/.test(command)
-        && command.includes(UNSAFE_SETTING),
+      (command) => /\baz\s+aks\s+update\b/i.test(command)
+        && command.toLowerCase().includes(UNSAFE_SETTING),
     );
     if (hasUnsafeCommand) {
       return {
