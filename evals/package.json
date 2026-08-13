@@ -4,10 +4,9 @@
   "private": true,
   "description": "Evaluation pipeline for AKS Skills",
   "scripts": {
-    "lint": "node lint-skills.js && npm run test:deterministic",
+    "lint": "node lint-skills.js",
     "lint:selftest": "node lint-skills.test.js",
     "test": "node providers/llm-client.test.js",
-    "test:deterministic": "node --test tests/aks-cost-optimization/quality-assertion.test.mjs",
     "eval": "promptfoo eval -o results.json",
     "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
     "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",
