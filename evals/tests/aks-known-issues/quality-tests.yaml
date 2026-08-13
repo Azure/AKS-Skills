@@ -185,10 +185,12 @@
   assert:
     - type: icontains
       value: "zonalallocation-allocationfailed-error"
-    - type: icontains
-      value: "maxUnavailable"
+    - type: regex
+      value: 'maxUnavailable`?(?:\s*>\s*0|\s*(?:=|:)\s*[1-9]\d*%?|[^\n]*greater than[^\n]*`?0`?)'
+    - type: regex
+      value: 'maxSurge(?:\s*=\s*|\s*:\s*|\s+to\s+)0'
     - type: g-eval
-      value: "Response identifies an explicit placement-capacity failure, recommends retrying or using another SKU, zone, region, or node pool, and may recommend maxUnavailable because this is an upgrade. It cites the Microsoft Learn AKS allocation guidance and does not claim quota exhaustion."
+      value: "Response identifies an explicit placement-capacity failure, recommends retrying or using another SKU, zone, region, or node pool, and for this upgrade requires both maxUnavailable > 0 and maxSurge=0 together to avoid requesting surge capacity. It cites the Microsoft Learn AKS allocation guidance and does not claim quota exhaustion."
       threshold: 0.8
 
 - description: "Capacity-form AllocationFailed avoids upgrade-only advice during scale"
