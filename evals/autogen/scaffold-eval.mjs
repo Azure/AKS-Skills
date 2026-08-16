@@ -171,6 +171,28 @@ export function validateTriggers(raw, skillName, knownSkills) {
   };
 }
 
+export async function generateDrafts({
+  qualityTemplate,
+  triggerTemplate,
+  bundleText,
+  skillName,
+  knownSkills,
+  chatImpl = chat,
+}) {
+  const qualityRequest = chatImpl({ system: qualityTemplate, user: bundleText });
+  const triggerRequest = triggerTemplate
+    ? chatImpl({ system: triggerTemplate, user: bundleText })
+    : Promise.resolve(null);
+  const [qualityResponse, triggerResponse] = await Promise.all([qualityRequest, triggerRequest]);
+
+  return {
+    raw: parseJsonLoose(qualityResponse.text),
+    triggers: triggerResponse
+      ? validateTriggers(parseJsonLoose(triggerResponse.text), skillName, knownSkills)
+      : { positives: [], boundaries: [] },
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.skill || !args["skill-path"] || !args.system) {
@@ -200,22 +222,22 @@ async function main() {
     raw = DRY_RUN_SAMPLE;
     triggers = args["no-triggers"] ? { positives: [], boundaries: [] } : DRY_RUN_TRIGGERS;
   } else {
-    const template = fs
+    const qualityTemplate = fs
       .readFileSync(path.join(__dirname, "prompts", "quality.md"), "utf8")
       .replaceAll("{{MIN}}", String(min))
       .replaceAll("{{MAX}}", String(max));
-    const { text } = await chat({ system: template, user: bundle.text });
-    raw = parseJsonLoose(text);
-
-    if (args["no-triggers"]) {
-      triggers = { positives: [], boundaries: [] };
-    } else {
-      const triggerTemplate = fs
-        .readFileSync(path.join(__dirname, "prompts", "trigger.md"), "utf8")
-        .replaceAll("{{SKILL_NAME}}", skillName);
-      const tResp = await chat({ system: triggerTemplate, user: bundle.text });
-      triggers = validateTriggers(parseJsonLoose(tResp.text), skillName, knownSkills);
-    }
+    const triggerTemplate = args["no-triggers"]
+      ? null
+      : fs
+          .readFileSync(path.join(__dirname, "prompts", "trigger.md"), "utf8")
+          .replaceAll("{{SKILL_NAME}}", skillName);
+    ({ raw, triggers } = await generateDrafts({
+      qualityTemplate,
+      triggerTemplate,
+      bundleText: bundle.text,
+      skillName,
+      knownSkills,
+    }));
   }
 
   if (!Array.isArray(raw)) throw new Error("model did not return a JSON array of candidates");
