@@ -37,5 +37,9 @@ scaffold-eval.mjs  →  <skill>.candidates.json  →  baseline-gate.mjs  →  *.
 The `--dry-run` flag on both scripts skips all model calls and emits fixed samples —
 use it to test wiring/plumbing without LLM spend.
 
+The baseline gate still makes four model requests per candidate. It runs the skill
+and baseline answer calls concurrently, then runs both judge calls concurrently;
+this reduces latency without changing request count or model spend.
+
 See the parent [evals/README.md](../README.md#autogen--draft-eval-coverage-from-a-skillmd)
 for the maintainer workflow and end-to-end usage.
