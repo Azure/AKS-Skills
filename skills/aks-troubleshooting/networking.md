@@ -113,17 +113,25 @@ az network nic show-effective-route-table \
 COREDNS_SUBNET_NSG_ID=$(az network vnet subnet show \
   --ids "$COREDNS_SOURCE_SUBNET_ID" \
   --query networkSecurityGroup.id -o tsv)
-az network nsg show \
-  --ids "$COREDNS_SUBNET_NSG_ID" \
-  --query '{customOutbound:securityRules[?direction==`Outbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
-  -o json
+if [ -n "$COREDNS_SUBNET_NSG_ID" ]; then
+  az network nsg show \
+    --ids "$COREDNS_SUBNET_NSG_ID" \
+    --query '{customOutbound:securityRules[?direction==`Outbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
+    -o json
+else
+  printf 'subnetNsg=absent\n'
+fi
 COREDNS_ROUTE_TABLE_ID=$(az network vnet subnet show \
   --ids "$COREDNS_SOURCE_SUBNET_ID" \
   --query routeTable.id -o tsv)
-az network route-table show \
-  --ids "$COREDNS_ROUTE_TABLE_ID" \
-  --query 'routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}' \
-  -o table
+if [ -n "$COREDNS_ROUTE_TABLE_ID" ]; then
+  az network route-table show \
+    --ids "$COREDNS_ROUTE_TABLE_ID" \
+    --query 'routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}' \
+    -o table
+else
+  printf 'routeTable=absent\n'
+fi
 ```
 
 Repeat these checks for each node hosting a CoreDNS pod. For Azure CNI Pod Subnet, `COREDNS_SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the CoreDNS node NIC subnet. If either NSG or route-table ID is empty, record that absence instead of running its dependent `show` command. Evaluate outbound rules and routes from the CoreDNS pod/node source to every configured upstream on both UDP and TCP destination port 53.
@@ -165,6 +173,8 @@ See [references/inspektor-gadget.md](references/inspektor-gadget.md).
 
 ### Executable evidence first
 
+A diagnosis is incomplete until every applicable evidence class below is collected, or its absence or the inability to collect it is recorded.
+
 ```bash
 AKS_RG="<cluster-resource-group>"
 AKS_NAME="<cluster-name>"
@@ -172,6 +182,8 @@ NS="<namespace>"
 POD="<affected-pod>"
 SQL_RG="<sql-resource-group>"
 SQL_SERVER="<sql-server-name>"
+SQL_FQDN="$SQL_SERVER.database.windows.net"
+SQL_DESTINATION_IP="<resolved-sql-destination-ip>"
 PRIVATE_DNS_RG="<private-dns-resource-group>"
 INCIDENT_START="<incident-start-utc>"
 INCIDENT_END="<incident-end-utc>"
@@ -188,6 +200,10 @@ NODE_RESOURCE_GROUP=$(az aks show \
   --query nodeResourceGroup -o tsv)
 SOURCE_NODE=$(kubectl get pod "$POD" -n "$NS" \
   -o jsonpath='{.spec.nodeName}')
+SOURCE_POD_IP=$(kubectl get pod "$POD" -n "$NS" \
+  -o jsonpath='{.status.podIP}')
+SOURCE_NODE_IP=$(kubectl get node "$SOURCE_NODE" \
+  -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
 SOURCE_POOL=$(kubectl get node "$SOURCE_NODE" \
   -o jsonpath='{.metadata.labels.agentpool}')
 PROVIDER_ID=$(kubectl get node "$SOURCE_NODE" \
@@ -220,6 +236,8 @@ if [ -n "$SUBNET_NSG_ID" ]; then
     --ids "$SUBNET_NSG_ID" \
     --query '{customInbound:securityRules[?direction==`Inbound`],customOutbound:securityRules[?direction==`Outbound`],defaultInbound:defaultSecurityRules[?direction==`Inbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
     -o json
+else
+  printf 'subnetNsg=absent\n'
 fi
 az network nic show-effective-route-table \
   --ids "$NODE_NIC_ID" -o table
@@ -231,13 +249,99 @@ if [ -n "$ROUTE_TABLE_ID" ]; then
     --ids "$ROUTE_TABLE_ID" \
     --query '{disableBgpRoutePropagation:disableBgpRoutePropagation,routes:routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}}' \
     -o json
+else
+  printf 'routeTable=absent\n'
 fi
+
+# Effective public egress identity for the reported AKS outbound type
+OUTBOUND_TYPE=$(az aks show \
+  --resource-group "$AKS_RG" \
+  --name "$AKS_NAME" \
+  --query networkProfile.outboundType -o tsv)
+printf 'outboundType=%s\n' "$OUTBOUND_TYPE"
+
+case "$OUTBOUND_TYPE" in
+  loadBalancer)
+    OUTBOUND_PUBLIC_IP_IDS=$(az aks show \
+      --resource-group "$AKS_RG" \
+      --name "$AKS_NAME" \
+      --query 'networkProfile.loadBalancerProfile.effectiveOutboundIPs[].id' \
+      -o tsv)
+    if [ -n "$OUTBOUND_PUBLIC_IP_IDS" ]; then
+      printf '%s\n' "$OUTBOUND_PUBLIC_IP_IDS" |
+      while IFS= read -r PUBLIC_IP_ID; do
+        [ -n "$PUBLIC_IP_ID" ] || continue
+        az network public-ip show \
+          --ids "$PUBLIC_IP_ID" \
+          --query '{id:id,ipAddress:ipAddress,publicIPPrefix:publicIPPrefix.id}' \
+          -o yaml
+      done
+    else
+      printf 'outboundIdentity=unknown: no effective load-balancer outbound public IP was returned\n'
+    fi
+    ;;
+  managedNATGateway|managedNATGatewayV2|userAssignedNATGateway|none)
+    NAT_GATEWAY_ID=$(az network vnet subnet show \
+      --ids "$SOURCE_SUBNET_ID" \
+      --query natGateway.id -o tsv)
+    if [ -n "$NAT_GATEWAY_ID" ]; then
+      az network nat gateway show \
+        --ids "$NAT_GATEWAY_ID" \
+        --query '{id:id,publicIpAddresses:publicIpAddresses[].id,publicIpPrefixes:publicIpPrefixes[].id}' \
+        -o yaml
+      NAT_PUBLIC_IP_IDS=$(az network nat gateway show \
+        --ids "$NAT_GATEWAY_ID" \
+        --query 'publicIpAddresses[].id' -o tsv)
+      NAT_PUBLIC_IP_PREFIX_IDS=$(az network nat gateway show \
+        --ids "$NAT_GATEWAY_ID" \
+        --query 'publicIpPrefixes[].id' -o tsv)
+      if [ -n "$NAT_PUBLIC_IP_IDS" ]; then
+        printf '%s\n' "$NAT_PUBLIC_IP_IDS" |
+        while IFS= read -r PUBLIC_IP_ID; do
+          [ -n "$PUBLIC_IP_ID" ] || continue
+          az network public-ip show \
+            --ids "$PUBLIC_IP_ID" \
+            --query '{id:id,ipAddress:ipAddress}' -o yaml
+        done
+      else
+        printf 'natGatewayPublicIpAddresses=absent\n'
+      fi
+      if [ -n "$NAT_PUBLIC_IP_PREFIX_IDS" ]; then
+        printf '%s\n' "$NAT_PUBLIC_IP_PREFIX_IDS" |
+        while IFS= read -r PUBLIC_IP_PREFIX_ID; do
+          [ -n "$PUBLIC_IP_PREFIX_ID" ] || continue
+          az network public-ip prefix show \
+            --ids "$PUBLIC_IP_PREFIX_ID" \
+            --query '{id:id,ipPrefix:ipPrefix}' -o yaml
+        done
+      else
+        printf 'natGatewayPublicIpPrefixes=absent\n'
+      fi
+      if [ -z "$NAT_PUBLIC_IP_IDS" ] && [ -z "$NAT_PUBLIC_IP_PREFIX_IDS" ]; then
+        printf 'outboundIdentity=unknown: NAT gateway has no visible public IP or prefix identity\n'
+      fi
+    elif [ "$OUTBOUND_TYPE" = "none" ]; then
+      printf 'outboundIdentity=not AKS-managed: no source-subnet NAT gateway; use the effective route and resolve any next-hop SNAT identity\n'
+    else
+      printf 'outboundIdentity=unknown: no NAT gateway is visible on the selected source subnet\n'
+    fi
+    ;;
+  userDefinedRouting)
+    printf 'outboundIdentity=not AKS-managed: use the effective default route and resolve the next-hop SNAT identity\n'
+    ;;
+  block)
+    printf 'outboundIdentity=blocked by AKS: record any observed exception path instead of assuming public egress\n'
+    ;;
+  *)
+    printf 'outboundIdentity=unknown: unrecognized outboundType=%s\n' "$OUTBOUND_TYPE"
+    ;;
+esac
 
 # Workload DNS/TCP evidence; use nc only when already present
 kubectl exec "$POD" -n "$NS" -- \
-  nslookup "$SQL_SERVER.database.windows.net"
+  nslookup "$SQL_FQDN"
 kubectl exec "$POD" -n "$NS" -- \
-  nc -vz -w <timeout-seconds> "$SQL_SERVER.database.windows.net" 1433
+  nc -vz -w <timeout-seconds> "$SQL_FQDN" 1433
 
 # Azure SQL public endpoint, service endpoint/VNet rule, private endpoint/DNS
 az sql server show \
@@ -247,7 +351,9 @@ az sql server show \
   -o yaml
 az sql server firewall-rule list \
   --resource-group "$SQL_RG" \
-  --server "$SQL_SERVER" -o table
+  --server "$SQL_SERVER" \
+  --query '[].{name:name,startIpAddress:startIpAddress,endIpAddress:endIpAddress}' \
+  -o table
 az network vnet subnet show \
   --ids "$SOURCE_SUBNET_ID" \
   --query '{serviceEndpoints:serviceEndpoints,routeTable:routeTable.id,networkSecurityGroup:networkSecurityGroup.id}' \
@@ -284,6 +390,21 @@ az network firewall show \
 FIREWALL_ID=$(az network firewall show \
   --resource-group "$FIREWALL_RG" \
   --name "$FIREWALL_NAME" --query id -o tsv)
+FIREWALL_PUBLIC_IP_IDS=$(az network firewall show \
+  --resource-group "$FIREWALL_RG" \
+  --name "$FIREWALL_NAME" \
+  --query 'ipConfigurations[].publicIPAddress.id' -o tsv)
+if [ -n "$FIREWALL_PUBLIC_IP_IDS" ]; then
+  printf '%s\n' "$FIREWALL_PUBLIC_IP_IDS" |
+  while IFS= read -r PUBLIC_IP_ID; do
+    [ -n "$PUBLIC_IP_ID" ] || continue
+    az network public-ip show \
+      --ids "$PUBLIC_IP_ID" \
+      --query '{id:id,ipAddress:ipAddress}' -o yaml
+  done
+else
+  printf 'firewallPublicEgressIdentity=unknown: no data-plane public IP was returned\n'
+fi
 FIREWALL_POLICY_ID=$(az network firewall show \
   --resource-group "$FIREWALL_RG" \
   --name "$FIREWALL_NAME" --query firewallPolicy.id -o tsv)
@@ -316,13 +437,47 @@ az monitor diagnostic-settings list \
 az monitor log-analytics query \
   --workspace "$LOG_WORKSPACE" \
   --timespan "$INCIDENT_START/$INCIDENT_END" \
-  --analytics-query "union isfuzzy=true AZFWNetworkRule, AZFWApplicationRule, AzureDiagnostics | where _ResourceId =~ '$FIREWALL_ID' | where isempty(Category) or Category in ('AzureFirewallNetworkRule','AzureFirewallApplicationRule') | project TimeGenerated,Category,Action,RuleCollection,Rule,msg_s,SourceIp,DestinationIp,DestinationPort,Fqdn"
+  --analytics-query "
+union isfuzzy=true
+  (AZFWNetworkRule
+    | where _ResourceId =~ '$FIREWALL_ID'
+    | where SourceIp in ('$SOURCE_POD_IP', '$SOURCE_NODE_IP')
+    | where DestinationIp == '$SQL_DESTINATION_IP'
+    | where DestinationPort == 1433 and Protocol =~ 'TCP'
+    | project TimeGenerated,LogTable='AZFWNetworkRule',Action,ActionReason,
+        Protocol,SourceIp,Destination=DestinationIp,DestinationPort,
+        RuleCollectionGroup,RuleCollection,Rule),
+  (AZFWApplicationRule
+    | where _ResourceId =~ '$FIREWALL_ID'
+    | where SourceIp in ('$SOURCE_POD_IP', '$SOURCE_NODE_IP')
+    | where Fqdn =~ '$SQL_FQDN'
+    | where DestinationPort == 1433 and Protocol in~ ('MSSQL', 'TCP')
+    | project TimeGenerated,LogTable='AZFWApplicationRule',Action,ActionReason,
+        Protocol,SourceIp,Destination=Fqdn,DestinationPort,
+        RuleCollectionGroup,RuleCollection,Rule)
+| order by TimeGenerated asc"
+az monitor log-analytics query \
+  --workspace "$LOG_WORKSPACE" \
+  --timespan "$INCIDENT_START/$INCIDENT_END" \
+  --analytics-query "
+AzureDiagnostics
+| where _ResourceId =~ '$FIREWALL_ID'
+| where Category in ('AzureFirewallNetworkRule','AzureFirewallApplicationRule')
+| where msg_s has '$SOURCE_POD_IP' or msg_s has '$SOURCE_NODE_IP'
+| where msg_s has '$SQL_DESTINATION_IP' or msg_s has '$SQL_FQDN'
+| where msg_s has '1433'
+| where msg_s has 'TCP' or msg_s has 'MSSQL'
+| extend Protocol=extract('^([A-Za-z]+) request',1,msg_s),
+         Action=extract('Action: ([A-Za-z]+)',1,msg_s)
+| project TimeGenerated,Category,Action,Protocol,msg_s
+| order by TimeGenerated asc"
 ```
 
 Fill the placeholders and run this read-only block before narrowing the failure. For Azure CNI Pod Subnet, `SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the node subnet. Empty NSG or route-table IDs mean no resource is associated. Inspect Firewall commands only when `VirtualAppliance` resolves to Azure Firewall; for an NVA, collect the equivalent selected route, network/application rules, and incident-window logs.
 
 - Run `nc` only if it already exists in the affected pod; do not install packages or create a test pod.
-- **Public endpoint:** the server FQDN resolves to a public address; evaluate SQL public network access/firewall rules and the cluster outbound path.
+- Set `SQL_DESTINATION_IP` to each address returned for the SQL FQDN from the affected pod and repeat the Firewall queries for every address used during the incident.
+- **Public endpoint:** the server FQDN resolves to a public address; compare every collected load-balancer, NAT gateway, Azure Firewall, or other next-hop SNAT public IP/prefix with the SQL firewall ranges. For `userDefinedRouting` or `none`, do not conclude that a rule allows or denies the source until the selected effective route and next-hop SNAT identity are proven. Record an unknown identity or any command/permission failure as an evidence gap.
 - **Service endpoint:** the FQDN remains public, while the source subnet advertises `Microsoft.Sql` and the SQL server has a matching virtual network rule.
 - **Private endpoint:** the FQDN follows the `privatelink.database.windows.net` chain to the private endpoint IP; verify endpoint approval, the A record, the affected VNet link or conditional forwarder, and the effective route to that private IP.
 

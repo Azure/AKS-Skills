@@ -49,10 +49,50 @@ Distinguish the evidence before choosing a fix:
 ## Node NotReady
 
 ```bash
-kubectl describe node <node>               # Conditions: MemoryPressure, DiskPressure, PIDPressure
-kubectl get events --field-selector involvedObject.name=<node> --sort-by='.lastTimestamp'
-az vmss list-instances -g MC_<rg>_<cluster>_<region> --name <vmss> -o table
-az vmss get-instance-view -g MC_<rg>_<cluster>_<region> --name <vmss> --instance-id <id>
+AKS_RG="<cluster-resource-group>"
+AKS_NAME="<cluster-name>"
+NODE="<node-name>"
+
+kubectl describe node "$NODE"
+kubectl get node "$NODE" \
+  -o jsonpath='{range .status.conditions[*]}{.lastTransitionTime}{"\t"}{.type}{"\t"}{.status}{"\t"}{.reason}{"\t"}{.message}{"\n"}{end}'
+kubectl get events --all-namespaces \
+  --field-selector involvedObject.kind=Node,involvedObject.name="$NODE" \
+  --sort-by='.metadata.creationTimestamp'
+
+# Derive the exact AKS node resource group, pool, VMSS, and instance
+NODE_RG=$(az aks show \
+  --resource-group "$AKS_RG" \
+  --name "$AKS_NAME" \
+  --query nodeResourceGroup -o tsv)
+AGENT_POOL=$(kubectl get node "$NODE" \
+  -o jsonpath='{.metadata.labels.agentpool}')
+PROVIDER_ID=$(kubectl get node "$NODE" \
+  -o jsonpath='{.spec.providerID}')
+VMSS=$(printf '%s\n' "$PROVIDER_ID" |
+  awk -F'/virtualMachineScaleSets/' '{print $2}' | cut -d/ -f1)
+INSTANCE_ID=${PROVIDER_ID##*/}
+
+printf 'nodeResourceGroup=%s\nagentPool=%s\nvmss=%s\ninstanceId=%s\n' \
+  "$NODE_RG" "$AGENT_POOL" "$VMSS" "$INSTANCE_ID"
+
+az aks nodepool show \
+  --resource-group "$AKS_RG" \
+  --cluster-name "$AKS_NAME" \
+  --name "$AGENT_POOL" \
+  --query '{provisioningState:provisioningState,powerState:powerState.code,nodeImageVersion:nodeImageVersion,orchestratorVersion:orchestratorVersion}' \
+  -o yaml
+az vmss get-instance-view \
+  --resource-group "$NODE_RG" \
+  --name "$VMSS" \
+  --instance-id "$INSTANCE_ID" \
+  -o json
+az vmss get-instance-view \
+  --resource-group "$NODE_RG" \
+  --name "$VMSS" \
+  --instance-id "$INSTANCE_ID" \
+  --query 'extensions[].{name:name,statuses:statuses,substatuses:substatuses}' \
+  -o json
 ```
 
 Common causes: kubelet crash, containerd OOM, Azure host maintenance, disk full, NTP drift, CNI plugin crash.
