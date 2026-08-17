@@ -63,6 +63,14 @@ reject "invalid capture name" \
   --name "../../etc"
 reject "overlong capture name" \
   --name aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+reject "newline in capture name" \
+  --name $'ok\n  ttlSecondsAfterFinished: 1'
+reject "carriage return in capture name" \
+  --name $'ok\rttlSecondsAfterFinished'
+reject "newline in tcpdump filter" \
+  --name t --tcpdump-filter $'udp\n        securityContext: {privileged: true}'
+reject "carriage return in tcpdump filter" \
+  --name t --tcpdump-filter $'udp\rsecurityContext'
 
 # Static assertion: no `eval` in command position in the runtime scripts.
 if grep -h -vE '^[[:space:]]*#' "$CREATE_SCRIPT" "$RUN_SCRIPT" "$RETRIEVE_SCRIPT" \

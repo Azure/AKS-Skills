@@ -69,16 +69,29 @@ EOF
 die() { echo "Error: $*" >&2; exit 1; }
 
 # --- strict validators (allowlist, never denylist) ---
+valid_single_line() {
+  case "$1" in
+    *$'\r'*|*$'\n'*) return 1 ;;
+  esac
+  return 0
+}
 valid_rfc1123() {
-  [ "${#1}" -le 63 ] && printf '%s' "$1" | grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+  valid_single_line "$1" && [ "${#1}" -le 63 ] \
+    && printf '%s' "$1" | grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
 }
 valid_node_name() {
-  [ "${#1}" -le 253 ] && printf '%s' "$1" \
+  valid_single_line "$1" && [ "${#1}" -le 253 ] && printf '%s' "$1" \
     | grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
 }
-valid_label_selector() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._/=,-]+$'; }
-valid_duration() { printf '%s' "$1" | grep -Eq '^[0-9]+[smh]$'; }
-valid_uint() { printf '%s' "$1" | grep -Eq '^[0-9]+$'; }
+valid_label_selector() {
+  valid_single_line "$1" && printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._/=,-]+$'
+}
+valid_duration() {
+  valid_single_line "$1" && printf '%s' "$1" | grep -Eq '^[0-9]+[smh]$'
+}
+valid_uint() {
+  valid_single_line "$1" && printf '%s' "$1" | grep -Eq '^[0-9]+$'
+}
 
 duration_to_seconds() {
   local d="$1" n unit
@@ -94,6 +107,7 @@ validate_filter() {
   local f="$1" tok
   [ -z "$f" ] && return 0
   [ "${#f}" -le 1024 ] || die "--tcpdump-filter too long (max 1024 chars)"
+  valid_single_line "$f" || die "--tcpdump-filter contains disallowed characters"
   # Safe BPF charset only: letters, digits, spaces, dots, colons, slashes, brackets,
   # and the operators () and & | . No quotes, backticks, ;, $, newlines, or backslashes.
   printf '%s' "$f" | grep -Eq '^[A-Za-z0-9 ._:/()&|<>=!-]+$' \
