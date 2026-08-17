@@ -51,17 +51,27 @@ az aks nodepool add \
   --labels "kubernetes.azure.com/scalesetpriority=spot"
 ```
 
-Pods that tolerate Spot but don't require it (no `nodeSelector` or required node affinity pinning them to the Spot pool) will be rescheduled onto the regular pool after eviction. Pods pinned to Spot via `nodeSelector` cannot reschedule and will remain pending until a Spot node is available again.
+The toleration below makes Spot nodes eligible, while preferred node affinity biases scheduling toward Spot when it is available. Because the affinity is preferred rather than required, regular nodes remain eligible as fallback when Spot capacity cannot satisfy the pod. Pods pinned to Spot with a `nodeSelector` or required node affinity cannot use that fallback and will remain pending until a Spot node is available again.
 
-## Workload Toleration (add to Deployment YAML)
+## Workload Toleration and Preference (add to Deployment YAML)
 
 ```yaml
-# Omit nodeSelector/required node affinity so regular nodes remain a fallback.
 tolerations:
 - key: "kubernetes.azure.com/scalesetpriority"
   operator: "Equal"
   value: "spot"
   effect: "NoSchedule"
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    # Kubernetes preference weights are 1-100; use 100 to strongly favor Spot.
+    - weight: 100
+      preference:
+        matchExpressions:
+        - key: "kubernetes.azure.com/scalesetpriority"
+          operator: In
+          values:
+          - "spot"
 ```
 
 ## Suitability
