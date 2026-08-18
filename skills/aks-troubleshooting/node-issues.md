@@ -2,6 +2,30 @@
 
 ## Node NotReady — executable evidence first
 
+Every identifier in this block is derivable or enumerable — exhaust derivation before asking the user for one. If no node was named, enumerate candidates with `kubectl get nodes --no-headers | awk '$2 !~ /^Ready(,|$)/'` and run the block for each; an empty result means no node in the current cluster is NotReady, so reconfirm the cluster identity before concluding. The VMSS name and instance id are computed from the node's `providerID` inside the block — never request them.
+
+If the cluster name or resource group is unknown, capture the current kubeconfig server and enumerate AKS clusters in every enabled subscription available to the current Azure CLI identity:
+
+```bash
+KUBECONFIG_SERVER=$(kubectl config view --minify \
+  -o jsonpath='{.clusters[0].cluster.server}')
+printf 'kubeconfigServer=%s\n' "$KUBECONFIG_SERVER"
+
+az account list --query "[?state=='Enabled'].id" -o tsv |
+  while IFS= read -r SUBSCRIPTION_ID; do
+    printf 'subscriptionId=%s\n' "$SUBSCRIPTION_ID"
+    if ! az aks list \
+      --subscription "$SUBSCRIPTION_ID" \
+      --query "[].{id:id,name:name,resourceGroup:resourceGroup,fqdn:fqdn,privateFqdn:privateFqdn}" \
+      -o json; then
+      printf 'aksEnumeration=inaccessible; subscriptionId=%s\n' \
+        "$SUBSCRIPTION_ID"
+    fi
+  done
+```
+
+Match the kubeconfig server host against `fqdn` or `privateFqdn`, then take the cluster name and resource group from the matching resource ID. Only ask the user if this read-only cross-subscription enumeration cannot produce a unique match.
+
 ```bash
 AKS_RG="<cluster-resource-group>"
 AKS_NAME="<cluster-name>"
@@ -53,7 +77,7 @@ az vmss get-instance-view \
   -o json
 ```
 
-This block is the minimum Node NotReady evidence. Collect it before narrowing the failure to kubelet, host, provisioning, pressure, or network causes.
+This block is the minimum Node NotReady evidence. It is incomplete until every command in it has produced output or the inability to collect it is recorded. Collect it before narrowing the failure to kubelet, host, provisioning, pressure, or network causes.
 
 ### Privileged and service mutation boundary
 
