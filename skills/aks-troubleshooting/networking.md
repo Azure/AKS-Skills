@@ -110,31 +110,61 @@ az network nic list-effective-nsg \
   --ids "$COREDNS_NODE_NIC_ID" -o json
 az network nic show-effective-route-table \
   --ids "$COREDNS_NODE_NIC_ID" -o table
-COREDNS_SUBNET_NSG_ID=$(az network vnet subnet show \
+if COREDNS_SUBNET_NSG_ID=$(az network vnet subnet show \
   --ids "$COREDNS_SOURCE_SUBNET_ID" \
-  --query networkSecurityGroup.id -o tsv)
-if [ -n "$COREDNS_SUBNET_NSG_ID" ]; then
-  az network nsg show \
-    --ids "$COREDNS_SUBNET_NSG_ID" \
-    --query '{customOutbound:securityRules[?direction==`Outbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
-    -o json
+  --query networkSecurityGroup.id -o tsv); then
+  if [ -n "$COREDNS_SUBNET_NSG_ID" ]; then
+    if COREDNS_SUBNET_NSG=$(az network nsg show \
+      --ids "$COREDNS_SUBNET_NSG_ID" \
+      --query '{customOutbound:securityRules[?direction==`Outbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
+      -o json); then
+      if [ -n "$COREDNS_SUBNET_NSG" ]; then
+        printf '%s\n' "$COREDNS_SUBNET_NSG"
+      else
+        printf 'subnetNsg=unknown: command=az network nsg show succeeded with empty output; id=%s\n' \
+          "$COREDNS_SUBNET_NSG_ID"
+      fi
+    else
+      printf 'subnetNsg=inaccessible: command=az network nsg show; id=%s\n' \
+        "$COREDNS_SUBNET_NSG_ID"
+    fi
+  else
+    printf 'subnetNsg=absent\n'
+  fi
 else
-  printf 'subnetNsg=absent\n'
+  COREDNS_SUBNET_NSG_ID=""
+  printf 'subnetNsg=inaccessible: command=az network vnet subnet show; ids=%s; query=networkSecurityGroup.id\n' \
+    "$COREDNS_SOURCE_SUBNET_ID"
 fi
-COREDNS_ROUTE_TABLE_ID=$(az network vnet subnet show \
+if COREDNS_ROUTE_TABLE_ID=$(az network vnet subnet show \
   --ids "$COREDNS_SOURCE_SUBNET_ID" \
-  --query routeTable.id -o tsv)
-if [ -n "$COREDNS_ROUTE_TABLE_ID" ]; then
-  az network route-table show \
-    --ids "$COREDNS_ROUTE_TABLE_ID" \
-    --query 'routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}' \
-    -o table
+  --query routeTable.id -o tsv); then
+  if [ -n "$COREDNS_ROUTE_TABLE_ID" ]; then
+    if COREDNS_ROUTE_TABLE=$(az network route-table show \
+      --ids "$COREDNS_ROUTE_TABLE_ID" \
+      --query 'routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}' \
+      -o table); then
+      if [ -n "$COREDNS_ROUTE_TABLE" ]; then
+        printf '%s\n' "$COREDNS_ROUTE_TABLE"
+      else
+        printf 'routeTableRoutes=absent: command=az network route-table show succeeded with empty routes output; id=%s\n' \
+          "$COREDNS_ROUTE_TABLE_ID"
+      fi
+    else
+      printf 'routeTable=inaccessible: command=az network route-table show; id=%s\n' \
+        "$COREDNS_ROUTE_TABLE_ID"
+    fi
+  else
+    printf 'routeTable=absent\n'
+  fi
 else
-  printf 'routeTable=absent\n'
+  COREDNS_ROUTE_TABLE_ID=""
+  printf 'routeTable=inaccessible: command=az network vnet subnet show; ids=%s; query=routeTable.id\n' \
+    "$COREDNS_SOURCE_SUBNET_ID"
 fi
 ```
 
-Repeat these checks for each node hosting a CoreDNS pod. For Azure CNI Pod Subnet, `COREDNS_SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the CoreDNS node NIC subnet. If either NSG or route-table ID is empty, record that absence instead of running its dependent `show` command. Evaluate outbound rules and routes from the CoreDNS pod/node source to every configured upstream on both UDP and TCP destination port 53.
+Repeat these checks for each node hosting a CoreDNS pod. For Azure CNI Pod Subnet, `COREDNS_SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the CoreDNS node NIC subnet. Record an NSG or route table as absent only when its association lookup succeeds with an empty ID; record a failed lookup as inaccessible instead of running its dependent `show` command. Evaluate outbound rules and routes from the CoreDNS pod/node source to every configured upstream on both UDP and TCP destination port 53.
 
 If the selected route has a `VirtualAppliance` next hop, run the exact policy or classic network-rule collection commands in [Mandatory Firewall or NVA branch when traversed](#3-mandatory-firewall-or-nva-branch-when-traversed), then query the matching DNS decisions:
 
@@ -198,12 +228,44 @@ NODE_RESOURCE_GROUP=$(az aks show \
   --resource-group "$AKS_RG" \
   --name "$AKS_NAME" \
   --query nodeResourceGroup -o tsv)
-SOURCE_NODE=$(kubectl get pod "$POD" -n "$NS" \
-  -o jsonpath='{.spec.nodeName}')
-SOURCE_POD_IP=$(kubectl get pod "$POD" -n "$NS" \
-  -o jsonpath='{.status.podIP}')
-SOURCE_NODE_IP=$(kubectl get node "$SOURCE_NODE" \
-  -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+if SOURCE_NODE=$(kubectl get pod "$POD" -n "$NS" \
+  -o jsonpath='{.spec.nodeName}'); then
+  if [ -z "$SOURCE_NODE" ]; then
+    printf 'sourceNode=unknown: kubectl get pod succeeded with empty spec.nodeName; namespace=%s; pod=%s\n' \
+      "$NS" "$POD"
+  fi
+else
+  SOURCE_NODE=""
+  printf 'sourceNode=inaccessible: command=kubectl get pod; namespace=%s; pod=%s; jsonpath=.spec.nodeName\n' \
+    "$NS" "$POD"
+fi
+if SOURCE_POD_IP=$(kubectl get pod "$POD" -n "$NS" \
+  -o jsonpath='{.status.podIP}'); then
+  if [ -z "$SOURCE_POD_IP" ]; then
+    printf 'sourcePodIp=unknown: kubectl get pod succeeded with empty status.podIP; namespace=%s; pod=%s\n' \
+      "$NS" "$POD"
+  fi
+else
+  SOURCE_POD_IP=""
+  printf 'sourcePodIp=inaccessible: command=kubectl get pod; namespace=%s; pod=%s; jsonpath=.status.podIP\n' \
+    "$NS" "$POD"
+fi
+if [ -n "$SOURCE_NODE" ]; then
+  if SOURCE_NODE_IP=$(kubectl get node "$SOURCE_NODE" \
+    -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}'); then
+    if [ -z "$SOURCE_NODE_IP" ]; then
+      printf 'sourceNodeIp=unknown: kubectl get node succeeded with no InternalIP; node=%s\n' \
+        "$SOURCE_NODE"
+    fi
+  else
+    SOURCE_NODE_IP=""
+    printf 'sourceNodeIp=inaccessible: command=kubectl get node; node=%s; jsonpath=.status.addresses[InternalIP]\n' \
+      "$SOURCE_NODE"
+  fi
+else
+  SOURCE_NODE_IP=""
+  printf 'sourceNodeIp=unknown: source node is unavailable\n'
+fi
 SOURCE_POOL=$(kubectl get node "$SOURCE_NODE" \
   -o jsonpath='{.metadata.labels.agentpool}')
 PROVIDER_ID=$(kubectl get node "$SOURCE_NODE" \
@@ -228,102 +290,218 @@ SOURCE_SUBNET_ID=${POD_SUBNET_ID:-$NODE_SUBNET_ID}
 # Effective NIC rules/routes and explicit subnet NSG inbound/outbound rules
 az network nic list-effective-nsg \
   --ids "$NODE_NIC_ID" -o json
-SUBNET_NSG_ID=$(az network vnet subnet show \
+if SUBNET_NSG_ID=$(az network vnet subnet show \
   --ids "$SOURCE_SUBNET_ID" \
-  --query networkSecurityGroup.id -o tsv)
-if [ -n "$SUBNET_NSG_ID" ]; then
-  az network nsg show \
-    --ids "$SUBNET_NSG_ID" \
-    --query '{customInbound:securityRules[?direction==`Inbound`],customOutbound:securityRules[?direction==`Outbound`],defaultInbound:defaultSecurityRules[?direction==`Inbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
-    -o json
+  --query networkSecurityGroup.id -o tsv); then
+  if [ -n "$SUBNET_NSG_ID" ]; then
+    if SUBNET_NSG=$(az network nsg show \
+      --ids "$SUBNET_NSG_ID" \
+      --query '{customInbound:securityRules[?direction==`Inbound`],customOutbound:securityRules[?direction==`Outbound`],defaultInbound:defaultSecurityRules[?direction==`Inbound`],defaultOutbound:defaultSecurityRules[?direction==`Outbound`]}' \
+      -o json); then
+      if [ -n "$SUBNET_NSG" ]; then
+        printf '%s\n' "$SUBNET_NSG"
+      else
+        printf 'subnetNsg=unknown: command=az network nsg show succeeded with empty output; id=%s\n' \
+          "$SUBNET_NSG_ID"
+      fi
+    else
+      printf 'subnetNsg=inaccessible: command=az network nsg show; id=%s\n' \
+        "$SUBNET_NSG_ID"
+    fi
+  else
+    printf 'subnetNsg=absent\n'
+  fi
 else
-  printf 'subnetNsg=absent\n'
+  SUBNET_NSG_ID=""
+  printf 'subnetNsg=inaccessible: command=az network vnet subnet show; ids=%s; query=networkSecurityGroup.id\n' \
+    "$SOURCE_SUBNET_ID"
 fi
 az network nic show-effective-route-table \
   --ids "$NODE_NIC_ID" -o table
-ROUTE_TABLE_ID=$(az network vnet subnet show \
+if ROUTE_TABLE_ID=$(az network vnet subnet show \
   --ids "$SOURCE_SUBNET_ID" \
-  --query routeTable.id -o tsv)
-if [ -n "$ROUTE_TABLE_ID" ]; then
-  az network route-table show \
-    --ids "$ROUTE_TABLE_ID" \
-    --query '{disableBgpRoutePropagation:disableBgpRoutePropagation,routes:routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}}' \
-    -o json
+  --query routeTable.id -o tsv); then
+  if [ -n "$ROUTE_TABLE_ID" ]; then
+    if ROUTE_TABLE=$(az network route-table show \
+      --ids "$ROUTE_TABLE_ID" \
+      --query '{disableBgpRoutePropagation:disableBgpRoutePropagation,routes:routes[].{name:name,addressPrefix:addressPrefix,nextHopType:nextHopType,nextHopIpAddress:nextHopIpAddress}}' \
+      -o json); then
+      if [ -n "$ROUTE_TABLE" ]; then
+        printf '%s\n' "$ROUTE_TABLE"
+      else
+        printf 'routeTable=unknown: command=az network route-table show succeeded with empty output; id=%s\n' \
+          "$ROUTE_TABLE_ID"
+      fi
+    else
+      printf 'routeTable=inaccessible: command=az network route-table show; id=%s\n' \
+        "$ROUTE_TABLE_ID"
+    fi
+  else
+    printf 'routeTable=absent\n'
+  fi
 else
-  printf 'routeTable=absent\n'
+  ROUTE_TABLE_ID=""
+  printf 'routeTable=inaccessible: command=az network vnet subnet show; ids=%s; query=routeTable.id\n' \
+    "$SOURCE_SUBNET_ID"
 fi
 
 # Effective public egress identity for the reported AKS outbound type
-OUTBOUND_TYPE=$(az aks show \
+if OUTBOUND_TYPE=$(az aks show \
   --resource-group "$AKS_RG" \
   --name "$AKS_NAME" \
-  --query networkProfile.outboundType -o tsv)
-printf 'outboundType=%s\n' "$OUTBOUND_TYPE"
+  --query networkProfile.outboundType -o tsv); then
+  if [ -n "$OUTBOUND_TYPE" ]; then
+    printf 'outboundType=%s\n' "$OUTBOUND_TYPE"
+  else
+    printf 'outboundType=unknown: az aks show succeeded with empty networkProfile.outboundType\n'
+  fi
+else
+  OUTBOUND_TYPE=""
+  printf 'outboundType=inaccessible: command=az aks show; resourceGroup=%s; cluster=%s; query=networkProfile.outboundType\n' \
+    "$AKS_RG" "$AKS_NAME"
+fi
 
 case "$OUTBOUND_TYPE" in
   loadBalancer)
-    OUTBOUND_PUBLIC_IP_IDS=$(az aks show \
+    if OUTBOUND_PUBLIC_IP_IDS=$(az aks show \
       --resource-group "$AKS_RG" \
       --name "$AKS_NAME" \
       --query 'networkProfile.loadBalancerProfile.effectiveOutboundIPs[].id' \
-      -o tsv)
-    if [ -n "$OUTBOUND_PUBLIC_IP_IDS" ]; then
-      printf '%s\n' "$OUTBOUND_PUBLIC_IP_IDS" |
-      while IFS= read -r PUBLIC_IP_ID; do
-        [ -n "$PUBLIC_IP_ID" ] || continue
-        az network public-ip show \
-          --ids "$PUBLIC_IP_ID" \
-          --query '{id:id,ipAddress:ipAddress,publicIPPrefix:publicIPPrefix.id}' \
-          -o yaml
-      done
+      -o tsv); then
+      if [ -n "$OUTBOUND_PUBLIC_IP_IDS" ]; then
+        printf '%s\n' "$OUTBOUND_PUBLIC_IP_IDS" |
+        while IFS= read -r PUBLIC_IP_ID; do
+          [ -n "$PUBLIC_IP_ID" ] || continue
+          if OUTBOUND_PUBLIC_IP=$(az network public-ip show \
+            --ids "$PUBLIC_IP_ID" \
+            --query '{id:id,ipAddress:ipAddress,publicIPPrefix:publicIPPrefix.id}' \
+            -o yaml); then
+            if [ -n "$OUTBOUND_PUBLIC_IP" ]; then
+              printf '%s\n' "$OUTBOUND_PUBLIC_IP"
+            else
+              printf 'outboundPublicIp=unknown: command=az network public-ip show succeeded with empty output; id=%s\n' \
+                "$PUBLIC_IP_ID"
+            fi
+          else
+            printf 'outboundPublicIp=inaccessible: command=az network public-ip show; id=%s\n' \
+              "$PUBLIC_IP_ID"
+          fi
+        done
+      else
+        printf 'outboundPublicIpIds=absent\n'
+        printf 'outboundIdentity=unknown: no effective load-balancer outbound public IP was returned\n'
+      fi
     else
-      printf 'outboundIdentity=unknown: no effective load-balancer outbound public IP was returned\n'
+      OUTBOUND_PUBLIC_IP_IDS=""
+      printf 'outboundPublicIpIds=inaccessible: command=az aks show; resourceGroup=%s; cluster=%s; query=networkProfile.loadBalancerProfile.effectiveOutboundIPs[].id\n' \
+        "$AKS_RG" "$AKS_NAME"
+      printf 'outboundIdentity=unknown: load-balancer outbound public IP lookup failed\n'
     fi
     ;;
   managedNATGateway|managedNATGatewayV2|userAssignedNATGateway|none)
-    NAT_GATEWAY_ID=$(az network vnet subnet show \
+    if NAT_GATEWAY_ID=$(az network vnet subnet show \
       --ids "$SOURCE_SUBNET_ID" \
-      --query natGateway.id -o tsv)
-    if [ -n "$NAT_GATEWAY_ID" ]; then
-      az network nat gateway show \
-        --ids "$NAT_GATEWAY_ID" \
-        --query '{id:id,publicIpAddresses:publicIpAddresses[].id,publicIpPrefixes:publicIpPrefixes[].id}' \
-        -o yaml
-      NAT_PUBLIC_IP_IDS=$(az network nat gateway show \
-        --ids "$NAT_GATEWAY_ID" \
-        --query 'publicIpAddresses[].id' -o tsv)
-      NAT_PUBLIC_IP_PREFIX_IDS=$(az network nat gateway show \
-        --ids "$NAT_GATEWAY_ID" \
-        --query 'publicIpPrefixes[].id' -o tsv)
-      if [ -n "$NAT_PUBLIC_IP_IDS" ]; then
-        printf '%s\n' "$NAT_PUBLIC_IP_IDS" |
-        while IFS= read -r PUBLIC_IP_ID; do
-          [ -n "$PUBLIC_IP_ID" ] || continue
-          az network public-ip show \
-            --ids "$PUBLIC_IP_ID" \
-            --query '{id:id,ipAddress:ipAddress}' -o yaml
-        done
+      --query natGateway.id -o tsv); then
+      if [ -n "$NAT_GATEWAY_ID" ]; then
+        if NAT_GATEWAY=$(az network nat gateway show \
+          --ids "$NAT_GATEWAY_ID" \
+          --query '{id:id,publicIpAddresses:publicIpAddresses[].id,publicIpPrefixes:publicIpPrefixes[].id}' \
+          -o yaml); then
+          if [ -n "$NAT_GATEWAY" ]; then
+            printf '%s\n' "$NAT_GATEWAY"
+          else
+            printf 'natGateway=unknown: command=az network nat gateway show succeeded with empty output; id=%s\n' \
+              "$NAT_GATEWAY_ID"
+          fi
+        else
+          printf 'natGateway=inaccessible: command=az network nat gateway show; id=%s\n' \
+            "$NAT_GATEWAY_ID"
+        fi
+
+        NAT_PUBLIC_IP_LOOKUP=failed
+        if NAT_PUBLIC_IP_IDS=$(az network nat gateway show \
+          --ids "$NAT_GATEWAY_ID" \
+          --query 'publicIpAddresses[].id' -o tsv); then
+          NAT_PUBLIC_IP_LOOKUP=succeeded
+          if [ -n "$NAT_PUBLIC_IP_IDS" ]; then
+            printf '%s\n' "$NAT_PUBLIC_IP_IDS" |
+            while IFS= read -r PUBLIC_IP_ID; do
+              [ -n "$PUBLIC_IP_ID" ] || continue
+              if NAT_PUBLIC_IP=$(az network public-ip show \
+                --ids "$PUBLIC_IP_ID" \
+                --query '{id:id,ipAddress:ipAddress}' -o yaml); then
+                if [ -n "$NAT_PUBLIC_IP" ]; then
+                  printf '%s\n' "$NAT_PUBLIC_IP"
+                else
+                  printf 'natGatewayPublicIp=unknown: command=az network public-ip show succeeded with empty output; id=%s\n' \
+                    "$PUBLIC_IP_ID"
+                fi
+              else
+                printf 'natGatewayPublicIp=inaccessible: command=az network public-ip show; id=%s\n' \
+                  "$PUBLIC_IP_ID"
+              fi
+            done
+          else
+            printf 'natGatewayPublicIpAddresses=absent\n'
+          fi
+        else
+          NAT_PUBLIC_IP_IDS=""
+          printf 'natGatewayPublicIpAddresses=inaccessible: command=az network nat gateway show; id=%s; query=publicIpAddresses[].id\n' \
+            "$NAT_GATEWAY_ID"
+        fi
+
+        NAT_PUBLIC_IP_PREFIX_LOOKUP=failed
+        if NAT_PUBLIC_IP_PREFIX_IDS=$(az network nat gateway show \
+          --ids "$NAT_GATEWAY_ID" \
+          --query 'publicIpPrefixes[].id' -o tsv); then
+          NAT_PUBLIC_IP_PREFIX_LOOKUP=succeeded
+          if [ -n "$NAT_PUBLIC_IP_PREFIX_IDS" ]; then
+            printf '%s\n' "$NAT_PUBLIC_IP_PREFIX_IDS" |
+            while IFS= read -r PUBLIC_IP_PREFIX_ID; do
+              [ -n "$PUBLIC_IP_PREFIX_ID" ] || continue
+              if NAT_PUBLIC_IP_PREFIX=$(az network public-ip prefix show \
+                --ids "$PUBLIC_IP_PREFIX_ID" \
+                --query '{id:id,ipPrefix:ipPrefix}' -o yaml); then
+                if [ -n "$NAT_PUBLIC_IP_PREFIX" ]; then
+                  printf '%s\n' "$NAT_PUBLIC_IP_PREFIX"
+                else
+                  printf 'natGatewayPublicIpPrefix=unknown: command=az network public-ip prefix show succeeded with empty output; id=%s\n' \
+                    "$PUBLIC_IP_PREFIX_ID"
+                fi
+              else
+                printf 'natGatewayPublicIpPrefix=inaccessible: command=az network public-ip prefix show; id=%s\n' \
+                  "$PUBLIC_IP_PREFIX_ID"
+              fi
+            done
+          else
+            printf 'natGatewayPublicIpPrefixes=absent\n'
+          fi
+        else
+          NAT_PUBLIC_IP_PREFIX_IDS=""
+          printf 'natGatewayPublicIpPrefixes=inaccessible: command=az network nat gateway show; id=%s; query=publicIpPrefixes[].id\n' \
+            "$NAT_GATEWAY_ID"
+        fi
+
+        if [ "$NAT_PUBLIC_IP_LOOKUP" != succeeded ] ||
+          [ "$NAT_PUBLIC_IP_PREFIX_LOOKUP" != succeeded ]; then
+          printf 'outboundIdentity=unknown: NAT gateway public identity lookup is incomplete\n'
+        elif [ -z "$NAT_PUBLIC_IP_IDS" ] &&
+          [ -z "$NAT_PUBLIC_IP_PREFIX_IDS" ]; then
+          printf 'outboundIdentity=unknown: NAT gateway has no visible public IP or prefix identity\n'
+        fi
       else
-        printf 'natGatewayPublicIpAddresses=absent\n'
+        printf 'natGateway=absent\n'
+        if [ "$OUTBOUND_TYPE" = "none" ]; then
+          printf 'outboundIdentity=not AKS-managed: no source-subnet NAT gateway; use the effective route and resolve any next-hop SNAT identity\n'
+        else
+          printf 'outboundIdentity=unknown: no NAT gateway is associated with the selected source subnet\n'
+        fi
       fi
-      if [ -n "$NAT_PUBLIC_IP_PREFIX_IDS" ]; then
-        printf '%s\n' "$NAT_PUBLIC_IP_PREFIX_IDS" |
-        while IFS= read -r PUBLIC_IP_PREFIX_ID; do
-          [ -n "$PUBLIC_IP_PREFIX_ID" ] || continue
-          az network public-ip prefix show \
-            --ids "$PUBLIC_IP_PREFIX_ID" \
-            --query '{id:id,ipPrefix:ipPrefix}' -o yaml
-        done
-      else
-        printf 'natGatewayPublicIpPrefixes=absent\n'
-      fi
-      if [ -z "$NAT_PUBLIC_IP_IDS" ] && [ -z "$NAT_PUBLIC_IP_PREFIX_IDS" ]; then
-        printf 'outboundIdentity=unknown: NAT gateway has no visible public IP or prefix identity\n'
-      fi
-    elif [ "$OUTBOUND_TYPE" = "none" ]; then
-      printf 'outboundIdentity=not AKS-managed: no source-subnet NAT gateway; use the effective route and resolve any next-hop SNAT identity\n'
     else
-      printf 'outboundIdentity=unknown: no NAT gateway is visible on the selected source subnet\n'
+      NAT_GATEWAY_ID=""
+      printf 'natGateway=inaccessible: command=az network vnet subnet show; ids=%s; query=natGateway.id\n' \
+        "$SOURCE_SUBNET_ID"
+      printf 'outboundIdentity=unknown: source-subnet NAT gateway association lookup failed\n'
     fi
     ;;
   userDefinedRouting)
@@ -331,6 +509,9 @@ case "$OUTBOUND_TYPE" in
     ;;
   block)
     printf 'outboundIdentity=blocked by AKS: record any observed exception path instead of assuming public egress\n'
+    ;;
+  "")
+    printf 'outboundIdentity=unknown: outboundType is unavailable\n'
     ;;
   *)
     printf 'outboundIdentity=unknown: unrecognized outboundType=%s\n' "$OUTBOUND_TYPE"
@@ -390,20 +571,37 @@ az network firewall show \
 FIREWALL_ID=$(az network firewall show \
   --resource-group "$FIREWALL_RG" \
   --name "$FIREWALL_NAME" --query id -o tsv)
-FIREWALL_PUBLIC_IP_IDS=$(az network firewall show \
+if FIREWALL_PUBLIC_IP_IDS=$(az network firewall show \
   --resource-group "$FIREWALL_RG" \
   --name "$FIREWALL_NAME" \
-  --query 'ipConfigurations[].publicIPAddress.id' -o tsv)
-if [ -n "$FIREWALL_PUBLIC_IP_IDS" ]; then
-  printf '%s\n' "$FIREWALL_PUBLIC_IP_IDS" |
-  while IFS= read -r PUBLIC_IP_ID; do
-    [ -n "$PUBLIC_IP_ID" ] || continue
-    az network public-ip show \
-      --ids "$PUBLIC_IP_ID" \
-      --query '{id:id,ipAddress:ipAddress}' -o yaml
-  done
+  --query 'ipConfigurations[].publicIPAddress.id' -o tsv); then
+  if [ -n "$FIREWALL_PUBLIC_IP_IDS" ]; then
+    printf '%s\n' "$FIREWALL_PUBLIC_IP_IDS" |
+    while IFS= read -r PUBLIC_IP_ID; do
+      [ -n "$PUBLIC_IP_ID" ] || continue
+      if FIREWALL_PUBLIC_IP=$(az network public-ip show \
+        --ids "$PUBLIC_IP_ID" \
+        --query '{id:id,ipAddress:ipAddress}' -o yaml); then
+        if [ -n "$FIREWALL_PUBLIC_IP" ]; then
+          printf '%s\n' "$FIREWALL_PUBLIC_IP"
+        else
+          printf 'firewallPublicIp=unknown: command=az network public-ip show succeeded with empty output; id=%s\n' \
+            "$PUBLIC_IP_ID"
+        fi
+      else
+        printf 'firewallPublicIp=inaccessible: command=az network public-ip show; id=%s\n' \
+          "$PUBLIC_IP_ID"
+      fi
+    done
+  else
+    printf 'firewallPublicIpIds=absent\n'
+    printf 'firewallPublicEgressIdentity=unknown: no data-plane public IP was returned\n'
+  fi
 else
-  printf 'firewallPublicEgressIdentity=unknown: no data-plane public IP was returned\n'
+  FIREWALL_PUBLIC_IP_IDS=""
+  printf 'firewallPublicIpIds=inaccessible: command=az network firewall show; resourceGroup=%s; firewall=%s; query=ipConfigurations[].publicIPAddress.id\n' \
+    "$FIREWALL_RG" "$FIREWALL_NAME"
+  printf 'firewallPublicEgressIdentity=unknown: data-plane public IP lookup failed\n'
 fi
 FIREWALL_POLICY_ID=$(az network firewall show \
   --resource-group "$FIREWALL_RG" \
@@ -434,14 +632,31 @@ else
 fi
 az monitor diagnostic-settings list \
   --resource "$FIREWALL_ID" -o json
-az monitor log-analytics query \
-  --workspace "$LOG_WORKSPACE" \
-  --timespan "$INCIDENT_START/$INCIDENT_END" \
-  --analytics-query "
+SOURCE_IP_KQL_LIST=""
+LEGACY_SOURCE_PREDICATE=""
+if [ -n "$SOURCE_POD_IP" ]; then
+  SOURCE_IP_KQL_LIST="'$SOURCE_POD_IP'"
+  LEGACY_SOURCE_PREDICATE="msg_s has '$SOURCE_POD_IP'"
+fi
+if [ -n "$SOURCE_NODE_IP" ]; then
+  if [ -n "$SOURCE_IP_KQL_LIST" ]; then
+    SOURCE_IP_KQL_LIST="$SOURCE_IP_KQL_LIST, '$SOURCE_NODE_IP'"
+    LEGACY_SOURCE_PREDICATE="$LEGACY_SOURCE_PREDICATE or msg_s has '$SOURCE_NODE_IP'"
+  else
+    SOURCE_IP_KQL_LIST="'$SOURCE_NODE_IP'"
+    LEGACY_SOURCE_PREDICATE="msg_s has '$SOURCE_NODE_IP'"
+  fi
+fi
+
+if [ -n "$SOURCE_IP_KQL_LIST" ]; then
+  az monitor log-analytics query \
+    --workspace "$LOG_WORKSPACE" \
+    --timespan "$INCIDENT_START/$INCIDENT_END" \
+    --analytics-query "
 union isfuzzy=true
   (AZFWNetworkRule
     | where _ResourceId =~ '$FIREWALL_ID'
-    | where SourceIp in ('$SOURCE_POD_IP', '$SOURCE_NODE_IP')
+    | where SourceIp in ($SOURCE_IP_KQL_LIST)
     | where DestinationIp == '$SQL_DESTINATION_IP'
     | where DestinationPort == 1433 and Protocol =~ 'TCP'
     | project TimeGenerated,LogTable='AZFWNetworkRule',Action,ActionReason,
@@ -449,21 +664,21 @@ union isfuzzy=true
         RuleCollectionGroup,RuleCollection,Rule),
   (AZFWApplicationRule
     | where _ResourceId =~ '$FIREWALL_ID'
-    | where SourceIp in ('$SOURCE_POD_IP', '$SOURCE_NODE_IP')
+    | where SourceIp in ($SOURCE_IP_KQL_LIST)
     | where Fqdn =~ '$SQL_FQDN'
     | where DestinationPort == 1433 and Protocol in~ ('MSSQL', 'TCP')
     | project TimeGenerated,LogTable='AZFWApplicationRule',Action,ActionReason,
         Protocol,SourceIp,Destination=Fqdn,DestinationPort,
         RuleCollectionGroup,RuleCollection,Rule)
 | order by TimeGenerated asc"
-az monitor log-analytics query \
-  --workspace "$LOG_WORKSPACE" \
-  --timespan "$INCIDENT_START/$INCIDENT_END" \
-  --analytics-query "
+  az monitor log-analytics query \
+    --workspace "$LOG_WORKSPACE" \
+    --timespan "$INCIDENT_START/$INCIDENT_END" \
+    --analytics-query "
 AzureDiagnostics
 | where _ResourceId =~ '$FIREWALL_ID'
 | where Category in ('AzureFirewallNetworkRule','AzureFirewallApplicationRule')
-| where msg_s has '$SOURCE_POD_IP' or msg_s has '$SOURCE_NODE_IP'
+| where $LEGACY_SOURCE_PREDICATE
 | where msg_s has '$SQL_DESTINATION_IP' or msg_s has '$SQL_FQDN'
 | where msg_s has '1433'
 | where msg_s has 'TCP' or msg_s has 'MSSQL'
@@ -471,9 +686,12 @@ AzureDiagnostics
          Action=extract('Action: ([A-Za-z]+)',1,msg_s)
 | project TimeGenerated,Category,Action,Protocol,msg_s
 | order by TimeGenerated asc"
+else
+  printf 'firewallLogEvidence=incomplete: no proven nonempty pod or node source IP; source-scoped queries not run\n'
+fi
 ```
 
-Fill the placeholders and run this read-only block before narrowing the failure. For Azure CNI Pod Subnet, `SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the node subnet. Empty NSG or route-table IDs mean no resource is associated. Inspect Firewall commands only when `VirtualAppliance` resolves to Azure Firewall; for an NVA, collect the equivalent selected route, network/application rules, and incident-window logs.
+Fill the placeholders and run this read-only block before narrowing the failure. For Azure CNI Pod Subnet, `SOURCE_SUBNET_ID` is the pod subnet; otherwise it is the node subnet. A successful empty NSG, route-table, NAT gateway, public-IP, or prefix association means that resource is absent; a failed lookup means the evidence is inaccessible or unknown and must not be recorded as absence. Inspect Firewall commands only when `VirtualAppliance` resolves to Azure Firewall; for an NVA, collect the equivalent selected route, network/application rules, and incident-window logs.
 
 - Run `nc` only if it already exists in the affected pod; do not install packages or create a test pod.
 - Set `SQL_DESTINATION_IP` to each address returned for the SQL FQDN from the affected pod and repeat the Firewall queries for every address used during the incident.
