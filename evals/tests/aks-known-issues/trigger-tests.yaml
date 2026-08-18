@@ -18,6 +18,16 @@
     - type: equals
       value: "aks-known-issues"
 
+- description: "AKS capacity-form AllocationFailed should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node-pool upgrade returned AllocationFailed: We do not have sufficient capacity for the requested VM size in this region."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
 - description: "VMCannotFitEphemeralOSDisk should route to aks-known-issues"
   metadata:
     skill: aks-known-issues
@@ -38,12 +48,152 @@
     - type: equals
       value: "aks-known-issues"
 
+- description: "AKS vmssCSE exit 50 should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node provisioning failed with VMExtensionProvisioningError: vmssCSE command terminated with exit status=50 and ERR_OUTBOUND_CONN_FAIL."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "AKS API-server connectivity CSE exit 51 should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node provisioning failed because vmssCSE terminated with ExitCode: 51."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "AKS API-server DNS CSE exit 52 should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "My AKS node pool reports VMExtensionError_K8SAPIServerDNSLookupFail while provisioning."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "AKS SkuNotAvailable should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node-pool creation returned SkuNotAvailable: the requested size is currently not available in location eastus zones 1 for this subscription."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "AKS ZonalAllocationFailed should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node-pool scale failed with code ZonalAllocationFailed: Allocation failed. We do not have sufficient capacity for the requested VM size in this zone."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "AKS OverconstrainedAllocationRequest should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node-pool scale failed with OverconstrainedAllocationRequest: VMs with the listed SKU, zone, ephemeral disk, and PPG constraints cannot be allocated."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
+- description: "AKS AllocationFailed with its nested message should route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "AKS node-pool create returned AllocationFailed: The VM allocation failed due to an internal error. Please retry later or try deploying to a different location."
+  assert:
+    - type: equals
+      value: "aks-known-issues"
+
 - description: "Boundary: a generic CrashLoopBackOff with no error code must go to aks-troubleshooting, not aks-known-issues"
   metadata:
     skill: aks-known-issues
     type: trigger
   vars:
     prompt: "A pod in my cluster is stuck in CrashLoopBackOff — help me figure out why."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Boundary: an AKS workload exit 50 without CSE context stays in troubleshooting"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "An init container in my AKS pod exited with status 50. There is no vmssCSE or VM extension failure."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Boundary: an unrelated script exit 50 must not route to aks-known-issues"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "A custom setup shell script on a standalone Linux VM, unrelated to AKS, exited with status 50."
+  assert:
+    - type: equals
+      value: "none"
+
+- description: "Boundary: a bare VMExtensionProvisioningError needs investigation"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "My AKS deployment reports only VMExtensionProvisioningError with no nested CSE error or exit code. Investigate the cause."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Boundary: pod DNS failure without a CSE signature stays in aks-troubleshooting"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "Pods in my AKS cluster get SERVFAIL from CoreDNS, but cluster and node provisioning completed without a VM extension error."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Boundary: Kubernetes FailedScheduling is not an Azure AllocationFailed catalog match"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "My AKS pod is Pending with FailedScheduling: 0/3 nodes are available due to Insufficient cpu."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Boundary: SkuNotAvailable for a non-AKS VM must not route to an AKS skill"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "Creating a standalone Azure VM returned SkuNotAvailable. This resource is not part of AKS or Kubernetes."
+  assert:
+    - type: equals
+      value: "none"
+
+- description: "Boundary: a bare AllocationFailed without its nested message needs investigation"
+  metadata:
+    skill: aks-known-issues
+    type: trigger
+  vars:
+    prompt: "An AKS operation returned only AllocationFailed with no nested Azure message. Investigate what caused it."
   assert:
     - type: equals
       value: "aks-troubleshooting"
