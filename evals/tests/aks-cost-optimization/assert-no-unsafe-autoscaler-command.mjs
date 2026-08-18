@@ -12,6 +12,7 @@ const SHELL_LANGUAGES = new Set([
 const POWERSHELL_LANGUAGES = new Set(['powershell', 'pwsh']);
 const UNSAFE_SETTING = 'skip-nodes-with-system-pods=false';
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const HEREDOC_ESCAPABLE_CHARACTERS = new Set(['$', '`', '\\', '\n']);
 const CONTROL_PREFIXES = new Set(['!', 'do', 'elif', 'else', 'if', 'then', 'until', 'while']);
 const AZ_GLOBAL_OPTIONS_WITH_VALUES = new Set([
   '-o',
@@ -216,7 +217,7 @@ function stripBashHeredocBodies(source) {
         if (candidate === delimiter) pending.shift();
         if (candidate === delimiter || !expands) return '';
 
-        return commandSubstitutionBodies(line, 'bash')
+        return heredocCommandSubstitutionBodies(line)
           .map((body) => `$(${body})`)
           .join(' ');
       }
@@ -225,6 +226,51 @@ function stripBashHeredocBodies(source) {
       return line;
     })
     .join('\n');
+}
+
+function heredocCommandSubstitutionBodies(source) {
+  const bodies = [];
+
+  // Quotes are literal in an expanding heredoc; only Bash's four backslash escapes suppress expansion.
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (character === '\\' && HEREDOC_ESCAPABLE_CHARACTERS.has(next)) {
+      index += 1;
+      continue;
+    }
+    if (character === '$' && next === '(') {
+      const closeIndex = findClosingParenthesis(source, index + 1, 'bash');
+      if (closeIndex >= 0) {
+        bodies.push(source.slice(index + 2, closeIndex));
+        index = closeIndex;
+      }
+      continue;
+    }
+    if (character === '`') {
+      let closeIndex = index + 1;
+
+      for (; closeIndex < source.length; closeIndex += 1) {
+        const backtickCharacter = source[closeIndex];
+        const afterBackslash = source[closeIndex + 1];
+
+        if (backtickCharacter === '\\'
+          && HEREDOC_ESCAPABLE_CHARACTERS.has(afterBackslash)) {
+          closeIndex += 1;
+        } else if (backtickCharacter === '`') {
+          break;
+        }
+      }
+
+      if (closeIndex < source.length) {
+        bodies.push(source.slice(index + 1, closeIndex));
+        index = closeIndex;
+      }
+    }
+  }
+
+  return bodies;
 }
 
 function stripShellComment(line, language) {
@@ -756,6 +802,16 @@ const REGRESSION_CASES = [
     output: fenced(`cat <<EOF\n${UNSAFE_COMMAND}\nEOF`),
   },
   {
+    name: 'backslash suppresses dollar substitution in expanding heredoc',
+    expectedPass: true,
+    output: fenced(`cat <<EOF\n'\\$(${UNSAFE_COMMAND})'\nEOF`),
+  },
+  {
+    name: 'backslash suppresses legacy backticks in expanding heredoc',
+    expectedPass: true,
+    output: fenced(`cat <<EOF\n'\\\`${UNSAFE_COMMAND}\\\`'\nEOF`),
+  },
+  {
     name: 'PowerShell block comment is inert',
     expectedPass: true,
     output: fenced(`<#\n${UNSAFE_COMMAND}\n#>`, 'powershell'),
@@ -914,6 +970,27 @@ const REGRESSION_CASES = [
     name: 'command substitution in expanding heredoc is rejected',
     expectedPass: false,
     output: fenced(`cat <<EOF\nresult=$(${UNSAFE_COMMAND})\nEOF`),
+  },
+  {
+    name: 'single quotes do not suppress substitution in expanding heredoc',
+    expectedPass: false,
+    output: fenced(`cat <<EOF\n'$(${UNSAFE_COMMAND})'\nEOF`),
+  },
+  {
+    name: 'quotes do not suppress legacy backticks in expanding heredoc',
+    expectedPass: false,
+    output: fenced(`cat <<EOF\n'\`${UNSAFE_COMMAND}\`'\nEOF`),
+  },
+  {
+    name: 'escaped backslash leaves heredoc substitution active',
+    expectedPass: false,
+    output: fenced(`cat <<EOF\n'\\\\$(${UNSAFE_COMMAND})'\nEOF`),
+  },
+  {
+    name: 'escaped newline leaves heredoc substitution active',
+    expectedPass: false,
+    output: fenced(`cat <<EOF\n'\\
+$(${UNSAFE_COMMAND})'\nEOF`),
   },
   {
     name: 'unsafe command after heredoc delimiter is rejected',
