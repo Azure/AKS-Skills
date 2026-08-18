@@ -203,7 +203,9 @@ See [references/inspektor-gadget.md](references/inspektor-gadget.md).
 
 ### Executable evidence first
 
-A diagnosis is incomplete until every applicable evidence class below is collected, or its absence or the inability to collect it is recorded.
+An external-connectivity diagnosis is incomplete until each evidence class below is collected, or the inability to collect it is recorded: the cluster's network model and outbound type; source NIC and subnet identity; effective NIC NSG rules plus the explicit subnet NSG rules; the effective route table and any UDR next hop; workload DNS and TCP behavior; the service's endpoint configuration — public access and firewall rules, service endpoint/VNet rules, private-endpoint connections, and the private-DNS zone, records, and links that determine which endpoint model is in effect; and — when the selected route's next hop is a firewall or NVA — the matching rule and incident-window logs. A skipped conditional step must be recorded with its reason (for example: selected next hop is Internet, so no firewall evidence applies). Do not conclude, and do not propose remediation, from a subset.
+
+Cluster-side identifiers are derivable — exhaust derivation before asking: the cluster name and resource group resolve from the current kubeconfig context confirmed against `az aks list` (same procedure as [node-issues.md](node-issues.md)), and the block computes the rest from the pod (pod → node → `providerID` → VMSS/NIC/subnet). Ask the user only for what cannot be derived: the target service's name and resource group and the incident window.
 
 ```bash
 AKS_RG="<cluster-resource-group>"
