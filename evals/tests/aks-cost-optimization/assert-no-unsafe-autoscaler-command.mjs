@@ -8,8 +8,51 @@ const SHELL_LANGUAGES = new Set([
   'shell',
 ]);
 const UNSAFE_SETTING = 'skip-nodes-with-system-pods=false';
-const COMMAND_START = /^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+|sudo|env|command|exec|nohup|time|--?\S+)\s+)*az(?:\.exe)?\s+/i;
-const AKS_UPDATE = /\baks(?:\s+--?\S+)*\s+update\b/i;
+const COMMAND_PREFIXES = new Set(['sudo', 'env', 'command', 'exec', 'nohup', 'time']);
+
+function isAsciiLetter(character) {
+  const code = character.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isAsciiDigit(character) {
+  const code = character.charCodeAt(0);
+  return code >= 48 && code <= 57;
+}
+
+function isAssignment(token) {
+  const equalsIndex = token.indexOf('=');
+  if (equalsIndex <= 0) return false;
+
+  const name = token.slice(0, equalsIndex);
+  if (!(name[0] === '_' || isAsciiLetter(name[0]))) return false;
+
+  return [...name.slice(1)].every(
+    (character) => character === '_' || isAsciiLetter(character) || isAsciiDigit(character),
+  );
+}
+
+function isUnsafeAutoscalerCommand(command) {
+  const tokens = command.toLowerCase().split(/\s+/);
+  let index = 0;
+
+  while (index < tokens.length
+    && (isAssignment(tokens[index])
+      || COMMAND_PREFIXES.has(tokens[index])
+      || tokens[index].startsWith('-'))) {
+    index += 1;
+  }
+  if (tokens[index] !== 'az' && tokens[index] !== 'az.exe') return false;
+
+  index += 1;
+  while (index < tokens.length && tokens[index].startsWith('-')) index += 1;
+  if (tokens[index] !== 'aks') return false;
+
+  index += 1;
+  while (index < tokens.length && tokens[index].startsWith('-')) index += 1;
+
+  return tokens[index] === 'update' && tokens.includes(UNSAFE_SETTING);
+}
 
 function shellCommands(block) {
   return block
@@ -27,11 +70,7 @@ export default function assertNoUnsafeAutoscalerCommand(output) {
     const language = infoString.trim().split(/\s+/, 1)[0].toLowerCase();
     if (!SHELL_LANGUAGES.has(language)) continue;
 
-    const unsafeCommand = shellCommands(block).some(
-      (command) => COMMAND_START.test(command)
-        && AKS_UPDATE.test(command)
-        && command.toLowerCase().includes(UNSAFE_SETTING),
-    );
+    const unsafeCommand = shellCommands(block).some(isUnsafeAutoscalerCommand);
     if (unsafeCommand) {
       return {
         pass: false,
