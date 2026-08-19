@@ -8,6 +8,8 @@
  *         warnings), not merely that both exit 0.
  * Case 2: a skill with no front matter must still fail — normalization must
  *         not make the parser accept malformed files.
+ * Case 3: nested skill Markdown must reject a hardcoded Azure MCP tool name.
+ * Case 4: README must reject a hardcoded Azure MCP tool name.
  *
  * Usage: node lint-skills.test.js
  */
@@ -77,6 +79,44 @@ try {
   if (broken.status === 0 || !broken.output.includes('malformed YAML front matter')) {
     failures.push(`malformed front matter was not rejected:\n${broken.output}`);
   }
+
+  // Case 3: nested skill guidance must not depend on a host-assigned tool name.
+  const skillPortabilityRoot = path.join(tmpRoot, 'skill-portability');
+  const skillPortabilityDir = path.join(skillPortabilityRoot, 'skills');
+  copyWithEol(SOURCE_SKILL, path.join(skillPortabilityDir, skillName), '\n');
+  const referencesDir = path.join(skillPortabilityDir, skillName, 'references');
+  fs.mkdirSync(referencesDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(referencesDir, 'mcp.md'),
+    'Call mcp_azure_mcp_aks_cluster_get before continuing.\n',
+  );
+  const skillPortability = runLinter(skillPortabilityDir);
+  if (
+    skillPortability.status === 0
+    || !skillPortability.output.includes(
+      'hardcoded Azure MCP tool name "mcp_azure_mcp_aks_cluster_get"',
+    )
+  ) {
+    failures.push(`hardcoded Azure MCP name in skill Markdown was not rejected:\n${skillPortability.output}`);
+  }
+
+  // Case 4: top-level README guidance follows the same portability contract.
+  const readmePortabilityRoot = path.join(tmpRoot, 'readme-portability');
+  const readmeSkillsDir = path.join(readmePortabilityRoot, 'skills');
+  copyWithEol(SOURCE_SKILL, path.join(readmeSkillsDir, skillName), '\n');
+  fs.writeFileSync(
+    path.join(readmePortabilityRoot, 'README.md'),
+    'Call mcp_azure_mcp_aks_nodepool_get before continuing.\n',
+  );
+  const readmePortability = runLinter(readmeSkillsDir);
+  if (
+    readmePortability.status === 0
+    || !readmePortability.output.includes(
+      'hardcoded Azure MCP tool name "mcp_azure_mcp_aks_nodepool_get"',
+    )
+  ) {
+    failures.push(`hardcoded Azure MCP name in README was not rejected:\n${readmePortability.output}`);
+  }
 } finally {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 }
@@ -85,4 +125,4 @@ if (failures.length > 0) {
   failures.forEach(f => console.error(`✗ lint self-test: ${f}`));
   process.exit(1);
 }
-console.log('✓ lint self-test: CRLF checkouts lint identically (warnings included); malformed front matter still rejected');
+console.log('✓ lint self-test: CRLF, malformed front matter, and Azure MCP name portability checks passed');

@@ -23,7 +23,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 | Property | Value |
 |----------|-------|
 | Best for | AKS Automatic migration readiness and manifest validation |
-| MCP Tools | `mcp_azure_mcp_aks` |
+| MCP Tools | Host-discovered Azure MCP AKS capability |
 | Related skills | aks-cluster-setup (cluster creation), aks-troubleshooting (live troubleshooting) |
 
 ## When to Use This Skill
@@ -52,9 +52,10 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 4. **Scope boundaries**: Route cluster creation/deletion questions → `aks-cluster-setup` skill. Route live troubleshooting → `aks-troubleshooting` skill.
 
 ## MCP Tools
-| Tool | Purpose | Key Parameters |
-|------|---------|----------------|
-| `mcp_azure_mcp_aks` | AKS MCP entry point — call `discover` first, then use the assessment action name returned in the response | `subscriptionId`, `resourceGroupName`, `resourceName`, `scope` |
+| Capability | Purpose | Typical Parameters |
+|------------|---------|--------------------|
+| Azure MCP AKS capability discovered from the host's available tools | Read cluster and node-pool configuration when the advertised surface provides those operations | Use only the parameters in the host-advertised schema |
+| Host Kubernetes capability or `kubectl` | Read sanitized workload manifests for local evaluation against the bundled constraint spec | Cluster context, resource kinds, namespaces |
 
 ## Workflow
 
@@ -62,7 +63,7 @@ AKS Automatic enforces **Deployment Safeguards** (25 active Deny policies), **Po
 
 Ask the user what they want to assess:
 
-**Option A — Cluster-connected assessment (via AKS MCP)**
+**Option A — Cluster-connected assessment**
 Use when the user has a connected cluster context (subscription + resource group + cluster name).
 
 **Option B — Offline manifest validation**
@@ -75,50 +76,38 @@ If the user pastes or points to a single YAML manifest, validate it directly wit
 
 #### Cluster-Connected Mode
 
-Call the AKS MCP tool — this is the preferred path. Always call `discover` first to get the available actions, then use the assessment action name returned in the response:
+1. Inspect the host's available tools for an Azure MCP capability that advertises AKS operations. Use the matching tool under whatever name the host assigned; never use a literal name or prefix as the availability check, and do not construct a mapping layer.
+2. Inspect its advertised schema or discovery surface. Use advertised cluster or node-pool read operations to collect configuration metadata. The documented Azure MCP AKS surface currently provides cluster and node-pool details; it does not define an AKS Automatic readiness-assessment operation. See [Azure MCP AKS tools](https://learn.microsoft.com/azure/developer/azure-mcp-server/tools/azure-kubernetes).
+3. Use the host's Kubernetes read capability with an equivalent allowlist projection, or pipe `kubectl` JSON through `scripts/sanitize-readiness-input.jq` before the result reaches the model. Never fetch `Secret` or ConfigMap resources.
+4. Evaluate the collected cluster metadata and workload manifests locally against `references/constraint-spec-v1.yaml`.
 
-```javascript
-// Step 1: Discover available actions
-mcp_azure_mcp_aks({ action: "discover" })
-
-// Step 2: Use the assessment action name from the discover response
-mcp_azure_mcp_aks({
-  action: "<action-from-discover>",
-  subscriptionId: "<subscription-id>",
-  resourceGroupName: "<resource-group>",
-  resourceName: "<cluster-name>",
-  scope: {
-    excludeNamespaces: ["kube-system", "gatekeeper-system"],
-    workloadTypes: ["Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job"]
-  }
-})
+```bash
+set -o pipefail
+kubectl get deployment,statefulset,daemonset,job,cronjob,pod,service,poddisruptionbudget,storageclass \
+  -A -o json |
+jq -f scripts/sanitize-readiness-input.jq
 ```
-
-**Required permissions:**
-- `Microsoft.ContainerService/managedClusters/read`
-- `Microsoft.ContainerService/managedClusters/listClusterUserCredential/action`
-
-For large clusters (500+ workloads), the API may return HTTP 202 with a `Location` header. Poll the location URL using the `Retry-After` interval until a 200 response is received.
-
-**Parsing the MCP response:**
-1. **`summary`** — aggregate counts: `compatible`, `requiresChanges`, `incompatible`, `autoFixed`, `totalWorkloads`, `clusterConfigIssues`
-2. **`clusterConfiguration`** — cluster-level issues with `constraintId`, `severity`, `remediation` (az CLI commands), and `documentationUrl`
-3. **`workloads[]`** — per-workload array, each with `name`, `namespace`, `kind`, `overallStatus`, and `issues[]`
-
-Each issue in `workloads[].issues[]` contains: `constraintId`, `severity` (`incompatible`/`requiresChanges`/`autoFixed`/`informational`), `description`, `field` (JSON Pointer), `suggestedPatch` (JSON Patch for deterministic fixes), `remediationGuide` (for LLM-reasoned fixes).
 
 #### Fallback Chain
 
 ```
-1. MCP tool (mcp_azure_mcp_aks)  → preferred, live cluster data
-   ↓ fails (tool not found — Azure MCP server not configured)
-2. Offline validation            → works on local manifests without any cluster
+Cluster metadata:
+1. Host-discovered Azure MCP AKS cluster/node-pool read capability
+   ↓ no matching capability, operation absent, or access fails
+2. `az aks show` and `az aks nodepool list`
+
+Workload data:
+1. Host Kubernetes read capability or `kubectl`
+   ↓ cluster access unavailable
+2. Offline validation of local, rendered, or user-provided manifests
 ```
 
-If `mcp_azure_mcp_aks` is not available, inform the user:
-> "The Azure MCP server is not configured in your editor. To enable live cluster assessment, follow the setup guide at [aka.ms/azure-mcp-setup](https://aka.ms/azure-mcp-setup). For now, I can validate your local manifests offline."
+Do not infer that Azure MCP is absent because one literal tool name is missing. If capability discovery finds no Azure MCP AKS tool:
 
-Then proceed to offline mode.
+- **Azure SRE Agent:** use its built-in Azure and `kubectl` tools first; they authenticate through the agent's managed identity and need no connector. If the user specifically wants the external Azure MCP surface, explain that installing the plugin records its `.mcp.json` requirement but does not provision the connector. If the plugin details show **Connector setup required**, use **Add as connector** (or **Builder > Connectors**), complete authentication, wait for **Connected**, and select the Azure MCP tools for the agent. Cite the official [built-in tools](https://learn.microsoft.com/azure/sre-agent/tools), [plugin marketplace guidance](https://learn.microsoft.com/azure/sre-agent/plugin-marketplace#what-the-plugin-marketplace-does), and [MCP connector tutorial](https://learn.microsoft.com/azure/sre-agent/mcp-connector).
+- **Other hosts:** explain that the host does not currently expose an Azure MCP AKS capability and point to the host's MCP configuration flow or the official [Azure MCP Server setup overview](https://learn.microsoft.com/azure/developer/azure-mcp-server/get-started).
+
+Then use the `az` metadata fallback and continue with Kubernetes or offline manifest validation.
 
 #### Offline Mode
 
@@ -183,7 +172,7 @@ Per-issue format:
 
 ### Step 4: Offer Fixes
 
-**Deterministic fixes** (have `suggestedPatch` — generate YAML diff directly):
+**Deterministic fixes** (the constraint rule and `references/common-fixes.md` define a direct field transformation — generate a YAML diff):
 - `safeguard-container-resource-requests` — add `resources.requests`
 - `safeguard-no-privilege-escalation` — set `allowPrivilegeEscalation: false`
 - `safeguard-container-capabilities` — remove `capabilities.add`
@@ -193,7 +182,7 @@ Per-issue format:
 
 Use patterns in `references/common-fixes.md` and generate a before/after diff. Starting resource values use safe defaults — VPA (enabled on Automatic) will auto-tune after deployment.
 
-**LLM-reasoned fixes** (require app context; use `remediationGuide`):
+**Context-dependent fixes** (the constraint spec's `fix` guidance requires application-specific input):
 - `safeguard-images-no-latest` — correct tag is user- and release-specific; ask the user: _"What specific version tag or SHA digest should I pin this image to?"_ Do not guess
 - `safeguard-pod-enforce-antiaffinity` — needs app labels for selector
 - `safeguard-no-host-path-volumes` — replacement depends on what hostPath is used for
@@ -209,7 +198,7 @@ For incompatible findings (e.g., hostPath volumes), explain the issue and propos
 4. On approval, apply the change to the file
 5. Move to the next finding
 
-If the user says "fix all" or "apply all deterministic fixes", first generate a single combined diff containing all eligible `suggestedPatch`-based fixes, show that combined diff with an explanation, and wait for one explicit approval before applying any writes. After approval, apply the batched changes and then suggest re-validation.
+If the user says "fix all" or "apply all deterministic fixes", first generate a single combined diff containing only the constraint rules with direct, context-independent transformations, show that combined diff with an explanation, and wait for one explicit approval before applying any writes. After approval, apply the batched changes and then suggest re-validation.
 
 ### Step 5: Recommend Next Steps
 
@@ -231,9 +220,11 @@ See `references/migration-guide-summary.md` for the full migration checklist.
 
 | Error / Symptom | Likely Cause | Remediation |
 |-----------------|--------------|-------------|
-| MCP tool call fails or times out | Invalid credentials or subscription context | Verify `az login`, confirm active subscription with `az account show`; if MCP remains unavailable, continue with offline validation using local or exported manifests and the bundled constraint spec |
-| HTTP 403 on assessment action | Missing permission | Ensure caller has sufficient RBAC access to read and assess the cluster via AKS APIs |
-| API returns HTTP 202 | Large cluster (500+ workloads) — async operation | Poll the `Location` header URL using `Retry-After` interval |
+| No Azure MCP AKS capability appears in the host's available tools | External connector/server is unavailable or the host relies on a different built-in Azure surface | In Azure SRE Agent, use built-in Azure tools or resolve **Connector setup required** only if the external server is needed; in other hosts, configure Azure MCP. Use `az` for cluster metadata while unavailable |
+| Discovered Azure MCP AKS capability has no readiness operation | Expected for the currently documented AKS surface | Use advertised cluster/node-pool reads, collect sanitized manifests through Kubernetes-native tools, and evaluate the bundled constraint spec locally |
+| Azure or Kubernetes read fails in Azure SRE Agent | Agent managed identity lacks target scope or RBAC | Check the agent's managed resource groups and UAMI role assignments per [SRE Agent permissions](https://learn.microsoft.com/azure/sre-agent/permissions) |
+| MCP or `az` read fails in another host | Invalid credentials or subscription context | Verify `az login` and the active subscription with `az account show`; continue with offline validation when live access remains unavailable |
+| `kubectl` cannot read workloads | Missing cluster context or Kubernetes RBAC | Verify the current context and read permissions, or use local/rendered manifests |
 | Helm chart uses Go templating — cannot evaluate | Template values not resolved | Ask user for rendered output (`helm template`) or values files |
 | Constraint spec version mismatch | Skill bundles spec v1.1.1 (2026-03-15) | Note version in output; recommend re-running after spec update |
 
