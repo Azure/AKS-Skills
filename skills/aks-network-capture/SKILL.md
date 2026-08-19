@@ -3,14 +3,14 @@ name: aks-network-capture
 license: MIT
 metadata:
   author: Microsoft
-  version: "1.0.0"
+  version: "1.0.1"
   openclaw:
     emoji: "🔍"
     requires:
       anyBins:
         - kubectl
         - az
-description: "Packet-level network evidence for AKS: run a bounded, distributed packet capture across nodes (filtered by IP, port, or tcpdump/BPF expression), and collect static network configuration (ip addr, routes, iptables, conntrack) plus Azure network resources (NSG rules, route tables, firewall, VNET peering) when you need pcap-level proof of where traffic drops. Escalation tool for when logs and read-only checks are inconclusive. WHEN: capture packets on a node, take a pcap, tcpdump on AKS, prove where a packet is dropped, verify an NSG or route is blocking traffic at the wire. DO NOT USE FOR: general DNS / connectivity / ingress troubleshooting — start with aks-troubleshooting (which routes here when a capture is actually needed)."
+description: "Packet-level network evidence for AKS: run a bounded, distributed packet capture across nodes (filtered by IP, port, or tcpdump/BPF expression), and collect Azure network resources (NSG rules, route tables, firewall, VNET peering) when you need pcap-level proof of where traffic drops. Escalation tool for when logs and read-only checks are inconclusive. WHEN: capture packets on a node, take a pcap, tcpdump on AKS, prove where a packet is dropped, verify an NSG or route is blocking traffic at the wire. DO NOT USE FOR: general DNS / connectivity / ingress troubleshooting — start with aks-troubleshooting (which routes here when a capture is actually needed)."
 ---
 
 # AKS Network Capture
@@ -24,48 +24,37 @@ This is an escalation tool. For most networking symptoms (DNS, connectivity, ing
 Packet capture requires elevated node access, so these scripts are built to be safe by construction:
 
 - **No shell injection.** User-supplied filters and targets are validated against strict allowlists, passed to `tcpdump` as a single trailing argument (never a shell string), and compile-checked in-pod with `tcpdump -d`. There is no `eval`. A negative regression test (`evals/tests/aks-network-capture/injection.test.sh`) proves malicious inputs are rejected.
-- **Scoped access, not `privileged`.** Capture pods use `NET_ADMIN` + `NET_RAW` (plus `SYS_ADMIN`/`SYS_CHROOT` to run the node's own `tcpdump` via `chroot`, which mounts the node root read-write) — so this is effectively node-level access, but never `privileged: true` and never `hostPID`.
-- **Pinned images.** The capture scripts' container images are Microsoft Container Registry references pinned by digest; no Docker Hub, no `:latest`. (The illustrative `kubectl debug` example below uses the MCR tag for readability.)
+- **Scoped access, not `privileged`.** Capture pods use only `NET_ADMIN` + `NET_RAW` with `hostNetwork`. They mount only `/var/log/aks-network-captures` from the node, never the node root, and never enable `hostPID`.
+- **Pinned images.** Capture Jobs use Microsoft Retina's network-tool image from Microsoft Container Registry, pinned by digest; no Docker Hub, no `:latest`.
 
-> Not yet validated on a live cluster in CI. Before relying on distributed capture in production, run the live-cluster smoke test — `evals/tests/aks-network-capture/smoke-live-cluster.sh` — against a throwaway AKS cluster you control (it creates a short capture, retrieves it, and asserts a non-empty pcap came back).
+> The live-cluster smoke test is manual and is not run in CI. Before relying on distributed capture in production, run `evals/tests/aks-network-capture/smoke-live-cluster.sh` against an AKS cluster you control; it uses an isolated namespace, generates bounded same-node DNS traffic, retrieves the exact run, decodes packet records, and verifies Kubernetes plus host-artifact cleanup.
 
-## Two capture methods
-
-**1. Ad-hoc, single node — Microsoft's documented `kubectl debug node` method (least setup).**
-Uses the node's own `tcpdump` via an ephemeral debug pod with only `NET_ADMIN`:
-
-```bash
-# find the node hosting the target pod
-kubectl get pod <pod> -n <ns> -o wide
-# capture on that node, narrowed to the pod IP
-kubectl debug node/<node> -it --profile=netadmin \
-  --image=mcr.microsoft.com/cbl-mariner/busybox:2.0 \
-  -- chroot /host tcpdump -i any host <pod-ip> -w /tmp/pod.pcap
-```
-
-**2. Unattended / multi-node — the capture Job scripts (this skill).**
+## Capture workflow
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/setup-capture-configmap.sh` | Deploy the static-collection script to the cluster (run once) |
+| `scripts/setup-capture-configmap.sh` | Deploy the fixed capture runner to a namespace (run once per namespace) |
 | `scripts/create-capture.sh` | Start a bounded capture Job on the selected nodes/pods |
 | `scripts/retrieve-captures.sh` | Pull capture bundles off the nodes and clean up |
 | `scripts/generate-test-traffic.sh` | Drive test traffic from a pod's netns while capturing |
 | `scripts/collect-azure-network-info.sh` | Collect the Azure-side network config for the cluster |
-| `scripts/collect-network-info.sh` | Static in-node network state (runs inside capture Jobs) |
 
 ```bash
+# Install the fixed capture runner in the namespace
+./scripts/setup-capture-configmap.sh default
+
 # Capture DNS traffic across all Linux nodes for 2 minutes
 ./scripts/create-capture.sh --name dns-debug --tcpdump-filter "udp port 53" --duration 120s
 
 # Capture for specific pods (resolves each pod to its host node and narrows to the pod IPs)
+./scripts/setup-capture-configmap.sh production
 ./scripts/create-capture.sh --name frontend --pod-selector "app=frontend" --namespace production
 
 # Retrieve and clean up
 ./scripts/retrieve-captures.sh --name dns-debug
 ```
 
-`create-capture.sh` targeting flags: `--node-selector`, `--node-names`, `--pod-selector`, `--pod-names` (with `--namespace`). Capture flags: `--duration` (max 30m), `--packet-size`, `--tcpdump-filter`. The filter must be a plain BPF expression — no flags, no shell metacharacters.
+`create-capture.sh` targeting flags: `--node-selector`, `--node-names`, `--pod-selector`, `--pod-names` (with `--namespace`). The same namespace contains the ConfigMap and capture Jobs; pass it to `retrieve-captures.sh --namespace` as well. Creation prints the run ID; pass `--run-id` during retrieval when a capture name has multiple runs. Capture flags: `--duration` (max 30m), `--packet-size`, `--tcpdump-filter`. The filter must be a plain BPF expression — no flags, no shell metacharacters.
 
 ## Azure-side analysis (AKS)
 
@@ -107,8 +96,7 @@ Highlight the first hop where the packet is absent in the capture or denied by a
 
 ## Analysis checklist
 
-1. Extract the retrieved tarballs; read the `network-info-*.txt` static state.
-2. Open the pcap (`tcpdump -r <file>`); confirm whether the traffic was seen at all.
-3. Cross-reference with the Azure network config (`collect-azure-network-info.sh` output).
-4. If the pcap is empty, drive traffic with `generate-test-traffic.sh` during a fresh capture.
-5. Report the failure domain and the evidence (the exact rule, route, or missing hop).
+1. Extract the retrieved tarballs and open the pcap (`tcpdump -r <file>`); confirm whether the traffic was seen at all.
+2. Cross-reference with the Azure network config (`collect-azure-network-info.sh` output).
+3. If the pcap is empty, drive traffic with `generate-test-traffic.sh` during a fresh capture.
+4. Report the failure domain and the evidence (the exact rule, route, or missing hop).
