@@ -42,7 +42,7 @@ jobs:
         working-directory: evals
         run: npm run lint:selftest
 
-      - name: Test llm-client backend auto-detection
+      - name: Run unit tests
         working-directory: evals
         run: npm test
 

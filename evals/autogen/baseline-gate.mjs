@@ -5,6 +5,8 @@
 //   - WITHOUT the skill (generic system) → should FAIL the rubric (baseline)
 // A test is kept only if the skill's presence is what flips it from fail→pass.
 // This blocks tautological tests that any vague answer would satisfy.
+// The two answers are generated concurrently, then the two independent judge
+// calls are run concurrently, reducing four network-latency stages to two.
 //
 // Keep decision is margin-based (see Lever 2 below): keep when the skill answer
 // is strong AND clears the baseline by a safe margin, then auto-calibrate a
@@ -108,6 +110,55 @@ async function judge({ prompt, answer, rubric, creds }) {
   const s = parsed.score;
   const valid = scoreIsValid(s);
   return { score: valid ? s : null, reason: parsed.reason ?? "", valid };
+}
+
+/**
+ * Collect the skill and baseline evidence for one candidate.
+ *
+ * Each judge depends on its corresponding answer, but the two answer branches
+ * are independent. Run each stage concurrently while preserving the same four
+ * calls and result mapping as the serial implementation.
+ */
+export async function collectCandidateEvidence({
+  candidate,
+  skillSystem,
+  creds,
+  chatFn = chat,
+  judgeFn = judge,
+}) {
+  const [skillResp, baseResp] = await Promise.all([
+    chatFn({ system: skillSystem, user: candidate.prompt, creds }),
+    chatFn({ system: BASELINE_SYSTEM, user: candidate.prompt, creds }),
+  ]);
+  const [skillJudge, baseJudge] = await Promise.all([
+    judgeFn({
+      prompt: candidate.prompt,
+      answer: skillResp.text,
+      rubric: candidate.rubric,
+      creds,
+    }),
+    judgeFn({
+      prompt: candidate.prompt,
+      answer: baseResp.text,
+      rubric: candidate.rubric,
+      creds,
+    }),
+  ]);
+
+  return {
+    withSkill: {
+      answer: skillResp.text,
+      score: skillJudge.score,
+      reason: skillJudge.reason,
+      valid: skillJudge.valid,
+    },
+    baseline: {
+      answer: baseResp.text,
+      score: baseJudge.score,
+      reason: baseJudge.reason,
+      valid: baseJudge.valid,
+    },
+  };
 }
 
 function keywordsPass(answer, keywords) {
@@ -272,6 +323,7 @@ async function main() {
   // bundle; a candidate that truly needs a reference simply won't clear this
   // gate — which is correct, since it would also fail in promptfoo today.)
   const skillContent = fs.readFileSync(path.resolve(args.skill), "utf8");
+  const skillSystem = SKILL_SYSTEM(skillContent);
   const dry = !!args["dry-run"];
   const creds = dry ? null : resolveCreds();
   const judgePin = {
@@ -288,12 +340,11 @@ async function main() {
       withSkill = { answer: "(dry) skill answer", score: 0.95, reason: "dry-run", valid: true };
       baseline = { answer: "(dry) baseline answer", score: 0.3, reason: "dry-run", valid: true };
     } else {
-      const skillResp = await chat({ system: SKILL_SYSTEM(skillContent), user: c.prompt, creds });
-      const baseResp = await chat({ system: BASELINE_SYSTEM, user: c.prompt, creds });
-      const sJudge = await judge({ prompt: c.prompt, answer: skillResp.text, rubric: c.rubric, creds });
-      const bJudge = await judge({ prompt: c.prompt, answer: baseResp.text, rubric: c.rubric, creds });
-      withSkill = { answer: skillResp.text, score: sJudge.score, reason: sJudge.reason, valid: sJudge.valid };
-      baseline = { answer: baseResp.text, score: bJudge.score, reason: bJudge.reason, valid: bJudge.valid };
+      ({ withSkill, baseline } = await collectCandidateEvidence({
+        candidate: c,
+        skillSystem,
+        creds,
+      }));
     }
 
     // Decision state, resolved below. `quarantined` means a skill-gap candidate
