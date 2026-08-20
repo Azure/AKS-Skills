@@ -1,12 +1,12 @@
 # Skill Evaluations
 
-Automated quality and routing checks for AKS skills. Runs on every PR that touches `skills/` or `evals/`.
+Deterministic and model-backed validation for AKS skills. Every PR gets the secret-free contracts; authoritative model-backed checks run only after the protected trust boundary described below. The separate manual Autogen workflow produces non-authoritative candidates for review.
 
 ## What it does
 
 - **Lint** — validates SKILL.md formatting (front matter, required fields, script shebangs, internal references). No API key needed.
-- **Quality eval** — sends test prompts to the model with the root skill plus only the deep files declared by that case, then grades the response with `icontains` and `g-eval` assertions.
-- **Trigger eval** — asks the model which skill should handle a query (router-provider), asserts with deterministic `equals`.
+- **Quality eval** — after explicit trust approval, sends test prompts to the configured model with the root skill plus only the deep files declared by that case, then grades with deterministic assertions and the configured judge model. Any failed case fails the trusted workflow.
+- **Trigger eval** — after the same boundary, asks the generator which skill should handle a query and asserts with deterministic `equals`. Any failed case fails the trusted workflow.
 - **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
 - **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the full AKS skill pool available, and grades the trajectory. Two tiers:
   - `tier: smoke` — competitive routing check: did the agent invoke the required skill, avoid the colliding skill (`skill-invocation`), and finish without crashing (`output-not-matches`)? No cluster.
@@ -26,9 +26,11 @@ npm run lint
 # Focused deterministic skill-context and network-script security checks
 npm run test:deep-content
 
-# Requires LLM credentials
+# Requires one supported model backend; Azure OpenAI example:
 export AZURE_OPENAI_API_KEY="your-key"
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+# Optional: pin a separate judge deployment. Otherwise the judge uses EVAL_MODEL.
+export EVAL_JUDGE_MODEL="judge-deployment"
 
 npm run eval              # quality tests → results.json
 npm run eval:trigger      # trigger/routing tests → routing-results.json
@@ -87,6 +89,8 @@ This proves that the selected files are loaded and available to the evaluation; 
 
 ## Environment variables
 
+### Local provider configuration
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `EVAL_PROVIDER` | No | Explicit backend override: `foundry` \| `azure` \| `openai` \| `github`. Takes precedence over every auto-detection rule below, including `OPENAI_BASE_URL`. Auto-detected if unset. |
@@ -95,6 +99,7 @@ This proves that the selected files are loaded and available to the evaluation; 
 | `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set. Optional when `OPENAI_BASE_URL` points at a keyless self-hosted server. |
 | `OPENAI_BASE_URL` | No | Point the `openai` backend at any OpenAI-compatible endpoint instead of `api.openai.com` — a self-hosted or local model server (llama.cpp / vLLM / Ollama) or a gateway. Default: `https://api.openai.com/v1`. Setting this is treated as explicit local/OpenAI-compatible intent during auto-detection: it selects the `openai` backend even if Azure credentials also happen to be present in the environment. |
 | `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5` for `azure`/`api.openai.com`). Set this for a custom `OPENAI_BASE_URL` server such as vLLM that requires a `model` field in the request body — servers that infer the model from what they have loaded (e.g. some llama.cpp/Ollama setups) can omit it. |
+| `EVAL_JUDGE_MODEL` | No | Optional judge deployment/model. Falls back to `EVAL_MODEL`, preserving the local single-endpoint flow. |
 
 *Either Azure OpenAI or OpenAI credentials must be provided, unless `EVAL_PROVIDER=openai` with `OPENAI_BASE_URL` set to a keyless endpoint.
 
@@ -115,6 +120,19 @@ npm run eval:trigger    # routing
 Local runs are a development signal, not a CI gate — like the GitHub Models backend, results aren't directly comparable to the frontier CI pool.
 
 The judge and the model under test share one endpoint per run today, so a local run is graded by a model on that same endpoint. Grading a small local model with a separate frontier judge in a single run (a cross-endpoint model-tier matrix) is a natural next step, not yet wired.
+
+### Trusted CI configuration
+
+| Variable | Trusted CI | Description |
+|----------|------------|-------------|
+| `EVAL_PROVIDER` | Fixed to `foundry` | Trusted runs cannot auto-detect a different backend. |
+| `EVAL_PROTOCOL` | Optional environment variable | Foundry protocol: `openai` (default) or `anthropic`. |
+| `EVAL_MODEL` | Required environment variable | Generator deployment/model name. |
+| `EVAL_JUDGE_MODEL` | Optional environment variable | Fixed judge deployment/model; falls back to `EVAL_MODEL`. |
+| `FOUNDRY_ENDPOINT` | Required environment variable | Foundry resource endpoint, without credentials. |
+| `FOUNDRY_ACCESS_TOKEN` | Short-lived only | Acquired inside the approved job through Azure OIDC; never stored in repository or environment secrets. |
+
+The shared client still supports explicit `azure`, `openai`, and `github` providers for local development. Trusted CI fixes `EVAL_PROVIDER=foundry` and sets `EVAL_REQUIRE_FOUNDRY=1`, so it cannot auto-detect a fallback provider. Foundry deployment names are opaque to the adapter: deploy the model in the configured resource, then update `EVAL_PROTOCOL`, `EVAL_MODEL`, and optionally `EVAL_JUDGE_MODEL`.
 
 Agentic evals don't use these variables — they authenticate via the GitHub Copilot CLI (`copilot /login`).
 
@@ -201,7 +219,7 @@ Run the **Autogen Evals** workflow from the Actions tab (`workflow_dispatch`), p
 
 The workflow only **reads** the repo (`contents: read`) — it never writes or opens a PR. Download the artifact, review it, drop the YAML into `evals/tests/<skill>/`, rename the `.autogen.yaml` files to the curated `quality-tests.yaml` / `trigger-tests.yaml` (merging with any hand-written cases), apply the wiring, and open the PR yourself.
 
-The gate makes real LLM calls per candidate, so this is **opt-in and manual by design** — it is not a background watcher. It reuses the same `AZURE_OPENAI_*` secrets as `skill-eval.yml`. Set `dry_run: true` to exercise the pipeline with no LLM spend (emits fixed samples).
+The gate makes real LLM calls per candidate, so this is **opt-in and manual by design** — it is not a background watcher. This workflow uses its own `AZURE_OPENAI_*` repository secrets; the pull-request `Skill Evaluation` workflow remains secret-free, and the Autogen artifact is not an authoritative trusted-eval result. Set `dry_run: true` to exercise the pipeline with no LLM spend (emits fixed samples).
 
 ### Local run
 
@@ -231,8 +249,8 @@ Then review, rename the `.autogen.yaml` files into the curated `quality-tests.ya
 
 | Config | What it tests | Provider | Assertions | Gate |
 |--------|---------------|----------|------------|------|
-| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (root plus case-declared deep files) | `icontains`, `g-eval` | No (advisory — retries 2x, reports only) |
-| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | No (advisory — reports only) |
+| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (root plus case-declared deep files) | `icontains`, `g-eval` | Required after trusted approval |
+| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | Required after trusted approval |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
 | `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `prompt`, `output-matches` | Manual; failed graders exit non-zero |
 
@@ -263,13 +281,33 @@ Compare g-eval scores between skill-loaded and baseline to quantify skill value.
 
 ## CI/CD
 
-The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:
+`Skill Evaluation` runs on every `pull_request`, including forks, with `contents: read` only. It checks out `pull_request.head.sha`, runs `npm run lint` and `npm run lint:agentic`, and uploads one inert `target.json` artifact named with that workflow run ID. It never references model/Azure secrets or executes model evaluation.
 
-1. **Lint** — fast-fails if SKILL.md format is invalid (a hard gate, alongside shellcheck and the injection test)
-2. **Quality eval** — runs quality tests with skill loaded (advisory — retries failing tests up to 2x, reports but does not block merge)
-3. **Trigger eval** — runs routing tests via router-provider (advisory — reports but does not block merge)
-4. **Baseline comparison** — quality tests without skill, reports score delta
-5. **PR comment** — posts results table with g-eval scores and baseline delta
+The default-branch-only `Trusted Skill Evaluation` workflow reacts through `workflow_run`. The trigger selects the display name, but the anchor, resolver, and final publisher each also require the platform-supplied path to be exactly `.github/workflows/skill-eval.yml`; a PR-added workflow that reuses the `Skill Evaluation` name cannot establish trust. Before reading any artifact, the anchor creates `Trusted Skill Evaluation` on the platform-supplied `workflow_run.head_sha` with a failure conclusion. The finalizer always runs, and a missing anchor can create only another failure check.
+
+The resolver identifies exactly one open PR from the platform-supplied head repository/ref/SHA, then requires the inert artifact's PR number and commit/repository/ref/run identity to match that current PR and `workflow_run`. It compares the complete Pull Files enumeration with the live `pullRequest.changed_files` count before classifying paths; GitHub's 3,000-file enumeration cap, duplicate/invalid entries, or any count mismatch therefore requires model evaluation rather than producing a non-model success. Changes under `skills/`, `evals/`, or any file in `.github/workflows/` are model-sensitive, including a newly added workflow.
+
+Workflow `run:` blocks never interpolate `${{ }}` values. Event, PR, artifact, and job-output strings enter step environment variables and are passed as quoted shell variables, so valid Git refs containing shell metacharacters remain inert. Branch values are also checked with `git check-ref-format --branch` without imposing a narrower repository naming convention.
+
+Model-sensitive changes enter the `trusted-skill-eval` environment, where GitHub enforces human approval before the exact recorded fork commit is checked out. The job does not enable `setup-node` caching after fork checkout. It uses Azure OIDC for a short-lived Foundry token and runs required quality and routing evaluations with Promptfoo caching and result writes disabled.
+
+**Accepted residual risk:** approval intentionally authorizes fork-authored code (`npm ci`, providers, configs, and eval scripts) to run while an inference credential is present. The control is the human gate plus an identity restricted to inference on the single Foundry resource; this design does not sandbox or attest away arbitrary fork-code execution. Approvers must verify the PR head SHA before approving. Do not grant this identity content, deployment, or broad management permissions.
+
+The final publisher revalidates the same workflow file path, event anchor, live PR head/repository/ref, original check ID, head SHA, external run identity, check name, and GitHub Actions app before promoting that exact check. Upstream failure, target/API failure, approval rejection, cancellation, required-eval failure, or an unresolved result leaves the check failed.
+
+### Trusted CI boundary and required repository configuration
+
+This branch does not modify repository settings, and the resolver deliberately does not duplicate GitHub's environment-policy enforcement. Configure and verify every setting below before treating the trusted check as authoritative:
+
+1. Create the `trusted-skill-eval` environment. Add at least one required reviewer, enable **Prevent self-review**, disable administrator bypass, and select **Protected branches only**. GitHub enforces this gate; repository code does not duplicate the environment-policy audit.
+2. Add environment variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `FOUNDRY_ENDPOINT`, and `EVAL_MODEL`. `EVAL_PROTOCOL` and `EVAL_JUDGE_MODEL` are optional. No long-lived model or Azure secret is required.
+3. Configure an Azure federated identity credential for subject `repo:Azure/AKS-Skills:environment:trusted-skill-eval`. Assign only inference data actions at the specific Foundry resource. For partner/MaaS models, the role must include the required `Microsoft.CognitiveServices/accounts/MaaS/*` data action; avoid content, deployment, subscription, and broad management roles.
+4. Add the stable required check contexts `eval` (the job under the `Skill Evaluation` workflow) and `Trusted Skill Evaluation` to the default-branch ruleset. The first is always present; the second is published onto the exact validated PR head SHA by the trusted default-branch workflow. Existing path-scoped `shellcheck` and `injection-test` jobs under `Script Security` remain hard failures when their workflow runs, but must not be made globally required while their path filters remain.
+5. Enable the repository or organization Actions policy **Require actions to be pinned to a full-length commit SHA**. All actions used by these workflows are already pinned.
+
+The trusted `workflow_run` path cannot execute until this workflow exists on the default branch. Pull-request CI therefore proves only the untrusted workflow and deterministic policy tests; the first post-merge run must confirm the live default-branch trigger and deployment policy.
+
+Authoritative platform behavior: [events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows), [deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments), [secure use of reference actions](https://docs.github.com/en/actions/reference/security/secure-use), [artifact storage and digests](https://docs.github.com/en/actions/tutorials/store-and-share-data), and [Azure OIDC federation](https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect).
 
 ## Filtering evals
 

@@ -26,14 +26,15 @@ Scripts get extra scrutiny because they run against customer clusters:
 
 ```bash
 cd evals && npm ci
-node lint-skills.js                                 # front matter, coverage, coaching lint
-node lint-skills.test.js                            # contract linter self-test (fixture-based, no network)
+npm run lint                                        # all secret-free mechanical/deep/CI-policy tests
+npm test                                            # llm-client backend auto-detection
+npm run lint:agentic                                # agentic schema + hard-failure contracts
 find ../skills -name '*.sh' -exec shellcheck -S warning {} +
 bash tests/aks-network-capture/injection.test.sh    # script security regression
-npm run eval && npm run eval:trigger                 # quality + routing (needs Azure OpenAI env)
+npm run eval && npm run eval:trigger                # optional local model evidence
 ```
 
-The quality/routing evals need `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`. Fork PRs run the secret-free gates (lint, shellcheck, injection test) automatically; a maintainer runs the LLM evals.
+Every PR runs the deterministic contracts without model or Azure credentials. After that succeeds, changes under `skills/`, `evals/`, or `.github/workflows/` enter the protected `trusted-skill-eval` environment. An approved job uses Azure OIDC and the exact recorded PR commit; quality and routing failures remain failures. See [`evals/README.md`](evals/README.md#trusted-ci-boundary-and-required-repository-configuration) for the one-time repository configuration, trust boundary, and local provider variables.
 
 ## Commit and review
 

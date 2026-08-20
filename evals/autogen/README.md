@@ -34,6 +34,10 @@ scaffold-eval.mjs  →  <skill>.candidates.json  →  baseline-gate.mjs  →  *.
 | `AZURE_OPENAI_API_VERSION` | Optional (default `2024-12-01-preview`) |
 | `EVAL_MODEL` | Optional deployment/model name (default `gpt-5`) |
 
+The manual Autogen workflow supplies `AZURE_OPENAI_*` from repository secrets.
+That boundary is separate from protected trusted-eval OIDC, and its artifacts
+remain non-authoritative candidates until a maintainer reviews and commits them.
+
 The `--dry-run` flag on both scripts skips all model calls and emits fixed samples —
 use it to test wiring/plumbing without LLM spend.
 

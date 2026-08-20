@@ -88,4 +88,6 @@ CI fails if a skill has no tests or if the configured skill context is invalid.
 - `evals/skill-context.test.mjs` — ordered selective loading, path and symlink safety, configured path resolution, expansion guards, and unique case IDs.
 - `evals/network-script-security.test.mjs` — rendered capture-manifest least privilege and traffic-generator argument boundaries.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).
-- `.github/workflows/skill-eval.yml` — routing + quality evals (requires Azure OpenAI secrets).
+- `.github/workflows/skill-eval.yml` — secret-free mechanical, deep-content, production-script, workflow-policy, and agentic fail-closed contracts on every fork and same-repository PR. It records the exact PR head SHA in an inert, run-scoped target artifact.
+- `.github/workflows/trusted-skill-eval.yml` — accepts only a platform-supplied run of `.github/workflows/skill-eval.yml`, verifies that run's recorded target against the current PR, waits for `trusted-skill-eval` approval, and evaluates the exact commit with short-lived Azure OIDC credentials. Quality and routing fail independently.
+- `evals/scripts/generate-report.mjs` — renders local eval artifacts into a committable report and escapes dynamic Markdown table cells.
