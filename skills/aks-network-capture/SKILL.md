@@ -10,7 +10,7 @@ metadata:
       anyBins:
         - kubectl
         - az
-description: "Packet-level network evidence for AKS: run a bounded, distributed packet capture across nodes (filtered by IP, port, or tcpdump/BPF expression), and collect Azure network resources (NSG rules, route tables, firewall, VNET peering) when you need pcap-level proof of where traffic drops. Escalation tool for when logs and read-only checks are inconclusive. WHEN: capture packets on a node, take a pcap, tcpdump on AKS, prove where a packet is dropped, verify an NSG or route is blocking traffic at the wire. DO NOT USE FOR: general DNS / connectivity / ingress troubleshooting — start with aks-troubleshooting (which routes here when a capture is actually needed)."
+description: "Packet-level network evidence for AKS: run a bounded, distributed packet capture across nodes (filtered by IP, port, or tcpdump/BPF expression), and collect Azure network resources (NSG rules, route tables, firewall, VNET peering) when you need pcap-level proof of where traffic drops. Escalation tool for when logs and read-only checks are inconclusive. WHEN: capture packets on a node, take a pcap, tcpdump on AKS, prove where a packet is dropped, verify an NSG or route is blocking traffic at the wire. DO NOT USE FOR: general DNS / connectivity / ingress troubleshooting (use aks-troubleshooting, which routes here when a capture is actually needed)."
 ---
 
 # AKS Network Capture

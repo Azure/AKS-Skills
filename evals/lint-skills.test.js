@@ -1,128 +1,712 @@
 #!/usr/bin/env node
 /**
- * Lint self-test: a CRLF working tree (standard Windows checkout) must lint
- * identically to the LF tree CI sees. Zero external dependencies.
+ * Self-test for the skill contract linter (lint-skills.js).
  *
- * Case 1: copy a real skill twice — once with LF endings, once with CRLF —
- *         and assert the linter's output is byte-identical (errors AND
- *         warnings), not merely that both exit 0.
- * Case 2: a skill with no front matter must still fail — normalization must
- *         not make the parser accept malformed files.
- * Case 3: nested skill Markdown must reject a hardcoded Azure MCP tool name.
- * Case 4: README must reject a hardcoded Azure MCP tool name.
+ * Uses only Node's built-in test runner (node:test / node:assert) — no new
+ * test framework or dependency. Run directly:
  *
- * Usage: node lint-skills.test.js
+ *   node lint-skills.test.js
+ *
+ * Most cases build a throwaway fixture skill tree under a temp directory,
+ * call lintSkills() in-process, and assert the expected result. Subprocess
+ * cases also prove the CLI exit codes used by CI. A final test runs
+ * lintSkills() against the real skills/ tree and asserts it is error-free.
  */
 
-const { spawnSync } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+'use strict';
 
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const { lintSkills } = require('./lint-skills.js');
 const LINTER = path.join(__dirname, 'lint-skills.js');
-// Small real skill whose eval coverage exists at evals/tests/<name>/, so the
-// coverage gate (resolved relative to evals/, not the target dir) passes.
-const SOURCE_SKILL = path.join(__dirname, '..', 'skills', 'aks-cost-optimization');
 
-if (!fs.existsSync(SOURCE_SKILL)) {
-  console.error(`✗ lint self-test: fixture skill not found at ${SOURCE_SKILL} — update SOURCE_SKILL after a skill rename/removal`);
-  process.exit(1);
+// --- Fixture helpers -------------------------------------------------------
+
+function mkTempRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'aks-skills-lint-test-'));
 }
 
-function runLinter(targetDir) {
-  const result = spawnSync(process.execPath, [LINTER, targetDir], { encoding: 'utf-8' });
-  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+function cleanup(root) {
+  fs.rmSync(root, { recursive: true, force: true });
 }
 
-function copyWithEol(src, dest, eol) {
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const from = path.join(src, entry.name);
-    const to = path.join(dest, entry.name);
+function validDescription(sibling = 'aks-fixture-sibling') {
+  return 'Does fixture things for AKS clusters. '
+    + 'WHEN: a fixture trigger phrase is present, or another fixture trigger phrase applies. '
+    + `DO NOT USE FOR: an unrelated fixture case (use ${sibling}).`;
+}
+
+/** Contract-compliant front matter lines, in the declared order, as an array of lines. */
+function validFrontMatterLines(name, overrides = {}) {
+  const {
+    license = 'MIT',
+    author = 'Microsoft',
+    version = '1.0.0',
+    description = validDescription(),
+  } = overrides;
+  return [
+    '---',
+    `name: ${name}`,
+    `license: ${license}`,
+    'metadata:',
+    `  author: ${author}`,
+    `  version: "${version}"`,
+    `description: "${description}"`,
+    '---',
+    '',
+    '# Fixture Skill',
+    '',
+    'Fixture body text for the contract linter self-test.',
+    '',
+  ];
+}
+
+function writeSkill(root, folderName, frontMatterLines) {
+  const dir = path.join(root, 'skills', folderName);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), frontMatterLines.join('\n'));
+  return dir;
+}
+
+function writeTests(root, skillName, overrides = {}) {
+  const {
+    trigger = '- description: fixture trigger case\n  vars:\n    prompt: fixture prompt\n  assert: []\n',
+    quality = '- description: fixture quality case\n  vars:\n    prompt: fixture prompt\n  assert: []\n',
+  } = overrides;
+  const dir = path.join(root, 'tests', skillName);
+  fs.mkdirSync(dir, { recursive: true });
+  if (trigger !== null) fs.writeFileSync(path.join(dir, 'trigger-tests.yaml'), trigger);
+  if (quality !== null) fs.writeFileSync(path.join(dir, 'quality-tests.yaml'), quality);
+}
+
+function writePromptfooConfig(root, testEntries) {
+  const body = ['tests:', ...testEntries.map(e => `  - ${e}`), ''].join('\n');
+  fs.writeFileSync(path.join(root, 'promptfooconfig.yaml'), body);
+}
+
+/** Sets up a fully valid single-skill fixture tree (skill + tests + wiring). */
+function setupValidScenario(root, skillName = 'aks-fixture-skill', frontMatterLines) {
+  const lines = frontMatterLines || validFrontMatterLines(skillName);
+  writeSkill(root, skillName, lines);
+  writeTests(root, skillName);
+  writePromptfooConfig(root, [`file://tests/${skillName}/quality-tests.yaml`]);
+}
+
+function runLint(root, overrides = {}) {
+  return lintSkills({
+    skillsDir: path.join(root, 'skills'),
+    testsDir: path.join(root, 'tests'),
+    promptfooConfigPath: path.join(root, 'promptfooconfig.yaml'),
+    ...overrides,
+  });
+}
+
+function runCli(root) {
+  return spawnSync(process.execPath, [LINTER, path.join(root, 'skills')], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      LINT_TESTS_DIR: path.join(root, 'tests'),
+      LINT_PROMPTFOO_CONFIG: path.join(root, 'promptfooconfig.yaml'),
+    },
+  });
+}
+
+function runGit(root, args) {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+  assert.equal(
+    result.status,
+    0,
+    `git ${args.join(' ')} failed:\n${result.stderr || result.stdout}`,
+  );
+}
+
+function initializeGitRepo(root) {
+  runGit(root, ['init', '--quiet']);
+}
+
+function stageWithMode(root, filePath, mode) {
+  if (!fs.existsSync(path.join(root, '.git'))) initializeGitRepo(root);
+  const relativePath = path.relative(root, filePath).split(path.sep).join('/');
+  runGit(root, ['add', '--', relativePath]);
+  runGit(root, [
+    'update-index',
+    mode === '100755' ? '--chmod=+x' : '--chmod=-x',
+    '--',
+    relativePath,
+  ]);
+}
+
+function withTempRoot(fn) {
+  const root = mkTempRoot();
+  try {
+    fn(root);
+  } finally {
+    cleanup(root);
+  }
+}
+
+function rewriteTreeEol(root, eol) {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      copyWithEol(from, to, eol);
+      rewriteTreeEol(entryPath, eol);
     } else {
-      const lf = fs.readFileSync(from, 'utf-8').replace(/\r\n?/g, '\n');
-      fs.writeFileSync(to, eol === '\n' ? lf : lf.replace(/\n/g, eol));
+      const lf = fs.readFileSync(entryPath, 'utf-8').replace(/\r\n?/g, '\n');
+      fs.writeFileSync(entryPath, lf.replace(/\n/g, eol));
     }
   }
 }
 
-const failures = [];
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-selftest-'));
-
-try {
-  // Case 1: CRLF copy must lint byte-identically to an LF copy of the same
-  // skill. The linter prints target-relative paths, so outputs are comparable.
-  const skillName = path.basename(SOURCE_SKILL);
-  const lfDir = path.join(tmpRoot, 'lf');
-  const crlfDir = path.join(tmpRoot, 'crlf');
-  copyWithEol(SOURCE_SKILL, path.join(lfDir, skillName), '\n');
-  copyWithEol(SOURCE_SKILL, path.join(crlfDir, skillName), '\r\n');
-  const lf = runLinter(lfDir);
-  const crlf = runLinter(crlfDir);
-  if (lf.status !== 0) {
-    failures.push(`LF copy of ${skillName} failed lint (broken fixture?):\n${lf.output}`);
-  } else if (crlf.status !== 0) {
-    failures.push(`CRLF copy of ${skillName} failed lint:\n${crlf.output}`);
-  } else if (crlf.output !== lf.output) {
-    failures.push(`CRLF and LF copies of ${skillName} produced different lint output:\n--- LF ---\n${lf.output}\n--- CRLF ---\n${crlf.output}`);
-  } else if (!crlf.output.includes('1 skill(s) checked')) {
-    failures.push(`linter did not discover the skill copies:\n${crlf.output}`);
-  }
-
-  // Case 2: malformed front matter must still be rejected.
-  const brokenDir = path.join(tmpRoot, 'broken', 'broken-skill');
-  fs.mkdirSync(brokenDir, { recursive: true });
-  fs.writeFileSync(path.join(brokenDir, 'SKILL.md'), 'No front matter here.\r\n');
-  const broken = runLinter(path.join(tmpRoot, 'broken'));
-  if (broken.status === 0 || !broken.output.includes('malformed YAML front matter')) {
-    failures.push(`malformed front matter was not rejected:\n${broken.output}`);
-  }
-
-  // Case 3: nested skill guidance must not depend on a host-assigned tool name.
-  const skillPortabilityRoot = path.join(tmpRoot, 'skill-portability');
-  const skillPortabilityDir = path.join(skillPortabilityRoot, 'skills');
-  copyWithEol(SOURCE_SKILL, path.join(skillPortabilityDir, skillName), '\n');
-  const referencesDir = path.join(skillPortabilityDir, skillName, 'references');
-  fs.mkdirSync(referencesDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(referencesDir, 'mcp.md'),
-    'Call mcp_azure_mcp_aks_cluster_get before continuing.\n',
-  );
-  const skillPortability = runLinter(skillPortabilityDir);
-  if (
-    skillPortability.status === 0
-    || !skillPortability.output.includes(
-      'hardcoded Azure MCP tool name "mcp_azure_mcp_aks_cluster_get"',
-    )
-  ) {
-    failures.push(`hardcoded Azure MCP name in skill Markdown was not rejected:\n${skillPortability.output}`);
-  }
-
-  // Case 4: top-level README guidance follows the same portability contract.
-  const readmePortabilityRoot = path.join(tmpRoot, 'readme-portability');
-  const readmeSkillsDir = path.join(readmePortabilityRoot, 'skills');
-  copyWithEol(SOURCE_SKILL, path.join(readmeSkillsDir, skillName), '\n');
-  fs.writeFileSync(
-    path.join(readmePortabilityRoot, 'README.md'),
-    'Call mcp_azure_mcp_aks_nodepool_get before continuing.\n',
-  );
-  const readmePortability = runLinter(readmeSkillsDir);
-  if (
-    readmePortability.status === 0
-    || !readmePortability.output.includes(
-      'hardcoded Azure MCP tool name "mcp_azure_mcp_aks_nodepool_get"',
-    )
-  ) {
-    failures.push(`hardcoded Azure MCP name in README was not rejected:\n${readmePortability.output}`);
-  }
-} finally {
-  fs.rmSync(tmpRoot, { recursive: true, force: true });
+function assertHasError(errors, re) {
+  const found = errors.some(e => re.test(e));
+  assert.ok(found, `expected an error matching ${re} in:\n${errors.join('\n')}`);
 }
 
-if (failures.length > 0) {
-  failures.forEach(f => console.error(`✗ lint self-test: ${f}`));
-  process.exit(1);
+function assertHasWarning(warnings, re) {
+  const found = warnings.some(w => re.test(w));
+  assert.ok(found, `expected a warning matching ${re} in:\n${warnings.join('\n')}`);
 }
-console.log('✓ lint self-test: CRLF, malformed front matter, and Azure MCP name portability checks passed');
+// --- Baseline: the fixture harness itself produces a passing skill ---------
+
+test('valid fixture skill passes with no errors', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('CLI exits zero for a valid fixture skill', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    const result = runCli(root);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /All skills pass schema validation/);
+  });
+});
+
+test('CLI exits non-zero for an invalid fixture skill', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const lines = validFrontMatterLines(name)
+      .filter(line => !line.startsWith('description: '));
+    setupValidScenario(root, name, lines);
+    const result = runCli(root);
+    assert.notEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Missing required field: description/);
+  });
+});
+
+test('CLI exits non-zero when no skills are discovered', () => {
+  withTempRoot((root) => {
+    fs.mkdirSync(path.join(root, 'skills'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'tests'), { recursive: true });
+    writePromptfooConfig(root, []);
+    const result = runCli(root);
+    assert.notEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stderr, /No skills found/);
+  });
+});
+
+test('CRLF fixtures produce the same errors and warnings as LF fixtures', () => {
+  const lfRoot = mkTempRoot();
+  const crlfRoot = mkTempRoot();
+  try {
+    setupValidScenario(lfRoot);
+    setupValidScenario(crlfRoot);
+    const skillName = 'aks-fixture-skill';
+    fs.appendFileSync(path.join(lfRoot, 'skills', skillName, 'SKILL.md'), 'Be concise when answering.\n');
+    fs.appendFileSync(path.join(crlfRoot, 'skills', skillName, 'SKILL.md'), 'Be concise when answering.\n');
+    rewriteTreeEol(crlfRoot, '\r\n');
+
+    assert.deepEqual(runLint(crlfRoot), runLint(lfRoot));
+  } finally {
+    cleanup(lfRoot);
+    cleanup(crlfRoot);
+  }
+});
+
+test('nested skill Markdown rejects a hardcoded Azure MCP tool name', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const referencesDir = path.join(root, 'skills', name, 'references');
+    fs.mkdirSync(referencesDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(referencesDir, 'mcp.md'),
+      'Call mcp_azure_mcp_aks_cluster_get before continuing.\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /hardcoded Azure MCP tool name "mcp_azure_mcp_aks_cluster_get"/);
+  });
+});
+
+test('README rejects a hardcoded Azure MCP tool name', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    fs.writeFileSync(
+      path.join(root, 'README.md'),
+      'Call mcp_azure_mcp_aks_nodepool_get before continuing.\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /hardcoded Azure MCP tool name "mcp_azure_mcp_aks_nodepool_get"/);
+  });
+});
+
+// --- Manifest: required fields, presence and order (contract §2) ----------
+
+const requiredFieldCases = [
+  {
+    label: 'name',
+    remove: line => line.startsWith('name: '),
+    error: /Missing required field: name/,
+  },
+  {
+    label: 'license',
+    remove: line => line.startsWith('license: '),
+    error: /Missing required field: license/,
+  },
+  {
+    label: 'metadata',
+    remove: line => line === 'metadata:' || line.startsWith('  author:') || line.startsWith('  version:'),
+    error: /Missing required field: metadata/,
+  },
+  {
+    label: 'metadata.author',
+    remove: line => line.startsWith('  author:'),
+    error: /Missing required field: metadata\.author/,
+  },
+  {
+    label: 'metadata.version',
+    remove: line => line.startsWith('  version:'),
+    error: /Missing required field: metadata\.version/,
+  },
+  {
+    label: 'description',
+    remove: line => line.startsWith('description: '),
+    error: /Missing required field: description/,
+  },
+];
+
+for (const requiredFieldCase of requiredFieldCases) {
+  test(`missing required field (${requiredFieldCase.label}) is an error`, () => {
+    withTempRoot((root) => {
+      const name = 'aks-fixture-skill';
+      const lines = validFrontMatterLines(name).filter(line => !requiredFieldCase.remove(line));
+      writeSkill(root, name, lines);
+      writeTests(root, name);
+      writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+      const { errors } = runLint(root);
+      assertHasError(errors, requiredFieldCase.error);
+    });
+  });
+}
+
+test('top-level front matter fields out of declared order is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    // metadata declared before license — violates name, license, metadata, description order.
+    const lines = [
+      '---',
+      `name: ${name}`,
+      'metadata:',
+      '  author: Microsoft',
+      '  version: "1.0.0"',
+      'license: MIT',
+      `description: "${validDescription()}"`,
+      '---',
+      '',
+    ];
+    writeSkill(root, name, lines);
+    writeTests(root, name);
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /front matter fields out of declared order/);
+  });
+});
+
+test('metadata fields out of declared order is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    // version declared before author — violates the author, version order.
+    const lines = [
+      '---',
+      `name: ${name}`,
+      'license: MIT',
+      'metadata:',
+      '  version: "1.0.0"',
+      '  author: Microsoft',
+      `description: "${validDescription()}"`,
+      '---',
+      '',
+    ];
+    writeSkill(root, name, lines);
+    writeTests(root, name);
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /metadata fields out of declared order/);
+  });
+});
+
+test('malformed YAML front matter is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const lines = ['---', 'name: [unterminated', '---', ''];
+    writeSkill(root, name, lines);
+    writeTests(root, name);
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /Front matter is not valid YAML/);
+  });
+});
+
+test('folded YAML description accepted by the written contract passes', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const lines = [
+      '---',
+      `name: ${name}`,
+      'license: MIT',
+      'metadata:',
+      '  author: Microsoft',
+      '  version: "1.0.0"',
+      'description: >-',
+      '  Does fixture things for AKS clusters.',
+      '  WHEN: a fixture trigger phrase is present.',
+      '  DO NOT USE FOR: an unrelated fixture case (use aks-fixture-sibling).',
+      '---',
+      '',
+      '# Fixture Skill',
+      '',
+    ];
+    setupValidScenario(root, name, lines);
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('no front matter delimiters at all is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const dir = path.join(root, 'skills', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), '# No front matter here\n');
+    writeTests(root, name);
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /Missing or malformed YAML front matter/);
+  });
+});
+
+// --- name === folder (contract §2) -----------------------------------------
+
+test('front matter name not matching folder name is an error', () => {
+  withTempRoot((root) => {
+    const folder = 'aks-fixture-folder';
+    const lines = validFrontMatterLines('aks-different-name');
+    writeSkill(root, folder, lines);
+    writeTests(root, folder);
+    writePromptfooConfig(root, [`file://tests/${folder}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /must equal folder name/);
+  });
+});
+
+// --- semver / license / author exact values (contract §2) ------------------
+
+test('non-semver metadata.version is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, { version: 'v1.0' }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /is not valid semver/);
+  });
+});
+
+test('semver metadata.version with a leading zero is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, { version: '01.0.0' }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /is not valid semver/);
+  });
+});
+
+test('license other than MIT is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, { license: 'Apache-2.0' }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /must be "MIT"/);
+  });
+});
+
+test('metadata.author other than Microsoft is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, { author: 'Contoso' }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /must be "Microsoft"/);
+  });
+});
+
+// --- description content rules (contract §2) --------------------------------
+
+test('description missing WHEN: clause is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const desc = 'Does fixture things. DO NOT USE FOR: an unrelated case (use aks-fixture-sibling).';
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /missing required "WHEN:" trigger clause/);
+  });
+});
+
+test('description missing DO NOT USE FOR: clause is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const desc = 'Does fixture things. WHEN: a fixture trigger phrase is present.';
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /missing required "DO NOT USE FOR:" boundary clause/);
+  });
+});
+
+test('description DO NOT USE FOR: clause without parenthetical-redirect grammar is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const desc = 'Does fixture things. WHEN: a fixture trigger phrase is present. '
+      + 'DO NOT USE FOR: an unrelated case, see the other skill instead.';
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /parenthetical-redirect grammar/);
+  });
+});
+
+test('description exceeding the ~2000 char routing budget is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const filler = 'A'.repeat(2100);
+    const desc = `${filler} WHEN: a fixture trigger phrase is present. `
+      + 'DO NOT USE FOR: an unrelated case (use aks-fixture-sibling).';
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /exceeds the contract's routing budget of ~2000 chars/);
+  });
+});
+
+// --- Required tests (contract §5) -------------------------------------------
+
+test('missing trigger-tests.yaml is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    writeSkill(root, name, validFrontMatterLines(name));
+    writeTests(root, name, { trigger: null });
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /missing required evals\/tests\/\.\.\.\/trigger-tests\.yaml/);
+  });
+});
+
+test('missing quality-tests.yaml is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    writeSkill(root, name, validFrontMatterLines(name));
+    writeTests(root, name, { quality: null });
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /missing required evals\/tests\/\.\.\.\/quality-tests\.yaml/);
+  });
+});
+
+test('empty (non-list) trigger-tests.yaml is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    writeSkill(root, name, validFrontMatterLines(name));
+    writeTests(root, name, { trigger: '# no cases yet\n' });
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /trigger-tests\.yaml must be a non-empty list of test cases/);
+  });
+});
+
+test('empty ([]) quality-tests.yaml is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    writeSkill(root, name, validFrontMatterLines(name));
+    writeTests(root, name, { quality: '[]\n' });
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /quality-tests\.yaml must be a non-empty list of test cases/);
+  });
+});
+
+test('malformed quality-tests.yaml is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    writeSkill(root, name, validFrontMatterLines(name));
+    writeTests(root, name, { quality: '- [unterminated\n' });
+    writePromptfooConfig(root, [`file://tests/${name}/quality-tests.yaml`]);
+    const { errors } = runLint(root);
+    assertHasError(errors, /quality-tests\.yaml is not valid YAML/);
+  });
+});
+
+test('quality-tests.yaml not wired into promptfooconfig.yaml is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    writeSkill(root, name, validFrontMatterLines(name));
+    writeTests(root, name);
+    writePromptfooConfig(root, []); // no tests: entries at all
+    const { errors } = runLint(root);
+    assertHasError(errors, /is not wired into evals\/promptfooconfig\.yaml/);
+  });
+});
+
+// --- Scripts: shebang + executable bit (contract §4) ------------------------
+
+test('script missing a shebang is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const scriptPath = path.join(scriptsDir, 'fixture');
+    fs.writeFileSync(scriptPath, 'echo hi\n');
+    stageWithMode(root, scriptPath, '100755');
+    const { errors } = runLint(root);
+    assertHasError(errors, /Script missing a valid shebang line/);
+    assert.ok(!errors.some(error => /Script is not executable/.test(error)));
+  });
+});
+
+test('script with a non-absolute shebang interpreter is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const scriptPath = path.join(scriptsDir, 'fixture.sh');
+    fs.writeFileSync(scriptPath, '#!env bash\necho hi\n');
+    stageWithMode(root, scriptPath, '100755');
+    const { errors } = runLint(root);
+    assertHasError(errors, /Script missing a valid shebang line/);
+  });
+});
+
+test('script with Git index mode 100644 is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const scriptPath = path.join(scriptsDir, 'fixture.sh');
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hi\n');
+    fs.chmodSync(scriptPath, 0o755);
+    stageWithMode(root, scriptPath, '100644');
+    const { errors } = runLint(root);
+    assertHasError(errors, /Script is not executable/);
+  });
+});
+
+test('script with Git index mode 100755 passes even when filesystem mode is not executable', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const scriptPath = path.join(scriptsDir, 'fixture.sh');
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hi\n');
+    fs.chmodSync(scriptPath, 0o644);
+    stageWithMode(root, scriptPath, '100755');
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('non-script artifacts under scripts are ignored', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, 'README.md'), '# Helper documentation\n');
+    fs.writeFileSync(path.join(scriptsDir, 'allowlist.json'), '{"allowed":[]}\n');
+    const { errors, warnings } = runLint(root);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, []);
+  });
+});
+
+test('untracked script reports that Git index mode cannot be verified', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    initializeGitRepo(root);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, 'fixture.sh'), '#!/bin/sh\necho hi\n');
+    const { errors, warnings } = runLint(root);
+    assert.deepEqual(errors, []);
+    assertHasWarning(warnings, /file is untracked or has no stage-0 index entry/);
+  });
+});
+
+test('missing Git executable reports that index mode cannot be verified', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, 'fixture.sh'), '#!/bin/sh\necho hi\n');
+    const { errors, warnings } = runLint(root, {
+      gitCommand: path.join(root, 'missing-git'),
+    });
+    assert.deepEqual(errors, []);
+    assertHasWarning(warnings, /Git executable is unavailable/);
+  });
+});
+
+// --- Preserved behavior: references and durability warnings -----------------
+
+test('missing internal file reference remains an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const skillPath = path.join(root, 'skills', name, 'SKILL.md');
+    fs.appendFileSync(skillPath, 'Read `references/missing.md` for details.\n');
+    const { errors } = runLint(root);
+    assertHasError(errors, /References `references\/missing\.md` but file does not exist/);
+  });
+});
+
+test('generic coaching phrase remains a durability warning', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const skillPath = path.join(root, 'skills', name, 'SKILL.md');
+    fs.appendFileSync(skillPath, 'Be concise when answering.\n');
+    const { errors, warnings } = runLint(root);
+    assert.deepEqual(errors, []);
+    assert.ok(warnings.some(w => /coaching phrase "be concise"/.test(w)));
+  });
+});
+
+// --- Regression: the real repo must still pass in full ---------------------
+
+test('real repo skills pass the full contract lint with zero errors', () => {
+  const repoRoot = path.join(__dirname, '..');
+  const { errors, skillCount } = lintSkills({
+    skillsDir: path.join(repoRoot, 'skills'),
+    testsDir: path.join(__dirname, 'tests'),
+    promptfooConfigPath: path.join(__dirname, 'promptfooconfig.yaml'),
+  });
+  assert.ok(skillCount > 0, 'expected at least one shipped skill to be discovered');
+  assert.deepEqual(errors, []);
+});
