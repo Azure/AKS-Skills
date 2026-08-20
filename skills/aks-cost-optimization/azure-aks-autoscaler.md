@@ -48,20 +48,21 @@ az aks nodepool update \
 
 ## Tune CAS Profile
 
-Apply when CAS is already on but idle nodes persist:
-
-> ⚠️ **Warning:** Setting `skip-nodes-with-system-pods=false` allows CAS to evict system pods. Ensure all system pods in `kube-system` have PodDisruptionBudgets before enabling this.
+Apply when CAS is already on but idle nodes persist. This uses the "Cost-Optimized" profile from the table below — the delay and unneeded-time timers are halved from the 10-minute defaults, and the utilization threshold is left at its 0.5 default (see [Microsoft Learn: cluster autoscaler profile settings](https://learn.microsoft.com/azure/aks/cluster-autoscaler#cluster-autoscaler-profile-settings) for the documented parameter names and defaults):
 
 ```bash
 az aks update \
   --name "<CLUSTER_NAME>" --resource-group "<RESOURCE_GROUP>" \
   --cluster-autoscaler-profile \
-    scale-down-delay-after-add=10m \
-    scale-down-unneeded-time=10m \
+    scale-down-delay-after-add=5m \
+    scale-down-unneeded-time=5m \
     scale-down-utilization-threshold=0.5 \
-    max-graceful-termination-sec=600 \
-    skip-nodes-with-system-pods=false
+    max-graceful-termination-sec=600
 ```
+
+> Risk: Medium. Shortening `scale-down-delay-after-add` and `scale-down-unneeded-time` makes CAS reclaim idle nodes faster, which increases savings but also increases the chance CAS deletes a node and then has to immediately reprovision one for the next burst ("thrashing"), adding node-provisioning latency to your workloads. Microsoft's own guidance on aggressive autoscaler tuning applies here: this isn't recommended for clusters with frequent scale-out/scale-in cycles in short intervals — raise `scale-down-delay-after-add` back toward the 10m default if you see repeated reprovisioning. ([Microsoft Learn: configure cluster autoscaler profile for aggressive scale-down](https://learn.microsoft.com/azure/aks/cluster-autoscaler#configure-cluster-autoscaler-profile-for-aggressive-scale-down))
+
+> ⚠️ **Do not add `skip-nodes-with-system-pods=false` as a cost lever.** This setting defaults to `true`, so CAS won't delete a node that hosts non-DaemonSet `kube-system` pods ([Microsoft Learn: cluster autoscaler profile settings](https://learn.microsoft.com/azure/aks/cluster-autoscaler#cluster-autoscaler-profile-settings)). Microsoft manages add-ons and other system components in `kube-system`, and customers can't alter those managed components ([Microsoft Learn: AKS support policies](https://learn.microsoft.com/azure/aks/support-policies#managed-features-in-aks)). Don't assume every managed add-on can be protected by a customer-managed PodDisruptionBudget; leave the setting at its default.
 
 To roll back to CAS defaults:
 
@@ -80,11 +81,9 @@ az aks update \
 | Conservative | 30m | 30m | 0.7 | Stateful / production |
 | Aggressive | 2m | 2m | 0.4 | Dev/test, batch |
 
-> Risk: High for aggressive tuning. Ensure PodDisruptionBudgets (PDBs) are set on critical workloads before tuning. Always confirm with user before applying.
+> Risk: High for aggressive tuning. Ensure PodDisruptionBudgets (PDBs) are set on critical user workloads before tuning. Always confirm with user before applying.
 >
 > Check existing PDBs before tuning:
 > ```bash
 > kubectl get pdb --all-namespaces
 > ```
-
-
