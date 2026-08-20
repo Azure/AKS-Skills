@@ -95,7 +95,7 @@ export function buildAnchorCheckRequest({
       output: {
         title: "Trusted evaluation is fail-closed",
         summary:
-          "This check is anchored to the platform-supplied workflow_run head SHA and starts failed. It is promoted only after trusted target resolution and all required evaluation work succeed.",
+          "This check is anchored to the platform-supplied workflow_run head SHA and starts failed. It is promoted only after trusted target resolution and advisory result collection are complete.",
       },
     },
   };
@@ -104,7 +104,7 @@ export function buildAnchorCheckRequest({
 export function finalCheckConclusion({
   upstreamConclusion,
   resolveResult,
-  evaluateResult,
+  advisoryResult,
   modelRequired,
 }) {
   invariant(
@@ -112,8 +112,8 @@ export function finalCheckConclusion({
     "resolve job result is invalid",
   );
   invariant(
-    JOB_RESULTS.has(evaluateResult),
-    "evaluate job result is invalid",
+    JOB_RESULTS.has(advisoryResult),
+    "advisory job result is invalid",
   );
   if (upstreamConclusion !== "success" || resolveResult !== "success") {
     return "failure";
@@ -121,7 +121,7 @@ export function finalCheckConclusion({
   if (modelRequired === false) {
     return "success";
   }
-  return modelRequired === true && evaluateResult === "success"
+  return modelRequired === true && advisoryResult === "success"
     ? "success"
     : "failure";
 }
@@ -147,14 +147,14 @@ export function validateAnchoredCheck(check, expected) {
 export function buildCheckUpdateRequest({
   upstreamConclusion,
   resolveResult,
-  evaluateResult,
+  advisoryResult,
   modelRequired,
   runUrl,
 }) {
   const conclusion = finalCheckConclusion({
     upstreamConclusion,
     resolveResult,
-    evaluateResult,
+    advisoryResult,
     modelRequired,
   });
   const modelState =
@@ -171,13 +171,13 @@ export function buildCheckUpdateRequest({
       title:
         conclusion === "success"
           ? modelRequired
-            ? "Trusted model evaluation passed"
+            ? "Advisory model matrix recorded"
             : "No model-sensitive paths changed"
           : "Trusted evaluation failed closed",
       summary:
         `Upstream=${upstreamConclusion}; resolve=${resolveResult}; ` +
-        `model=${modelState}; evaluate=${evaluateResult}. ` +
-        "The check remains failed unless every required trusted phase succeeds.",
+        `model=${modelState}; advisory=${advisoryResult}. ` +
+        "Model results are advisory; inspect the matrix summary for pass, evaluation-failure, infrastructure-error, and unavailable classifications.",
     },
   };
 }
@@ -220,7 +220,7 @@ async function main() {
       "pr-number",
       "upstream-conclusion",
       "resolve-result",
-      "evaluate-result",
+      "advisory-result",
       "model-required",
       "run-url",
     ]),
@@ -234,7 +234,7 @@ async function main() {
     "pr-number",
     "upstream-conclusion",
     "resolve-result",
-    "evaluate-result",
+    "advisory-result",
     "model-required",
     "run-url",
   ]) {
@@ -276,7 +276,7 @@ async function main() {
   const update = buildCheckUpdateRequest({
     upstreamConclusion: args["upstream-conclusion"],
     resolveResult: args["resolve-result"],
-    evaluateResult: args["evaluate-result"],
+    advisoryResult: args["advisory-result"],
     modelRequired: parseModelRequired(args["model-required"]),
     runUrl: args["run-url"],
   });

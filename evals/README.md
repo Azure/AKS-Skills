@@ -1,12 +1,12 @@
 # Skill Evaluations
 
-Deterministic and model-backed validation for AKS skills. Every PR gets the secret-free contracts; authoritative model-backed checks run only after the protected trust boundary described below. The separate manual Autogen workflow produces non-authoritative candidates for review.
+Deterministic validation and advisory model-backed evidence for AKS skills. Every PR gets the secret-free contracts; model-backed matrix cells run only after the protected trust boundary described below. Matrix evidence remains advisory until it is calibrated. The separate manual Autogen workflow produces non-authoritative candidates for review.
 
 ## What it does
 
 - **Lint** — validates SKILL.md formatting (front matter, required fields, script shebangs, internal references). No API key needed.
-- **Quality eval** — after explicit trust approval, sends test prompts to the configured model with the root skill plus only the deep files declared by that case, then grades with deterministic assertions and the configured judge model. Any failed case fails the trusted workflow.
-- **Trigger eval** — after the same boundary, asks the generator which skill should handle a query and asserts with deterministic `equals`. Any failed case fails the trusted workflow.
+- **Quality eval** — after explicit trust approval, sends test prompts through each deployable matrix generator with the root skill plus only the deep files declared by that case, then grades with deterministic assertions and that cell's distinct judge. A failed case fails that visible cell but does not gate the advisory summary.
+- **Trigger eval** — after the same boundary, asks each deployable generator which skill should handle a query and asserts with deterministic `equals`. A failed case remains attributable to its cell while the other cells continue.
 - **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
 - **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the full AKS skill pool available, and grades the trajectory. Two tiers:
   - `tier: smoke` — competitive routing check: did the agent invoke the required skill, avoid the colliding skill (`skill-invocation`), and finish without crashing (`output-not-matches`)? No cluster.
@@ -126,13 +126,15 @@ The judge and the model under test share one endpoint per run today, so a local 
 | Variable | Trusted CI | Description |
 |----------|------------|-------------|
 | `EVAL_PROVIDER` | Fixed to `foundry` | Trusted runs cannot auto-detect a different backend. |
-| `EVAL_PROTOCOL` | Optional environment variable | Foundry protocol: `openai` (default) or `anthropic`. |
-| `EVAL_MODEL` | Required environment variable | Generator deployment/model name. |
-| `EVAL_JUDGE_MODEL` | Optional environment variable | Fixed judge deployment/model; falls back to `EVAL_MODEL`. |
+| `EVAL_PROTOCOL` | Fixed to `openai` | The currently deployable matrix entries all use the existing Foundry OpenAI protocol. |
+| `EVAL_MODEL` | Derived from the matrix cell | Exact generator deployment/model identity. |
+| `EVAL_JUDGE_MODEL` | Derived from the matrix cell | Exact distinct judge deployment/model identity. |
 | `FOUNDRY_ENDPOINT` | Required environment variable | Foundry resource endpoint, without credentials. |
 | `FOUNDRY_ACCESS_TOKEN` | Short-lived only | Acquired inside the approved job through Azure OIDC; never stored in repository or environment secrets. |
 
-The shared client still supports explicit `azure`, `openai`, and `github` providers for local development. Trusted CI fixes `EVAL_PROVIDER=foundry` and sets `EVAL_REQUIRE_FOUNDRY=1`, so it cannot auto-detect a fallback provider. Foundry deployment names are opaque to the adapter: deploy the model in the configured resource, then update `EVAL_PROTOCOL`, `EVAL_MODEL`, and optionally `EVAL_JUDGE_MODEL`.
+The shared client still supports explicit `azure`, `openai`, and `github` providers for local development. Trusted CI uses the same existing `EVAL_MODEL` and `EVAL_JUDGE_MODEL` interfaces, fixes `EVAL_PROVIDER=foundry`, and sets `EVAL_REQUIRE_FOUNDRY=1`, so it cannot auto-detect a fallback provider. It does not introduce separate judge provider/protocol overrides.
+
+The native workflow matrix currently evaluates the three deployments provisioned in the selected environment: `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra`. `claude-opus-5` and `claude-opus-4-8` are explicitly reported as `unavailable` / `not-provisioned`; they are not invoked and do not count as failures. Revalidate the environment's deployment list read-only before changing these classifications.
 
 Agentic evals don't use these variables — they authenticate via the GitHub Copilot CLI (`copilot /login`).
 
@@ -289,20 +291,20 @@ The resolver identifies exactly one open PR from the platform-supplied head repo
 
 Workflow `run:` blocks never interpolate `${{ }}` values. Event, PR, artifact, and job-output strings enter step environment variables and are passed as quoted shell variables, so valid Git refs containing shell metacharacters remain inert. Branch values are also checked with `git check-ref-format --branch` without imposing a narrower repository naming convention.
 
-Model-sensitive changes enter the `trusted-skill-eval` environment, where GitHub enforces human approval before the exact recorded fork commit is checked out. The job does not enable `setup-node` caching after fork checkout. It uses Azure OIDC for a short-lived Foundry token and runs required quality and routing evaluations with Promptfoo caching and result writes disabled.
+Model-sensitive changes expand into native GitHub Actions matrices with `fail-fast: false`. Supported cells enter the `trusted-skill-eval` environment, where GitHub enforces human approval before the exact recorded fork commit is checked out. Each supported cell records its generator deployment, distinct judge deployment, and typed result (`passed`, `evaluation-failed`, or `infrastructure-error`). Unprovisioned cells run without Azure access and record `unavailable` / `not-provisioned`. The job does not enable `setup-node` caching after fork checkout. It uses Azure OIDC for a short-lived Foundry token and runs quality and routing evaluations with Promptfoo caching and result writes disabled.
 
 **Accepted residual risk:** approval intentionally authorizes fork-authored code (`npm ci`, providers, configs, and eval scripts) to run while an inference credential is present. The control is the human gate plus an identity restricted to inference on the single Foundry resource; this design does not sandbox or attest away arbitrary fork-code execution. Approvers must verify the PR head SHA before approving. Do not grant this identity content, deployment, or broad management permissions.
 
-The final publisher revalidates the same workflow file path, event anchor, live PR head/repository/ref, original check ID, head SHA, external run identity, check name, and GitHub Actions app before promoting that exact check. Upstream failure, target/API failure, approval rejection, cancellation, required-eval failure, or an unresolved result leaves the check failed.
+The summary distinguishes evaluation failures from infrastructure errors and unavailable deployments. Matrix results are advisory: a failed supported cell remains visible and attributable but does not turn the collected summary into a quality gate. The final publisher revalidates the same workflow file path, event anchor, live PR head/repository/ref, original check ID, head SHA, external run identity, check name, and GitHub Actions app before recording that the advisory summary was collected. Upstream failure, target/API failure, approval rejection, cancellation before summary collection, or an unresolved summary leaves the exact-SHA check failed.
 
 ### Trusted CI boundary and required repository configuration
 
 This branch does not modify repository settings, and the resolver deliberately does not duplicate GitHub's environment-policy enforcement. Configure and verify every setting below before treating the trusted check as authoritative:
 
 1. Create the `trusted-skill-eval` environment. Add at least one required reviewer, enable **Prevent self-review**, disable administrator bypass, and select **Protected branches only**. GitHub enforces this gate; repository code does not duplicate the environment-policy audit.
-2. Add environment variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `FOUNDRY_ENDPOINT`, and `EVAL_MODEL`. `EVAL_PROTOCOL` and `EVAL_JUDGE_MODEL` are optional. No long-lived model or Azure secret is required.
+2. Add environment variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `FOUNDRY_ENDPOINT`. Generator and judge deployments are committed per matrix cell; the workflow does not read environment-level `EVAL_MODEL`, `EVAL_PROTOCOL`, `EVAL_JUDGE_MODEL`, or judge provider/protocol overrides. No long-lived model or Azure secret is required.
 3. Configure an Azure federated identity credential for subject `repo:Azure/AKS-Skills:environment:trusted-skill-eval`. Assign only inference data actions at the specific Foundry resource. For partner/MaaS models, the role must include the required `Microsoft.CognitiveServices/accounts/MaaS/*` data action; avoid content, deployment, subscription, and broad management roles.
-4. Add the stable required check contexts `eval` (the job under the `Skill Evaluation` workflow) and `Trusted Skill Evaluation` to the default-branch ruleset. The first is always present; the second is published onto the exact validated PR head SHA by the trusted default-branch workflow. Existing path-scoped `shellcheck` and `injection-test` jobs under `Script Security` remain hard failures when their workflow runs, but must not be made globally required while their path filters remain.
+4. Keep the stable `eval` job under `Skill Evaluation` as the deterministic required context. `Trusted Skill Evaluation` is published onto the exact validated PR head SHA, but remains advisory while the matrix is uncalibrated and must not be added as a required quality gate. Existing path-scoped `shellcheck` and `injection-test` jobs under `Script Security` remain hard failures when their workflow runs, but must not be made globally required while their path filters remain.
 5. Enable the repository or organization Actions policy **Require actions to be pinned to a full-length commit SHA**. All actions used by these workflows are already pinned.
 
 The trusted `workflow_run` path cannot execute until this workflow exists on the default branch. Pull-request CI therefore proves only the untrusted workflow and deterministic policy tests; the first post-merge run must confirm the live default-branch trigger and deployment policy.

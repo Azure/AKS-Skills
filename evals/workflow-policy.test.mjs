@@ -152,7 +152,8 @@ test("trusted workflow keeps the approval, OIDC, exact-SHA, and fail-closed boun
   assertPinnedActions(parsed);
   assertNoActionsExpressionsInRun(parsed, "trusted-skill-eval.yml");
 
-  const { anchor, resolve, evaluate, finalize } = parsed.jobs;
+  const { anchor, resolve, evaluate, advisory_summary: advisorySummary, finalize } =
+    parsed.jobs;
   assert.deepEqual(anchor.permissions, { checks: "write" });
   assert.match(
     anchor.steps[0].with.script,
@@ -176,6 +177,7 @@ test("trusted workflow keeps the approval, OIDC, exact-SHA, and fail-closed boun
   );
 
   assert.equal(evaluate.environment.name, "trusted-skill-eval");
+  assert.equal(evaluate.strategy["fail-fast"], false);
   assert.deepEqual(evaluate.permissions, {
     contents: "read",
     "id-token": "write",
@@ -203,7 +205,12 @@ test("trusted workflow keeps the approval, OIDC, exact-SHA, and fail-closed boun
   );
 
   assert.equal(finalize.if, "always()");
-  assert.deepEqual(finalize.needs, ["anchor", "resolve", "evaluate"]);
+  assert.deepEqual(finalize.needs, ["anchor", "resolve", "advisory_summary"]);
+  assert.deepEqual(advisorySummary.needs, [
+    "resolve",
+    "evaluate",
+    "unavailable",
+  ]);
   assert.deepEqual(finalize.permissions, {
     checks: "write",
     contents: "read",
@@ -354,31 +361,31 @@ test("trusted checks start failed and promote only complete valid outcomes", () 
     {
       upstreamConclusion: "failure",
       resolveResult: "skipped",
-      evaluateResult: "skipped",
+      advisoryResult: "skipped",
       modelRequired: null,
     },
     {
       upstreamConclusion: "success",
       resolveResult: "failure",
-      evaluateResult: "skipped",
+      advisoryResult: "skipped",
       modelRequired: null,
     },
     {
       upstreamConclusion: "success",
       resolveResult: "success",
-      evaluateResult: "failure",
+      advisoryResult: "failure",
       modelRequired: true,
     },
     {
       upstreamConclusion: "success",
       resolveResult: "success",
-      evaluateResult: "cancelled",
+      advisoryResult: "cancelled",
       modelRequired: true,
     },
     {
       upstreamConclusion: "success",
       resolveResult: "success",
-      evaluateResult: "skipped",
+      advisoryResult: "skipped",
       modelRequired: true,
     },
   ];
@@ -390,16 +397,25 @@ test("trusted checks start failed and promote only complete valid outcomes", () 
     finalCheckConclusion({
       upstreamConclusion: "success",
       resolveResult: "success",
-      evaluateResult: "success",
+      advisoryResult: "success",
       modelRequired: true,
     }),
     "success",
   );
+  const advisoryUpdate = buildCheckUpdateRequest({
+    upstreamConclusion: "success",
+    resolveResult: "success",
+    advisoryResult: "success",
+    modelRequired: true,
+    runUrl: "https://github.com/Azure/AKS-Skills/actions/runs/123",
+  });
+  assert.equal(advisoryUpdate.output.title, "Advisory model matrix recorded");
+  assert.match(advisoryUpdate.output.summary, /Model results are advisory/);
   assert.equal(
     finalCheckConclusion({
       upstreamConclusion: "success",
       resolveResult: "success",
-      evaluateResult: "skipped",
+      advisoryResult: "skipped",
       modelRequired: false,
     }),
     "success",
@@ -466,7 +482,7 @@ test("package wiring and providers omit deleted provenance and judge mandates", 
   );
   assert.equal(
     packageJson.scripts["test:ci-policy"],
-    "node --test workflow-policy.test.mjs",
+    "node --test workflow-policy.test.mjs trusted-model-matrix.test.mjs",
   );
   assert.equal(packageJson.scripts.lint, "node lint-skills.js");
   assert.equal(packageJson.scripts["lint:selftest"], "node lint-skills.test.js");
@@ -493,7 +509,10 @@ test("package wiring and providers omit deleted provenance and judge mandates", 
   for (const removedPath of [
     "provider-adapter.test.mjs",
     "report-provenance.test.mjs",
+    "scripts/aggregate-trusted-results.mjs",
     "scripts/create-run-manifest.mjs",
+    "scripts/model-matrix.mjs",
+    "trusted-model-matrix.json",
   ]) {
     assert.equal(existsSync(path.join(EVALS_DIR, removedPath)), false);
   }
