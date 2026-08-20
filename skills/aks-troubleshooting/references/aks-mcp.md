@@ -1,17 +1,25 @@
 # AKS MCP Reference
 
-Use this reference when AKS-aware MCP tools are available in the client.
+Use this reference to discover and select AKS-aware Azure MCP tools in the current host.
+
+## Capability Discovery
+
+1. Inspect the host's available tool catalog or tool descriptions.
+2. Find Azure MCP capabilities that advertise AKS operations. Also identify supporting AppLens, Azure Monitor, and Resource Health capabilities when the investigation needs them.
+3. Use the matching capabilities under the names assigned by the host. Names and prefixes are host-specific; a literal name is never an availability check.
+4. Inspect the selected tool's advertised schema or built-in discovery surface, then choose the smallest read operation that fits.
+
+Do not guess names, translate one host's name to another, or build a mapping layer. Capability metadata supplied by the host is the source of truth.
 
 ## Preference Order
 
-1. `mcp_azure_mcp_aks`
-2. The AKS-MCP tools that surface after discovery in the client
-3. Supporting Azure tools such as `mcp_azure_mcp_applens`, `mcp_azure_mcp_monitor`, and `mcp_azure_mcp_resourcehealth`
-4. Raw `az aks` and `kubectl` only when required functionality is missing from MCP
+1. Host-discovered Azure MCP AKS capability
+2. Supporting host-discovered AppLens, Azure Monitor, or Resource Health capabilities
+3. Raw `az aks` and `kubectl` only when required functionality is missing from the discovered MCP surface
 
 ## Happy Path
 
-After selecting `mcp_azure_mcp_aks`, let the client enumerate the exact AKS-MCP tools it exposes and choose the smallest tool that fits the task.
+After selecting the Azure MCP AKS capability, inspect the exact operations and parameter schemas it exposes. If it provides its own discovery operation, use that before the task-specific call.
 
 Favor the obvious read paths first:
 
@@ -22,7 +30,7 @@ Favor the obvious read paths first:
 
 ## Authentication And Access
 
-AKS-MCP is Azure CLI-backed. Expect service principal, workload identity, managed identity, or existing `az login` auth, usually keyed by `AZURE_CLIENT_ID`. If `AZURE_SUBSCRIPTION_ID` is set, expect the server to select that subscription after login.
+Authentication is host-specific. In Azure SRE Agent, built-in Azure operations use the agent's user-assigned managed identity; verify its target scope and RBAC. An external MCP connector uses the authentication configured on that connector. In CLI-backed hosts, the Azure MCP server can use the host's Azure CLI or service-principal context. Inspect the host and tool schema rather than assuming one credential source.
 
 Default to `readonly`. Only suggest `readwrite` or `admin` when the current diagnostic step truly requires it.
 
@@ -32,7 +40,7 @@ For detector-style workflows, use the cluster resource ID, keep the time window 
 
 ## Fallback Rule
 
-If the client does not expose the AKS-MCP surface needed for a check, then fall back to:
+If capability discovery finds no Azure MCP AKS tool, or the discovered surface does not provide the operation needed for a check, fall back to:
 
 - `az aks` for Azure-side AKS operations
 - raw `kubectl` for Kubernetes-side inspection

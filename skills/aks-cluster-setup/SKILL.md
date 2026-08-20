@@ -38,7 +38,7 @@ Install **both**: `aks-cluster-setup` for the AKS design brain, Azure Skills as 
 ## Rules
 
 1. Start from the user's requirements for compute, networking, security, and scale.
-2. When AKS-aware MCP tools are available, select `mcp_azure_mcp_aks` first to discover the exact AKS tools the client exposes; use the smallest tool that fits, and fall back to `az aks` only when the MCP surface does not expose the needed operation.
+2. Inspect the host's available tools for an Azure MCP capability that advertises AKS operations. Use the matching capability under whatever name the host assigned, inspect its advertised schema or discovery surface, and choose the smallest operation that fits. Do not gate on or construct a mapping for a literal tool name. Fall back to `az aks` only when the host exposes no matching capability or its AKS surface lacks the needed operation.
 3. Default to **AKS Automatic** unless the user needs control not supported by Node Auto Provisioning. Standard is for full configurability at higher operational overhead.
 4. Record the rationale for every Day-0 decision (networking, API-server access) — these are expensive or impossible to change after creation.
 

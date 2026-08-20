@@ -10,6 +10,7 @@
  *  4. name matches parent folder name
  *  5. Scripts have a shebang line
  *  6. Internal file references in SKILL.md resolve to real files
+ *  7. README and skill Markdown do not hardcode host-assigned Azure MCP tool names
  *
  * Usage:
  *   node lint-skills.js [skills-dir]
@@ -20,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SKILLS_DIR = path.resolve(process.argv[2] || path.join(__dirname, '..', 'skills'));
+const HARDCODED_AZURE_MCP_NAME_RE = /\bmcp_azure_mcp_[A-Za-z0-9_]+\b/i;
 
 /**
  * Read a text file with line endings normalized to LF. Windows checkouts
@@ -96,6 +98,37 @@ function findSkillFolders(dir) {
 
   walk(dir);
   return results;
+}
+
+function findMarkdownFiles(target) {
+  if (!fs.existsSync(target)) return [];
+
+  const stat = fs.statSync(target);
+  if (stat.isFile()) return target.endsWith('.md') ? [target] : [];
+
+  return fs.readdirSync(target, { withFileTypes: true }).flatMap((entry) => {
+    const child = path.join(target, entry.name);
+    if (entry.isDirectory()) return findMarkdownFiles(child);
+    return entry.isFile() && entry.name.endsWith('.md') ? [child] : [];
+  });
+}
+
+function checkAzureMcpNamePortability() {
+  const readmePath = path.join(path.dirname(SKILLS_DIR), 'README.md');
+  const guidanceFiles = [
+    ...findMarkdownFiles(readmePath),
+    ...findMarkdownFiles(SKILLS_DIR),
+  ];
+
+  for (const filePath of guidanceFiles) {
+    const match = readText(filePath).match(HARDCODED_AZURE_MCP_NAME_RE);
+    if (match) {
+      addError(
+        filePath,
+        `hardcoded Azure MCP tool name "${match[0]}" is host-assigned; use capability discovery instead`,
+      );
+    }
+  }
 }
 
 /**
@@ -177,6 +210,7 @@ function checkInternalRefs(skillDir, content) {
 
 // --- Main ---
 
+checkAzureMcpNamePortability();
 const skillFolders = findSkillFolders(SKILLS_DIR);
 
 if (skillFolders.length === 0) {

@@ -39,14 +39,16 @@ az aks nodepool list -g <rg> --cluster-name <cluster> -o table
 For AI-powered diagnostics:
 
 ```text
-mcp_azure_mcp_applens
-  intent: "diagnose AKS cluster issues"
-  command: "diagnose"
-  parameters:
-    resourceId: "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<cluster>"
+<host-assigned Azure MCP AppLens tool>
+  resource: "<cluster-name>"
+  question: "Diagnose the reported AKS cluster issue and recommend remediation."
+  resource-group: "<resource-group>"  # optional disambiguation
+  resource-type: "Microsoft.ContainerService/managedClusters"  # optional disambiguation
 ```
 
-> 💡 **Tip:** AppLens automatically detects common issues and provides remediation recommendations using the cluster resource ID.
+The angle-bracketed token is a placeholder, not a literal tool name. Inspect the host's available tools for the Azure MCP capability that advertises AppLens diagnostics, use its assigned name, and follow its advertised schema. The representative inputs above match the current AppLens capability; omit or rename them if the host advertises a different schema.
+
+> 💡 **Tip:** AppLens uses the resource name and diagnostic question; provide the resource group and type only when needed to disambiguate the cluster.
 
 ---
 
