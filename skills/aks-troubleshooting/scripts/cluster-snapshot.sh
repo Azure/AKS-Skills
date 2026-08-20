@@ -19,10 +19,19 @@ kubectl get nodes -o wide 2>/dev/null || echo "(kubectl not configured)"
 
 echo ""
 echo "--- Node Conditions (non-Ready or pressure) ---"
+# Use one API response so both condition groups describe the same node snapshot.
 kubectl get nodes -o json 2>/dev/null | \
-  jq -r '.items[] | .metadata.name as $n | .status.conditions[] | select(.type != "Ready" and .status == "True") | [$n, .type, .reason] | @tsv' 2>/dev/null || true
-kubectl get nodes -o json 2>/dev/null | \
-  jq -r '.items[] | .metadata.name as $n | .status.conditions[] | select(.type == "Ready" and .status != "True") | [$n, .type, .status, .reason] | @tsv' 2>/dev/null || true
+  jq -r '
+    (
+      [.items[] | .metadata.name as $n | .status.conditions[]
+        | select(.type != "Ready" and .status == "True")
+        | [$n, .type, .reason]]
+      +
+      [.items[] | .metadata.name as $n | .status.conditions[]
+        | select(.type == "Ready" and .status != "True")
+        | [$n, .type, .status, .reason]]
+    )[] | @tsv
+  ' 2>/dev/null || true
 
 echo ""
 echo "--- Pods Not Running/Succeeded (all namespaces) ---"
