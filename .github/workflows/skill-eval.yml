@@ -2,29 +2,33 @@ name: Skill Evaluation
 
 on:
   pull_request:
-    paths:
-      - 'skills/**'
-      - 'evals/**'
   workflow_dispatch:
     inputs:
       skill:
-        description: 'Specific skill to evaluate (leave empty for all)'
+        description: 'Specific skill to validate (leave empty for all)'
         required: false
         type: string
 
 permissions:
   contents: read
-  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   eval:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Checkout exact validation target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
           cache: 'npm'
@@ -42,13 +46,13 @@ jobs:
         working-directory: evals
         run: npm run lint:selftest
 
-      - name: Lint agentic eval specs
-        working-directory: evals
-        run: npm run lint:agentic
-
       - name: Test mock dispatcher fail-closed behavior
         working-directory: evals
         run: node --test mocks/lib/dispatch.test.mjs
+
+      - name: Test trusted evaluation policy
+        working-directory: evals
+        run: npm run test:ci-policy
 
       - name: Test selective skill context
         working-directory: evals
@@ -58,231 +62,26 @@ jobs:
         working-directory: evals
         run: npm test
 
-      - name: Cache promptfoo results
-        uses: actions/cache@v6
+      - name: Enforce agentic fail-closed contracts
+        working-directory: evals
+        run: npm run lint:agentic
+
+      - name: Record exact validated pull request commit
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+        run: node evals/scripts/record-validation-target.mjs --output "$RUNNER_TEMP/validation-target/target.json"
+
+      - name: Upload immutable validation target
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          path: ~/.cache/promptfoo
-          key: ${{ runner.os }}-promptfoo-v1
-          restore-keys: |
-            ${{ runner.os }}-promptfoo-
-
-      - name: Run skill evaluations
-        working-directory: evals
-        env:
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          npx promptfoo eval -o results.json --no-progress-bar || true
-          # Summarize from the results.json we just wrote — do NOT re-run the eval
-          # (a second `promptfoo eval` here would double the LLM spend and then throw
-          # on the unsupported "markdown" output format).
-          node -e '
-            const r = require("./results.json").results.results || [];
-            const pass = r.filter(t => t.success).length;
-            let out = "## Skill Evaluation Results\n\n**" + pass + "/" + r.length + " passed**\n\n| | Test |\n|---|---|\n";
-            for (const t of r) out += "| " + (t.success ? "✅" : "❌") + " | " + ((t.testCase && t.testCase.description) || "(test)") + " |\n";
-            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
-          ' || true
-
-      - name: Run routing evaluations
-        working-directory: evals
-        env:
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          npx promptfoo eval -c promptfoo-routing.yaml -o routing-results.json --no-progress-bar || true
-
-      - name: Run baseline comparison
-        continue-on-error: true
-        working-directory: evals
-        env:
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar
-
-      - name: Check results
-        working-directory: evals
-        env:
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          for attempt in 1 2 3; do
-            FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' results.json)
-            TOTAL=$(jq '[.results.results[]] | length' results.json)
-            PASSED=$((TOTAL - FAILURES))
-            echo "Attempt ${attempt}: ${PASSED}/${TOTAL} passed"
-
-            if [ "$FAILURES" -eq 0 ]; then
-              exit 0
-            fi
-
-            if [ "$attempt" -eq 3 ]; then
-              # Advisory, not blocking. Single-shot g-eval quality is a noisy proxy: it
-              # never loads references/ or runs scripts/, and the judge scores on a 0-10
-              # scale where one point of noise can flip a result. The hard gates are lint,
-              # shellcheck, and the injection test; behavioral quality is gated by the
-              # trajectory-eval track (Vally). See docs/skill-contract.md.
-              echo "::warning::${FAILURES} quality eval(s) below threshold (advisory — not blocking)"
-              jq -r '.results.results[] | select(.success == false) | "ADVISORY-FAIL: \(.testCase.description // .testCase.vars.prompt)"' results.json
-              exit 0
-            fi
-
-            echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
-            npx promptfoo eval -o retry-results.json --no-progress-bar --filter-failing results.json || true
-            # Merge: replace failed tests in results.json with retry outcomes
-            jq -s '
-              (.[1].results.results | map({key: (.testCase.description // .testCase.vars.prompt), value: .}) | from_entries) as $retried |
-              .[0] | .results.results |= map(
-                if .success then . else ($retried[.testCase.description // .testCase.vars.prompt] // .) end
-              )
-            ' results.json retry-results.json > merged-results.json && mv merged-results.json results.json
-          done
-
-      - name: Check routing results
-        working-directory: evals
-        run: |
-          # Advisory, not blocking. Routing decisions are model-sampled and vary
-          # run-to-run; report them but do not gate on them. Deterministic gates
-          # (lint, shellcheck, injection test) remain hard.
-          if [ ! -f routing-results.json ]; then
-            echo "::warning::Routing eval produced no results (likely no LLM credentials — expected on fork PRs)"
-            exit 0
-          fi
-          FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' routing-results.json)
-          TOTAL=$(jq '[.results.results[]] | length' routing-results.json)
-          PASSED=$((TOTAL - FAILURES))
-          echo "Routing: ${PASSED}/${TOTAL} passed"
-          if [ "$FAILURES" -gt 0 ]; then
-            echo "::warning::${FAILURES} routing test(s) failed (advisory — not blocking)"
-            jq -r '.results.results[] | select(.success == false) | "ADVISORY-FAIL: \(.testCase.description // .testCase.vars.prompt)"' routing-results.json
-          fi
-
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const fs = require('fs');
-            const resultsPath = 'evals/results.json';
-
-            if (!fs.existsSync(resultsPath)) {
-              return;
-            }
-
-            const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-            const testResults = results.results?.results || [];
-            const total = testResults.length;
-            const passed = testResults.filter(r => r.success).length;
-            const failed = total - passed;
-
-            let body = `## 🧪 Skill Evaluation Results\n\n`;
-            body += `**${passed}/${total} passed**`;
-            if (failed > 0) body += ` ⚠️ ${failed} failed`;
-            body += `\n\n`;
-
-            // Extract g-eval score from a test result
-            const extractGEvalScore = (r) => {
-              const comps = r.gradingResult?.componentResults || [];
-              const g = comps.find(c => c.assertion?.type === 'g-eval');
-              const s = Number(g?.score);
-              return Number.isFinite(s) ? s : null;
-            };
-
-            body += `| Status | Test | Skill | G-Eval |\n|--------|------|-------|--------|\n`;
-            for (const r of testResults) {
-              const status = r.success ? '✅' : '❌';
-              const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-              const skill = r.testCase?.vars?.skill_path?.split('/').slice(-2, -1)[0] || 'unknown';
-              const geval = extractGEvalScore(r);
-              const gevalStr = geval != null ? geval.toFixed(2) : '—';
-              body += `| ${status} | ${desc} | ${skill} | ${gevalStr} |\n`;
-            }
-
-            // Baseline comparison — scores come from separate baseline-only run
-            const baselinePath = 'evals/baseline-results.json';
-            if (fs.existsSync(baselinePath)) {
-              const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
-              const baselineResults = baseline.results?.results || [];
-
-              // Get skill g-eval scores from the main eval
-              const skillScores = {};
-              for (const r of testResults) {
-                const score = extractGEvalScore(r);
-                if (score == null) continue;
-                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-                skillScores[desc] = score;
-              }
-
-              // Get baseline g-eval scores
-              const baselineScores = {};
-              for (const r of baselineResults) {
-                const score = extractGEvalScore(r);
-                if (score == null) continue;
-                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-                baselineScores[desc] = score;
-              }
-
-              // Only show tests that appear in both (quality tests)
-              const sharedTests = Object.keys(baselineScores).filter(d => skillScores[d] != null);
-
-              if (sharedTests.length > 0) {
-                body += `\n### 📊 Baseline Comparison (Quality Tests)\n\n`;
-                body += `| Test | With Skill | Baseline | Delta |\n|------|-----------|----------|-------|\n`;
-
-                for (const desc of sharedTests) {
-                  const skill = skillScores[desc].toFixed(2);
-                  const base = baselineScores[desc].toFixed(2);
-                  const delta = (skillScores[desc] - baselineScores[desc]).toFixed(2);
-                  const sign = parseFloat(delta) > 0 ? '+' : '';
-                  body += `| ${desc} | ${skill} | ${base} | ${sign}${delta} |\n`;
-                }
-              }
-            }
-
-            // Routing/trigger results
-            const routingPath = 'evals/routing-results.json';
-            if (fs.existsSync(routingPath)) {
-              const routing = JSON.parse(fs.readFileSync(routingPath, 'utf8'));
-              const routingResults = routing.results?.results || [];
-              const rPassed = routingResults.filter(r => r.success).length;
-              body += `\n### 🔀 Trigger Tests (${rPassed}/${routingResults.length} passed)\n\n`;
-              body += `| Status | Test | Routed To |\n|--------|------|-----------|\n`;
-              for (const r of routingResults) {
-                const status = r.success ? '✅' : '❌';
-                const desc = r.testCase?.description || r.testCase?.vars?.prompt || 'unnamed';
-                const output = r.response?.output || '—';
-                body += `| ${status} | ${desc} | ${output} |\n`;
-              }
-            }
-
-            // Find existing comment to update
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(c =>
-              c.body.includes('🧪 Skill Evaluation Results')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+          name: validation-target-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validation-target/target.json
+          if-no-files-found: error
