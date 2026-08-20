@@ -19,6 +19,8 @@ permissions:
 jobs:
   eval:
     runs-on: ubuntu-latest
+    env:
+      SKILL_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.skill || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -61,7 +63,12 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          npx promptfoo eval -o results.json --no-progress-bar || true
+          set --
+          if [ -n "$SKILL_FILTER" ]; then
+            echo "Filtering evaluations to skill: $SKILL_FILTER"
+            set -- --filter-metadata "skill=$SKILL_FILTER"
+          fi
+          npx promptfoo eval -o results.json --no-progress-bar "$@" || true
           # Summarize from the results.json we just wrote — do NOT re-run the eval
           # (a second `promptfoo eval` here would double the LLM spend and then throw
           # on the unsupported "markdown" output format).
@@ -80,7 +87,11 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          npx promptfoo eval -c promptfoo-routing.yaml -o routing-results.json --no-progress-bar || true
+          set --
+          if [ -n "$SKILL_FILTER" ]; then
+            set -- --filter-metadata "skill=$SKILL_FILTER"
+          fi
+          npx promptfoo eval -c promptfoo-routing.yaml -o routing-results.json --no-progress-bar "$@" || true
 
       - name: Run baseline comparison
         continue-on-error: true
@@ -90,7 +101,11 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar
+          set --
+          if [ -n "$SKILL_FILTER" ]; then
+            set -- --filter-metadata "skill=$SKILL_FILTER"
+          fi
+          npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar "$@"
 
       - name: Check results
         working-directory: evals
@@ -99,6 +114,10 @@ jobs:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          set --
+          if [ -n "$SKILL_FILTER" ]; then
+            set -- --filter-metadata "skill=$SKILL_FILTER"
+          fi
           for attempt in 1 2 3; do
             FAILURES=$(jq '[.results.results[] | select(.success == false)] | length' results.json)
             TOTAL=$(jq '[.results.results[]] | length' results.json)
@@ -121,7 +140,7 @@ jobs:
             fi
 
             echo "::warning::${FAILURES} test(s) failed — retry ${attempt}/2..."
-            npx promptfoo eval -o retry-results.json --no-progress-bar --filter-failing results.json || true
+            npx promptfoo eval -o retry-results.json --no-progress-bar --filter-failing results.json "$@" || true
             # Merge: replace failed tests in results.json with retry outcomes
             jq -s '
               (.[1].results.results | map({key: (.testCase.description // .testCase.vars.prompt), value: .}) | from_entries) as $retried |
