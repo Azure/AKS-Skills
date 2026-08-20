@@ -1,31 +1,32 @@
-# Vally eval config for aks-troubleshooting skill
-# Tests skill invocation, output quality, and tool awareness
+# Vally eval config for aks-troubleshooting routing and mock investigations.
+# Every stimulus sees the full AKS skill pool so selection is competitive.
 
 name: aks-troubleshooting-agentic-eval
 description: |
-  Agentic evaluation for aks-troubleshooting skill — tests that the agent
-  correctly invokes the skill and produces SRE-appropriate responses
-  for AKS cluster investigation scenarios.
+  Agentic evaluation for aks-troubleshooting. Generic AKS incidents must invoke
+  the troubleshooting skill without selecting packet capture, while explicit
+  pcap intent must escape the troubleshooting catch-all.
 tags:
   type: integration
   skill: aks-troubleshooting
 
 environment:
   skills:
+    - ../../../skills/aks-automatic-readiness
+    - ../../../skills/aks-cluster-setup
+    - ../../../skills/aks-cost-optimization
+    - ../../../skills/aks-gpu-inference
+    - ../../../skills/aks-known-issues
+    - ../../../skills/aks-network-capture
     - ../../../skills/aks-troubleshooting
 
 defaults:
   runs: 1
-  timeout: "5m"
   executor: copilot-sdk
   model: claude-sonnet-4.6
   judge_model: claude-sonnet-4.6
 
-scoring:
-  threshold: 0.8
-
 stimuli:
-  # ── Routing: CrashLoopBackOff investigation ──
   - name: "Routing: CrashLoopBackOff pods"
     prompt: "My pods in the payments namespace are in CrashLoopBackOff. Help me investigate."
     tags:
@@ -38,14 +39,12 @@ stimuli:
         config:
           required:
             - aks-troubleshooting
+          disallowed:
+            - aks-network-capture
       - type: output-not-matches
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
-    constraints:
-      expect_skills:
-        - aks-troubleshooting
 
-  # ── Routing: OOMKilled pods ──
   - name: "Routing: OOMKilled investigation"
     prompt: "Several pods are being OOMKilled in my AKS cluster. What should I do?"
     tags:
@@ -58,16 +57,50 @@ stimuli:
         config:
           required:
             - aks-troubleshooting
+          disallowed:
+            - aks-network-capture
       - type: output-not-matches
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
-    constraints:
-      expect_skills:
-        - aks-troubleshooting
 
-  # ── Mock: node pool scale failure (vCPU quota) ──
-  # Runs the agent against a fake-broken cluster (shimmed az/kubectl). Ground
-  # truth = vCPU quota exhaustion; az aks show is a healthy distractor.
+  - name: "Routing: generic DNS resolution failure"
+    prompt: "Pods cannot resolve DNS names in my AKS cluster. I suspect CoreDNS or an NSG blocking UDP 53. Help me investigate."
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: routing
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-troubleshooting
+          disallowed:
+            - aks-network-capture
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+
+  - name: "Discrimination: explicit packet capture escapes troubleshooting"
+    prompt: "Standard checks were inconclusive. Take a pcap on the AKS node hosting my pod, filtered to port 443, so I can see exactly where packets drop."
+    tags:
+      type: integration
+      tier: smoke
+      cost: llm
+      area: discrimination
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-network-capture
+          disallowed:
+            - aks-troubleshooting
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+
+  # Mock substrate only: proves the agent follows the expected investigation
+  # trajectory against canned az/kubectl responses, not that a live cluster works.
   - name: "Mock: node pool scale failure (vCPU quota)"
     prompt: "My user node pool 'np2' won't scale up in AKS cluster 'prod'. Investigate and tell me the root cause."
     tags:
@@ -75,18 +108,21 @@ stimuli:
       tier: mock
       cost: llm
       area: investigation
+      substrate: canned
     environment:
-      skills:
-        - ../../../skills/aks-troubleshooting
       files:
         - src: ../../scenarios/aks-troubleshooting/nodepool-scale-failure/responses.json
           dest: .mocks/responses.json
     graders:
-      # Outcome (deterministic): named the real cause
+      - type: skill-invocation
+        config:
+          required:
+            - aks-troubleshooting
+          disallowed:
+            - aks-network-capture
       - type: output-matches
         config:
           pattern: "(?i)quota|vcpu|core limit|cores"
-      # Process/recall: actually inspected the node pool + quota
       - type: tool-calls
         config:
           required:
@@ -94,7 +130,6 @@ stimuli:
               command: "az aks nodepool (list|show)"
             - name: "^bash$"
               command: "az (monitor activity-log|vm list-usage)"
-      # Precision/anti-rabbit-hole: did NOT chase unrelated components
       - type: tool-calls
         config:
           disallowed:
@@ -102,15 +137,9 @@ stimuli:
               command: "kubectl (logs|describe pod)"
             - name: "^bash$"
               command: "az network"
-      # Efficiency: bounded tool calls
-      - type: tool-call-count
-        config:
-          max: 30
-      # Outcome (rubric, LLM judge): two-pass-style correctness check
       - type: prompt
         config:
           threshold: 0.6
-      # Crash guard
       - type: output-not-matches
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
@@ -118,7 +147,48 @@ stimuli:
       - "Correctly identifies the root cause as vCPU/core quota exhaustion blocking node pool scale-up."
       - "Does NOT misattribute the failure to a healthy control plane or unrelated workload pods."
       - "Recommends a concrete fix (request a quota increase, change VM SKU, or lower min-count)."
-    constraints:
-      expect_skills:
-        - aks-troubleshooting
-      max_turns: 15
+
+  - name: "Mock: DNS resolution blocked by NSG (UDP 53)"
+    prompt: "Pods in my AKS cluster 'prod' suddenly cannot resolve any DNS names. Investigate and tell me the root cause."
+    tags:
+      type: integration
+      tier: mock
+      cost: llm
+      area: investigation
+      substrate: canned
+    environment:
+      files:
+        - src: ../../scenarios/aks-troubleshooting/dns-nsg-block/responses.json
+          dest: .mocks/responses.json
+    graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-troubleshooting
+          disallowed:
+            - aks-network-capture
+      - type: output-matches
+        config:
+          pattern: "(?i)NSG|network security group|udp 53|outbound.*(deny|block)|deny.*dns"
+      - type: tool-calls
+        config:
+          required:
+            - name: "^bash$"
+              command: "kubectl exec.*(nslookup|resolv.conf)"
+            - name: "^bash$"
+              command: "az network nsg rule list"
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "^bash$"
+              command: "kubectl (delete|rollout restart).*(coredns|kube-dns)"
+      - type: prompt
+        config:
+          threshold: 0.6
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
+    rubric:
+      - "Correctly identifies the root cause as an NSG rule blocking outbound UDP 53 (DNS)."
+      - "Does NOT misattribute the failure to CoreDNS, which is healthy/Running in this scenario."
+      - "Recommends removing or amending the NSG deny rule for UDP 53 as the fix."
