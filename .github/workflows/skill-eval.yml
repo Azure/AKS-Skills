@@ -34,11 +34,11 @@ jobs:
         working-directory: evals
         run: npm ci
 
-      - name: Lint skill schemas
+      - name: Lint skill contract
         working-directory: evals
         run: npm run lint
 
-      - name: Lint self-test (CRLF checkout parity)
+      - name: Test contract linter (fixtures and CLI exit codes)
         working-directory: evals
         run: npm run lint:selftest
 
