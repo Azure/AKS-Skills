@@ -42,6 +42,14 @@ jobs:
         working-directory: evals
         run: npm run lint:selftest
 
+      - name: Lint agentic eval specs
+        working-directory: evals
+        run: npm run lint:agentic
+
+      - name: Test mock dispatcher fail-closed behavior
+        working-directory: evals
+        run: node --test mocks/lib/dispatch.test.mjs
+
       - name: Test llm-client backend auto-detection
         working-directory: evals
         run: npm test
