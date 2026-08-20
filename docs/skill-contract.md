@@ -36,6 +36,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 - **Durability.** A sentence that prescribes *how to think, write, or generally behave* — with no AKS/Azure/Kubernetes token, no tool/resource identifier, and no safety verb — is decaying coaching; drop it. Instructions that encode an **org policy**, a **tool contract**, or a **safety boundary** the model cannot infer are durable; keep them. (The coaching-phrase lint flags candidates as a warning; a human decides.)
 - **Read-only by default.** Any skill that can mutate a cluster MUST state the read-only guardrail: *do not restart, delete, cordon, drain, scale, upgrade, or reconfigure unless the user explicitly asks.*
 - **No host coupling in the body.** No "OpenClaw UI will render…", no `/home/<user>/...` paths, no host-specific assumptions.
+- **MCP product names and boundaries.** **Azure MCP Server** means `@azure/mcp`, which this repository configures through `.mcp.json`. The **AKS MCP server** means the separate `Azure/aks-mcp` product, which this repository does not configure or support. Never shorten Azure MCP Server to "AKS MCP" or "AKS-MCP." Azure MCP Server's AKS area is limited to cluster and node-pool metadata; AppLens, Azure Monitor, and Resource Health are separate areas. Select operations from host-advertised capabilities and schemas, and retain direct CLI/Kubernetes fallbacks.
 
 ## 4. Script rules
 
@@ -66,6 +67,6 @@ CI fails if a skill has no tests (the coverage gate).
 
 ## 7. What CI enforces automatically
 
-- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
+- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).
 - `.github/workflows/skill-eval.yml` — routing + quality evals (requires Azure OpenAI secrets).
