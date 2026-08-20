@@ -8,8 +8,8 @@ const { chat } = require('./llm-client');
  * Presents all skill descriptions to the model and asks which skill
  * (if any) should handle the user's query. Returns just the skill id.
  *
- * Auto-discovers skills by walking the whole skills/ tree for SKILL.md files,
- * or accepts an explicit list via config.skills.
+ * Auto-discovers skills once per provider instance by walking the whole skills/
+ * tree for SKILL.md files, or accepts an explicit list via config.skills.
  *
  * Backend selection + credentials are handled by ./llm-client (foundry / azure /
  * openai / github). See its header for configuration.
@@ -58,10 +58,34 @@ class RouterProvider {
   constructor(options) {
     this.providerId = options.id || 'router-provider';
     this.config = options.config || {};
+    this.routingContext = null;
   }
 
   id() {
     return this.providerId;
+  }
+
+  getRoutingContext() {
+    if (this.routingContext) return this.routingContext;
+
+    const skills = this.config.skills || discoverSkills();
+    const skillList = skills.map(s => `- ${s.id}: ${s.description}`).join('\n');
+    this.routingContext = {
+      skills,
+      allowed: new Set(['none', ...skills.map(s => s.id.toLowerCase())]),
+      systemMessage: [
+        'You are a skill router. Given the user query below, decide which skill (if any) should handle it.',
+        '',
+        'Available skills:',
+        skillList,
+        '',
+        'Rules:',
+        '- Reply with ONLY the skill id (e.g. "aks-troubleshooting") if the query matches a skill.',
+        '- Reply with ONLY "none" if no skill is appropriate.',
+        '- Do not explain your reasoning. Output only the skill id or "none".',
+      ].join('\n'),
+    };
+    return this.routingContext;
   }
 
   async callApi(prompt, context) {
@@ -73,24 +97,10 @@ class RouterProvider {
     }
 
     // Get skill pool — config override or auto-discover
-    const skills = this.config.skills || discoverSkills();
+    const { skills, allowed, systemMessage } = this.getRoutingContext();
     if (skills.length === 0) {
       return { error: 'No skills discovered. Check skills/providers/ directory or pass config.skills.' };
     }
-
-    const skillList = skills.map(s => `- ${s.id}: ${s.description}`).join('\n');
-
-    const systemMessage = [
-      'You are a skill router. Given the user query below, decide which skill (if any) should handle it.',
-      '',
-      'Available skills:',
-      skillList,
-      '',
-      'Rules:',
-      '- Reply with ONLY the skill id (e.g. "aks-troubleshooting") if the query matches a skill.',
-      '- Reply with ONLY "none" if no skill is appropriate.',
-      '- Do not explain your reasoning. Output only the skill id or "none".',
-    ].join('\n');
 
     const result = await chat(systemMessage, userPrompt);
     if (result.error) {
@@ -100,7 +110,6 @@ class RouterProvider {
     // Normalize: extract first token matching a known skill id or "none"
     const raw = result.output || '';
     const tokens = raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
-    const allowed = new Set(['none', ...skills.map(s => s.id.toLowerCase())]);
     const output = tokens.find(t => allowed.has(t)) || raw.toLowerCase().trim();
 
     return { output, tokenUsage: result.tokenUsage };
