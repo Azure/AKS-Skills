@@ -50,6 +50,10 @@ jobs:
         working-directory: evals
         run: node --test mocks/lib/dispatch.test.mjs
 
+      - name: Test selective skill context
+        working-directory: evals
+        run: npm run test:deep-content
+
       - name: Test llm-client backend auto-detection
         working-directory: evals
         run: npm test

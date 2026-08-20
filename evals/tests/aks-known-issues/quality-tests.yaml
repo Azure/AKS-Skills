@@ -13,8 +13,13 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-ephemeral-os-disk
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-known-issues/SKILL.md"
+    skill_files:
+      - "references/error-code-map.md"
     prompt: "My AKS node pool create failed with VMCannotFitEphemeralOSDisk. What is this and how do I fix it?"
   assert:
     - type: icontains
@@ -27,8 +32,13 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-linked-authorization
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-known-issues/SKILL.md"
+    skill_files:
+      - "references/error-code-map.md"
     prompt: "Cluster creation fails with LinkedAuthorizationFailed and mentions a linked network resource. Help me resolve it."
   assert:
     - type: icontains
@@ -41,8 +51,13 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-node-image-snapshot
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-known-issues/SKILL.md"
+    skill_files:
+      - "references/error-code-map.md"
     prompt: "Node pool image update rejected: 'NodeImageVersion is not accepted, can only be current version or latest'. This pool was created from a snapshot. How do I fix it?"
   assert:
     - type: icontains
@@ -55,6 +70,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-cse-exit-50
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node provisioning failed: VMExtensionProvisioningError, vmssCSE command terminated with exit status=50 and ERR_OUTBOUND_CONN_FAIL. What is the documented fix?"
@@ -73,6 +89,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-cse-exit-51
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool scale failed with VMExtensionError_K8SAPIServerConnFail and vmssCSE exit status 51. What is the documented fix?"
@@ -89,6 +106,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-cse-exit-52
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS create failed with VMExtensionError_K8SAPIServerDNSLookupFail and vmssCSE ExitCode 52. What is the documented fix?"
@@ -105,6 +123,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-vmextension-wrapper
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "My AKS deployment says only VMExtensionProvisioningError. What is the root cause?"
@@ -117,6 +136,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-sku-unavailable
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool create failed with SkuNotAvailable for Standard_D8s_v5 in eastus zone 1. How should I respond?"
@@ -135,6 +155,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-overconstrained-allocation
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool scale failed with OverconstrainedAllocationRequest. The message lists Standard_D4s_v5, zone 2, accelerated networking, and ephemeral OS disk. There is no proximity placement group."
@@ -149,6 +170,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-zonal-allocation
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool scale failed with code ZonalAllocationFailed: Allocation failed. We do not have sufficient capacity for the requested VM size in this zone. There is no proximity placement group."
@@ -165,6 +187,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-allocation-internal
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool create failed with: AllocationFailed: The VM allocation failed due to an internal error. Please retry later or try deploying to a different location."
@@ -179,6 +202,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-allocation-upgrade-capacity
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool upgrade returned AllocationFailed: We do not have sufficient capacity for the requested VM size in this region. What should I do?"
@@ -197,6 +221,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-allocation-scale-capacity
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "AKS node-pool scale returned AllocationFailed: We do not have sufficient capacity for the requested VM size in this region. This is not an upgrade."
@@ -211,6 +236,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-non-aks-exit-50
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "A standalone Linux VM setup script exited 50. It is not an AKS VM, vmssCSE, or Kubernetes resource. Diagnose it."
@@ -223,6 +249,7 @@
   metadata:
     skill: aks-known-issues
     type: quality
+    case_id: known-issue-workload-exit-50
   vars:
     skill_path: "aks-known-issues/SKILL.md"
     prompt: "An init container in an AKS pod exited 50. Node provisioning succeeded and there is no vmssCSE or VM extension error. Is this the documented outbound CSE failure?"

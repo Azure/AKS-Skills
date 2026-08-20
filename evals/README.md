@@ -5,7 +5,7 @@ Automated quality and routing checks for AKS skills. Runs on every PR that touch
 ## What it does
 
 - **Lint** — validates SKILL.md formatting (front matter, required fields, script shebangs, internal references). No API key needed.
-- **Quality eval** — sends test prompts to the model with the skill loaded, then grades the response with `icontains` and `g-eval` assertions.
+- **Quality eval** — sends test prompts to the model with the root skill plus only the deep files declared by that case, then grades the response with `icontains` and `g-eval` assertions.
 - **Trigger eval** — asks the model which skill should handle a query (router-provider), asserts with deterministic `equals`.
 - **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
 - **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the full AKS skill pool available, and grades the trajectory. Two tiers:
@@ -22,6 +22,9 @@ npm ci
 
 # Lint only (instant, no API key)
 npm run lint
+
+# Focused deterministic skill-context and network-script security checks
+npm run test:deep-content
 
 # Requires LLM credentials
 export AZURE_OPENAI_API_KEY="your-key"
@@ -61,6 +64,26 @@ The mock tier proves the agent can *investigate*, not just route — without any
 - The dispatcher reads `.mocks/responses.json` from the scenario's working dir, matches the full command line against an ordered regex table, and returns the canned `stdout`/`stderr`/`exit`. Missing or malformed fixtures and unmatched commands fail non-zero, so absent canned evidence cannot masquerade as a successful tool call.
 - Each scenario lives at `evals/scenarios/<skill>/<fault>/responses.json` and is mounted into the run via the stimulus's `environment.files` (`dest: .mocks/responses.json`). Fixtures encode one real fault plus healthy *distractors* so the agent must reach the true root cause instead of stopping at the first red herring.
 - Mock results must be described as canned-substrate trajectory evidence. Live packet-capture behavior requires `evals/tests/aks-network-capture/smoke-live-cluster.sh`.
+
+### Selective skill context
+
+Promptfoo is an eval representation, not a runtime loader. `skill-provider.js` always loads the selected root `SKILL.md`; a quality case may then request one or more skill-relative files:
+
+```yaml
+metadata:
+  case_id: my-deep-case
+vars:
+  skill_path: "my-skill/SKILL.md"
+  skill_files:
+    - "references/needed-causal-map.md"
+    - "references/needed-command-flow.md"
+```
+
+Files are loaded root-first and then in declaration order. Missing files, directories, traversal/current-directory segments, cross-skill paths, duplicate declarations, symlink aliases of an already loaded file, and symlink escapes fail closed. Omit `skill_files` to preserve the root-only default.
+
+Promptfoo treats string arrays as variable permutations unless the case sets `options.disableVarExpansion: true`. Every case with `skill_files` must set that option so the provider receives one ordered file list; the focused test enforces it, resolves every configured path, and rejects duplicate `case_id` values.
+
+This proves that the selected files are loaded and available to the evaluation; it does not by itself prove that they change model behavior. Use a behavioral comparison when making that stronger claim. The same focused test also executes the real network-capture scripts to preserve the rendered manifest and argument-boundary security invariants without maintaining a mirror of every production script.
 
 ## Environment variables
 
@@ -119,8 +142,13 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
   metadata:
     skill: <your-skill-name>
     type: quality
+    case_id: <globally-unique-case-id>
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "<your-skill-name>/SKILL.md"
+    skill_files:
+      - "references/<only-the-file-needed-for-this-case>.md"
     prompt: "A detailed user scenario"
   assert:
     - type: g-eval
@@ -129,7 +157,8 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
 ```
 
 3. Add quality tests to `promptfooconfig.yaml` under `tests:`. Trigger tests are auto-discovered via glob (`file://tests/*/trigger-tests.yaml`).
-4. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the full competing skill pool and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
+4. If the case needs supporting files, add only those paths under `skill_files`, keep `disableVarExpansion: true`, assign a unique `case_id`, and run `npm run test:deep-content`.
+5. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the full competing skill pool and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
 
 ```yaml
 # eval.yaml — does the agent invoke the skill and respond well?
@@ -202,7 +231,7 @@ Then review, rename the `.autogen.yaml` files into the curated `quality-tests.ya
 
 | Config | What it tests | Provider | Assertions | Gate |
 |--------|---------------|----------|------------|------|
-| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (loads SKILL.md) | `icontains`, `g-eval` | No (advisory — retries 2x, reports only) |
+| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (root plus case-declared deep files) | `icontains`, `g-eval` | No (advisory — retries 2x, reports only) |
 | `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | No (advisory — reports only) |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
 | `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `prompt`, `output-matches` | Manual; failed graders exit non-zero |
