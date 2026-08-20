@@ -27,7 +27,7 @@
     - type: icontains
       value: "previous"
     - type: g-eval
-      value: "Response follows the production symptom map's CrashLoop order: current logs for all containers, previous logs for all containers, pod description for exit codes and restart count, then pod-scoped events. It distinguishes missing environment/secret, an unmounted config, OOM exit 137, an unreachable dependency, and a liveness probe killing healthy startup as separate causes. It does not collapse the investigation to generic logging advice."
+      value: "Response gathers both current and previous logs for all containers before inspecting pod termination state and restart count and then pod-scoped events; it does not prescribe an order between the two log reads. It separately discriminates missing environment or Secret injection, an unmounted ConfigMap or config file, OOM exit 137, an unreachable dependency, and a liveness probe killing startup. It does not replace this evidence chain with generic logging advice or add startup-probe content unsupported by the loaded source."
       threshold: 0.8
 
 - description: "CrashLoop exit codes distinguish OOM from graceful termination context"
@@ -107,7 +107,7 @@
     prompt: "One of my AKS nodes went NotReady during a cluster upgrade. Investigate."
   assert:
     - type: g-eval
-      value: "Response includes both Kubernetes-level checks (kubectl describe node, kubelet status) AND Azure-level checks (VM instance view, extension status)"
+      value: "Response uses safe read-only Kubernetes node description, conditions, and events plus available Azure VM or VMSS instance evidence for the affected node. It may gather the Kubernetes and Azure evidence in either order and does not require VMSS extension status. Privileged kubelet inspection is optional and may be mentioned only as an explicitly user-approved escalation; it is not executed or recommended by default."
       threshold: 0.8
 
 - description: "DNS failure response covers the full diagnostic path"
@@ -145,7 +145,7 @@
     - type: icontains
       value: "policy"
     - type: g-eval
-      value: "Response identifies NetworkPolicy as a likely cause and recommends checking policy rules, with packet capture as a verification step"
+      value: "Response identifies NetworkPolicy or default-deny posture as a likely cause and audits applicable policies, source and destination pod labels, source egress rules, and destination ingress rules. It does not require unsupported namespace-selector or port details, and it does not receive credit for claiming that a connectivity test was executed. Packet capture is optional, separately routed to aks-network-capture, and only suggested after explicit user request or approval for packet-level evidence; it is not required by default."
       threshold: 0.8
 
 - description: "External connectivity failure investigates Azure-level networking"
