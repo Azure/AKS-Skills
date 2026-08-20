@@ -4,10 +4,28 @@
   metadata:
     skill: aks-cluster-setup
     type: quality
+    case_id: cluster-setup-delegates-provisioning
   vars:
     skill_path: "aks-cluster-setup/SKILL.md"
     prompt: "Help me design and create a production AKS cluster with private networking."
   assert:
     - type: g-eval
       value: "Response makes AKS-specific Day-0 design decisions (SKU Automatic vs Standard, CNI/pod-IP model, private API server, egress) AND delegates the actual provisioning to the Azure Skills engine (azure-prepare/validate/deploy) rather than hand-rolling the deployment"
+      threshold: 0.8
+
+- description: "Cluster setup documents the Standard manual CLI fallback"
+  metadata:
+    skill: aks-cluster-setup
+    type: quality
+    case_id: cluster-setup-manual-cli-fallback
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-cluster-setup/SKILL.md"
+    skill_files:
+      - "references/cli-reference.md"
+    prompt: "Help me design a production Standard AKS cluster with private networking. The Azure Skills deployment engine is unavailable, so include the documented manual CLI fallback."
+  assert:
+    - type: g-eval
+      value: "Response makes AKS-specific Day-0 decisions (Standard SKU, CNI/pod-IP model, private API server and egress). Because the deployment engine is unavailable, it gives the reference's Standard az aks create shape with three zones, Azure CNI Overlay, cluster autoscaler bounds, OIDC issuer, and workload identity, while clearly treating that command as a fallback rather than provisioning non-AKS dependencies."
       threshold: 0.8

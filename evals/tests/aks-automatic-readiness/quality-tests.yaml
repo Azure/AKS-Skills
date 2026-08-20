@@ -4,10 +4,63 @@
   metadata:
     skill: aks-automatic-readiness
     type: quality
+    case_id: automatic-natural-language-readiness
   vars:
     skill_path: "aks-automatic-readiness/SKILL.md"
     prompt: "Assess whether my workloads are ready to move to AKS Automatic and what I need to change."
   assert:
     - type: g-eval
       value: "Response assesses workloads/cluster config against specific AKS Automatic constraints (e.g. resource requests/limits, node/pool assumptions, unsupported settings) and proposes concrete fixes, rather than generic 'it depends' advice"
+      threshold: 0.8
+
+- description: "Readiness assessment distinguishes admission outcomes and safe fixes"
+  metadata:
+    skill: aks-automatic-readiness
+    type: quality
+    case_id: automatic-safeguards-and-fixes
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-automatic-readiness/SKILL.md"
+    skill_files:
+      - "references/constraint-spec-v1.yaml"
+      - "references/common-fixes.md"
+    prompt: "Assess this AKS Automatic migration manifest: it has no resources, uses myapp:latest, adds NET_ADMIN, and mounts /var/log with hostPath. Tell me which findings are auto-fixed, warning-only, require changes, or incompatible, and give safe remediation."
+  assert:
+    - type: g-eval
+      value: "Response uses the bundled constraint semantics: missing resource requests/limits are autoFixed with 500m CPU and 2Gi memory defaults (100m/100Mi minimums); NET_ADMIN and hostPath are incompatible rather than silently removed; :latest requires a user-confirmed version or digest; probes are warning-only. It proposes PVC/ConfigMap/Container Insights alternatives for hostPath and does not present optional Restricted PSS controls as baseline Deny."
+      threshold: 0.8
+
+- description: "Migration plan preserves AKS Automatic Day-0 boundaries"
+  metadata:
+    skill: aks-automatic-readiness
+    type: quality
+    case_id: automatic-migration-boundaries
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-automatic-readiness/SKILL.md"
+    skill_files:
+      - "references/migration-guide-summary.md"
+    prompt: "My existing Standard cluster uses kubenet. Give me the shortest safe migration and validation plan for AKS Automatic, including what cannot be converted in place."
+  assert:
+    - type: g-eval
+      value: "Response treats AKS Automatic as a new-cluster migration: Azure CNI Overlay, API Server VNet Integration, and the Azure Linux system pool are Day-0 boundaries. It delegates new-cluster creation to aks-cluster-setup, uses server-side dry-run and staging validation before cutover, and decommissions the old cluster only after workload stability is confirmed."
+      threshold: 0.8
+
+- description: "MCP assessment handles async and offline fallback correctly"
+  metadata:
+    skill: aks-automatic-readiness
+    type: quality
+    case_id: automatic-mcp-async-fallback
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-automatic-readiness/SKILL.md"
+    skill_files:
+      - "references/mcp-integration.md"
+    prompt: "The AKS readiness MCP assessment returned HTTP 202 for a 600-workload cluster, and another environment has no MCP tool. What should the agent do in each environment?"
+  assert:
+    - type: g-eval
+      value: "Response treats 202 as asynchronous: follow the Location header, honor Retry-After, poll until completion, and bound polling. When the MCP tool is unavailable, it falls back to offline validation using rendered/local or exported manifests and the bundled constraint spec; it does not invent MCP parameters or claim the assessment completed."
       threshold: 0.8

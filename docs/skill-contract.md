@@ -28,7 +28,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 ```
 
 - **`description`** carries the routing surface. It must include `WHEN:` triggers **and** a `DO NOT USE FOR:` boundary that names the sibling skill to use instead (the parenthetical-redirect grammar). No two skills may share a description or have one subsume another.
-- **Budget:** the front-matter `description` must fit host routing budgets — keep it under ~500 tokens (~2000 characters), since some hosts truncate long descriptions at routing time. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into `references/` — progressive disclosure, loaded only when the skill is active.
+- **Budget:** the front-matter `description` must fit host routing budgets — keep it under ~500 tokens (~2000 characters), since some hosts truncate long descriptions at routing time. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into files inside the same skill — progressive disclosure, loaded only when needed. Do not flatten every file into every prompt.
 - **Runtime hints are additive, never conflicting:** `metadata.openclaw.requires.anyBins` (openclaw gating, harmless elsewhere); the repo-root `plugin.json` + `.mcp.json` for SRE Agent / marketplace install.
 
 ## 3. Content rules
@@ -53,7 +53,24 @@ Per skill:
 - **Quality tests** (`evals/tests/<skill>/quality-tests.yaml`) — at least one, wired into `evals/promptfooconfig.yaml`.
 - Any script change ships a regression test (e.g. the packet-capture injection test).
 
-CI fails if a skill has no tests (the coverage gate).
+For a quality case that needs supporting content beyond `SKILL.md`, list only the
+needed skill-relative paths under `vars.skill_files` and set
+`options.disableVarExpansion: true`. The eval provider loads the root first and
+then those files in declaration order. Focused tests ensure configured paths
+resolve safely, the expansion guard is present, and quality `case_id` values are
+unique.
+
+Loading a file proves only that its content is available to the evaluation. A
+claim that the content changes model behavior needs behavioral evidence, such as
+an appropriate comparison, rather than loader or inventory accounting.
+
+Live packet capture and node host mounts remain a pre-production operator gate.
+`evals/tests/aks-network-capture/smoke-live-cluster.sh` exercises the live
+create/retrieve pcap round trip. Deterministic tests retain the rendered
+least-privilege manifest and argument-boundary security invariants without
+claiming live integration.
+
+CI fails if a skill has no tests or if the configured skill context is invalid.
 
 ## 6. Review checklist (human)
 
@@ -62,11 +79,13 @@ CI fails if a skill has no tests (the coverage gate).
 - [ ] Durable content; coaching-lint warnings resolved or justified.
 - [ ] Read-only guardrail present if the skill can mutate.
 - [ ] Any `scripts/` change had a security review (no `eval`, validated inputs, pinned images, shellcheck-clean).
-- [ ] Tests exist and are wired; token budget respected.
+- [ ] Tests exist and are wired; claimed behavior is supported by behavioral evidence; token budget respected.
 - [ ] A named owner in `CODEOWNERS` approved.
 
 ## 7. What CI enforces automatically
 
 - `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
+- `evals/skill-context.test.mjs` — ordered selective loading, path and symlink safety, configured path resolution, expansion guards, and unique case IDs.
+- `evals/network-script-security.test.mjs` — rendered capture-manifest least privilege and traffic-generator argument boundaries.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).
 - `.github/workflows/skill-eval.yml` — routing + quality evals (requires Azure OpenAI secrets).
