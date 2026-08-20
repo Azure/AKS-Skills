@@ -2,6 +2,8 @@
 
 Loaded when discovering Azure MCP capabilities, collecting live cluster metadata, or debugging the fallback chain.
 
+Azure MCP Server is the `@azure/mcp` package configured by this repository. The **AKS MCP server** is the separate `Azure/aks-mcp` product and is not configured or supported here; do not apply its Kubernetes tools or `--access-level` behavior to Azure MCP Server.
+
 ---
 
 ## Capability Discovery

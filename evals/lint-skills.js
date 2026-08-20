@@ -18,7 +18,7 @@
  * 10. every skill's quality-tests.yaml is wired into evals/promptfooconfig.yaml
  * 11. every script-shaped file in scripts/ has a valid shebang and Git mode 100755
  * 12. internal file references in SKILL.md resolve to real files
- * 13. README and skill Markdown do not hardcode host-assigned Azure MCP tool names
+ * 13. shipped guidance preserves Azure MCP host portability and product boundaries
  *
  * Usage:
  *   node lint-skills.js [skills-dir]
@@ -50,6 +50,26 @@ const REQUIRED_TOP_LEVEL_FIELDS = ['name', 'license', 'metadata', 'description']
 const VALID_SHEBANG_RE = /^#!\/\S+(?:\s+.*)?$/;
 const SCRIPT_EXTENSIONS = new Set(['.sh', '.py']);
 const HARDCODED_AZURE_MCP_NAME_RE = /\bmcp_azure_mcp_[A-Za-z0-9_]+\b/i;
+const AKS_MCP_PRODUCT_NAME_RE = /\bAKS[- ]MCP\b/i;
+const EXPLICIT_AKS_MCP_PRODUCT_RE = /\bAzure\/aks-mcp\b/i;
+const REMOVED_READINESS_API_PATTERNS = [
+  {
+    label: 'readiness discovery action',
+    pattern: /\baction\s*[:=]\s*["']?discover\b/i,
+  },
+  {
+    label: 'readiness polling action',
+    pattern: /\bpollOperation\b/i,
+  },
+  {
+    label: 'HTTP 202 readiness polling contract',
+    pattern: /\bHTTP\s*-?\s*202\b/i,
+  },
+  {
+    label: 'invented readiness response field',
+    pattern: /\b(?:clusterConfiguration|totalWorkloads|overallStatus|suggestedPatch|remediationGuide)\b/,
+  },
+];
 
 /**
  * Read a text file with line endings normalized to LF. Windows checkouts
@@ -199,20 +219,54 @@ function findMarkdownFiles(target) {
   });
 }
 
-function checkAzureMcpNamePortability(skillsDir, addError) {
-  const readmePath = path.join(path.dirname(skillsDir), 'README.md');
+function checkAzureMcpGuidanceContract(skillsDir, addError) {
+  const repoRoot = path.dirname(skillsDir);
+  const manifestPaths = [
+    path.join(repoRoot, '.mcp.json'),
+    path.join(repoRoot, 'plugin.json'),
+    path.join(repoRoot, '.claude-plugin', 'plugin.json'),
+    path.join(repoRoot, '.claude-plugin', 'marketplace.json'),
+  ].filter(filePath => fs.existsSync(filePath));
   const guidanceFiles = [
-    ...findMarkdownFiles(readmePath),
+    ...findMarkdownFiles(path.join(repoRoot, 'README.md')),
+    ...findMarkdownFiles(path.join(repoRoot, 'docs')),
     ...findMarkdownFiles(skillsDir),
+    ...manifestPaths,
   ];
+  const readinessRoot = path.join(skillsDir, 'aks-automatic-readiness');
 
   for (const filePath of guidanceFiles) {
-    const match = readText(filePath).match(HARDCODED_AZURE_MCP_NAME_RE);
-    if (match) {
+    const content = readText(filePath);
+    const hardcodedName = content.match(HARDCODED_AZURE_MCP_NAME_RE);
+    if (hardcodedName) {
       addError(
         filePath,
-        `hardcoded Azure MCP tool name "${match[0]}" is host-assigned; use capability discovery instead`,
+        `hardcoded Azure MCP tool name "${hardcodedName[0]}" is host-assigned; use capability discovery instead`,
       );
+    }
+
+    for (const [index, line] of content.split('\n').entries()) {
+      if (AKS_MCP_PRODUCT_NAME_RE.test(line) && !EXPLICIT_AKS_MCP_PRODUCT_RE.test(line)) {
+        addError(
+          filePath,
+          `line ${index + 1} uses "AKS MCP" without naming the separate Azure/aks-mcp product; call @azure/mcp "Azure MCP Server"`,
+        );
+      }
+    }
+
+    const isReadinessGuidance = filePath === readinessRoot
+      || filePath.startsWith(`${readinessRoot}${path.sep}`)
+      || /\b(?:AKS Automatic|readiness assessment|readiness API)\b/i.test(content);
+    if (isReadinessGuidance) {
+      for (const { label, pattern } of REMOVED_READINESS_API_PATTERNS) {
+        const match = content.match(pattern);
+        if (match) {
+          addError(
+            filePath,
+            `${label} "${match[0]}" belongs to the removed fictional MCP readiness API; collect sanitized evidence and evaluate it locally`,
+          );
+        }
+      }
     }
   }
 }
@@ -448,7 +502,7 @@ function lintSkills({
 
   // --- Main per-skill loop ---
 
-  checkAzureMcpNamePortability(skillsDir, addError);
+  checkAzureMcpGuidanceContract(skillsDir, addError);
   const skillFolders = findSkillFolders(skillsDir);
 
   for (const skillDir of skillFolders) {

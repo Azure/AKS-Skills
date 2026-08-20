@@ -6,7 +6,7 @@
 Resolve subscription -> resolve resource group -> resolve cluster -> inspect cluster state -> inspect node pools -> inspect resource health -> inspect recent operations
 ```
 
-CLI fallback when AKS-MCP cannot perform the cluster baseline read:
+Portable Azure CLI fallback for cluster metadata, activity, and operations:
 
 ```bash
 az aks show -g <resource-group> -n <cluster-name>
@@ -20,7 +20,7 @@ az monitor activity-log list -g <resource-group> --max-events 20
 Check API reachability -> inspect nodes -> inspect kube-system -> inspect events -> inspect affected namespace -> inspect pod details and logs
 ```
 
-CLI fallback when AKS-MCP cannot perform the Kubernetes baseline read:
+Portable Kubernetes CLI flow:
 
 ```bash
 kubectl cluster-info
@@ -38,7 +38,7 @@ kubectl logs <pod-name> -n <namespace> --previous
 pod -> service -> endpoints -> ingress or load balancer -> DNS -> network controls
 ```
 
-CLI fallback when AKS-MCP cannot perform the connectivity read:
+Portable Kubernetes CLI flow:
 
 ```bash
 kubectl get pods -n <namespace> -o wide
@@ -50,11 +50,15 @@ kubectl describe ingress <ingress-name> -n <namespace>
 
 ## Detector Flow
 
+Use the separately advertised Azure MCP AppLens area when available; this is not part of the Azure MCP AKS metadata area.
+
 ```text
 resolve cluster resource ID -> list detectors or choose category -> select a focused time window -> run the detector or category -> rank critical findings above warnings -> ignore emerging issues when choosing the primary root cause
 ```
 
 ## Monitoring Flow
+
+Use separately advertised Azure MCP Monitor and Resource Health areas when available, or their Azure CLI equivalents.
 
 ```text
 check resource health -> inspect metrics -> verify diagnostics settings -> inspect control plane logs if available -> correlate with Application Insights or namespace symptoms
@@ -66,7 +70,7 @@ check resource health -> inspect metrics -> verify diagnostics settings -> inspe
 pod events -> node capacity -> taints and tolerations -> affinity rules -> PVC state -> quotas
 ```
 
-CLI fallback when AKS-MCP cannot perform the scheduling read:
+Portable Kubernetes CLI flow:
 
 ```bash
 kubectl describe pod <pod-name> -n <namespace>

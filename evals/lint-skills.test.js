@@ -698,6 +698,154 @@ test('generic coaching phrase remains a durability warning', () => {
   });
 });
 
+// --- Host portability --------------------------------------------------------
+
+test('hardcoded Azure MCP tool names in skill Markdown are errors', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const referencesDir = path.join(root, 'skills', name, 'references');
+    fs.mkdirSync(referencesDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(referencesDir, 'mcp.md'),
+      'Call mcp_azure_mcp_aks_cluster_get before continuing.\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /hardcoded Azure MCP tool name "mcp_azure_mcp_aks_cluster_get"/);
+  });
+});
+
+test('hardcoded Azure MCP tool names in README are errors', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    fs.writeFileSync(
+      path.join(root, 'README.md'),
+      'Call mcp_azure_mcp_aks_nodepool_get before continuing.\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /hardcoded Azure MCP tool name "mcp_azure_mcp_aks_nodepool_get"/);
+  });
+});
+
+test('hardcoded Azure MCP tool names in docs are errors', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    const docsDir = path.join(root, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(docsDir, 'integration.md'),
+      'Call mcp_azure_mcp_monitor_metrics_query before continuing.\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /hardcoded Azure MCP tool name "mcp_azure_mcp_monitor_metrics_query"/);
+  });
+});
+
+test('hardcoded Azure MCP tool names in plugin manifests are errors', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    fs.writeFileSync(
+      path.join(root, 'plugin.json'),
+      '{"description":"Call mcp_azure_mcp_aks_cluster_get"}\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /hardcoded Azure MCP tool name "mcp_azure_mcp_aks_cluster_get"/);
+  });
+});
+
+test('configuring an unqualified AKS MCP runtime is an error', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    fs.writeFileSync(
+      path.join(root, '.mcp.json'),
+      '{"mcpServers":{"aks":{"command":"aks-mcp"}}}\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /uses "AKS MCP" without naming the separate Azure\/aks-mcp product/);
+  });
+});
+
+test('unqualified AKS MCP product names are errors', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    fs.appendFileSync(
+      path.join(root, 'skills', name, 'SKILL.md'),
+      'Use the AKS-MCP tools for cluster diagnostics.\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /uses "AKS MCP" without naming the separate Azure\/aks-mcp product/);
+  });
+});
+
+test('explicit references to the separate Azure aks-mcp product are allowed', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    fs.writeFileSync(
+      path.join(root, 'README.md'),
+      'Azure MCP Server is `@azure/mcp`; the AKS MCP server is the separate `Azure/aks-mcp` product.\n',
+    );
+
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+const removedReadinessApiCases = [
+  ['discover action', 'Invoke the readiness API with action: "discover".\n', /readiness discovery action/],
+  ['polling action', 'Call pollOperation until the assessment completes.\n', /readiness polling action/],
+  ['HTTP polling contract', 'Large assessments return HTTP 202 and a polling URL.\n', /HTTP 202 readiness polling contract/],
+  ['invented response field', 'Read clusterConfiguration from the response.\n', /invented readiness response field/],
+];
+
+for (const [label, guidance, expectedError] of removedReadinessApiCases) {
+  test(`removed MCP readiness ${label} is an error`, () => {
+    withTempRoot((root) => {
+      const name = 'aks-automatic-readiness';
+      setupValidScenario(root, name);
+      fs.appendFileSync(path.join(root, 'skills', name, 'SKILL.md'), guidance);
+
+      const { errors } = runLint(root);
+      assertHasError(errors, expectedError);
+    });
+  });
+}
+
+test('removed MCP readiness identifiers in shared docs are errors', () => {
+  withTempRoot((root) => {
+    setupValidScenario(root);
+    const docsDir = path.join(root, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(docsDir, 'readiness.md'),
+      'For an AKS Automatic readiness assessment, call action: "discover".\n',
+    );
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /readiness discovery action/);
+  });
+});
+
+test('host capability discovery wording remains allowed for readiness guidance', () => {
+  withTempRoot((root) => {
+    const name = 'aks-automatic-readiness';
+    setupValidScenario(root, name);
+    fs.appendFileSync(
+      path.join(root, 'skills', name, 'SKILL.md'),
+      'Inspect the host-advertised Azure MCP capability and schema, then collect sanitized evidence for local evaluation.\n',
+    );
+
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
 // --- Regression: the real repo must still pass in full ---------------------
 
 test('real repo skills pass the full contract lint with zero errors', () => {

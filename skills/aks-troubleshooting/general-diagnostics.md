@@ -34,9 +34,9 @@ az aks get-credentials -g <rg> -n <cluster>
 az aks nodepool list -g <rg> --cluster-name <cluster> -o table
 ```
 
-### AppLens (MCP) for AKS
+### Azure MCP AppLens area for AKS
 
-For AI-powered diagnostics:
+AppLens is a separate Azure MCP Server area, not part of its AKS cluster/node-pool metadata area. For AI-powered diagnostics:
 
 ```text
 <host-assigned Azure MCP AppLens tool>
