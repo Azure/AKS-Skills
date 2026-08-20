@@ -115,7 +115,7 @@ jobs:
             --report "$OUTDIR/gate-report.json" $DRY
 
       - name: Upload candidate evals
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: autogen-${{ inputs.skill }}-${{ github.run_id }}
           path: autogen-out/${{ inputs.skill }}/
