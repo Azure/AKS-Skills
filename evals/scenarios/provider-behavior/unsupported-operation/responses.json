@@ -1,0 +1,8 @@
+{
+  "responses": [
+    {
+      "match": "^az aks show --resource-group rg-aks-eval --name prod-aks$",
+      "stdout": "{\"contract_version\":\"1.0\",\"semantic_capability\":\"azure.aks.cluster.read\",\"provider\":{\"id\":\"direct-azure-cli\",\"version\":\"fixture\",\"published_operation\":\"az aks show\",\"host_alias_debug\":null},\"operation_mode\":\"read\",\"target\":{\"azure\":{\"tenant\":\"sha256:692532053426e6d13f0ca754ab4fbd00f33cb69bc95aa36cd932f8d5422b7fb7\",\"subscription\":\"sha256:9ba5514defd98a73e71dc537816049970904977850751cef5a8450fdae715ed0\",\"resource_group\":\"sha256:6b69cdbec96c469c6eb1a9b9e854c1dbb114985ec7c9b1e57e98d74d8c5ff242\",\"cluster\":\"sha256:cc5ca2c26972d8918baec91de41c40ee3d7cbdb5fdcf1b2418c82d442a0799d8\"},\"kubernetes\":{\"context\":null,\"namespace\":null}},\"identity_kind\":\"user\",\"observation\":{\"observed_at\":\"2026-08-21T18:00:00Z\",\"window\":null},\"authorization\":\"allowed\",\"approval\":\"not-required\",\"result\":\"success\",\"redaction_profile\":\"aks-evidence-v1\",\"source\":{\"excerpt\":\"cluster provisioning state Succeeded\",\"digest\":\"sha256:b9f2ef1efe6be3eef03a4dc85d996f0b12a474675213596994c077f27268db49\"},\"fallback\":{\"reason\":\"unsupported\",\"target\":\"direct-azure-cli\"}}"
+    }
+  ]
+}

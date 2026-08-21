@@ -50,6 +50,8 @@ npm run lint:agentic                                                          # 
 npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml --tag tier=smoke  # one spec, routing tier only
 npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml                   # one spec, all tiers
 npm run eval:mock                                                             # all mock-tier investigations (all skills)
+npm run test:provider-harness                                                 # fixture protocol, envelopes, redaction, fail-closed behavior
+npm run eval:provider-behavior                                                # provider behavior matrix through copilot-sdk
 ```
 
 Pass the skill's spec path with `--eval-spec`; add `--tag tier=smoke` for the fast routing checks, or use `npm run eval:mock` for the full fake-broken-cluster investigations.
@@ -64,6 +66,69 @@ The mock tier proves the agent can *investigate*, not just route — without any
 - The dispatcher reads `.mocks/responses.json` from the scenario's working dir, matches the full command line against an ordered regex table, and returns the canned `stdout`/`stderr`/`exit`. Missing or malformed fixtures and unmatched commands fail non-zero, so absent canned evidence cannot masquerade as a successful tool call.
 - Each scenario lives at `evals/scenarios/<skill>/<fault>/responses.json` and is mounted into the run via the stimulus's `environment.files` (`dest: .mocks/responses.json`). Fixtures encode one real fault plus healthy *distractors* so the agent must reach the true root cause instead of stopping at the first red herring.
 - Mock results must be described as canned-substrate trajectory evidence. Live packet-capture behavior requires `evals/tests/aks-network-capture/smoke-live-cluster.sh`.
+
+#### Provider behavior harness
+
+`tests/provider-behavior/eval.yaml` runs complete AKS skill folders through the
+same Vally `copilot-sdk` executor as the other agentic evaluations. It connects
+that real agent path to a zero-dependency stdio MCP fixture instead of Azure or
+Kubernetes:
+
+- The matrix mounts the complete `aks-troubleshooting`,
+  `aks-network-capture`, and `aks-automatic-readiness` folders. Those are the
+  skills exercised by its journeys and preserve the DNS/egress versus explicit
+  packet-capture routing boundary without registering unrelated skills.
+- `.vally.yaml` gives each case an opaque MCP server alias and selects a fixture
+  scenario.
+- `mocks/mcp/server.mjs` implements MCP initialize, tool discovery, and tool
+  calls. Unadvertised tools and arguments that do not exactly match the
+  scenario return an error rather than empty success.
+- `mocks/mcp/scenarios.json` advertises host-assigned tool aliases plus semantic
+  capability, canonical provider/version/published operation, operation class,
+  target/context support, input schema, exact expected arguments, and a
+  deterministic outcome.
+- `scenarios/provider-behavior/**/responses.json` supplies only the direct
+  `az`/`kubectl` fallbacks authorized by a case. The existing fail-closed shell
+  dispatcher rejects every unmatched command.
+
+Raw fixture evidence may contain synthetic tokens, connection strings,
+identifiers, Secret data, and ConfigMap values. The MCP fixture applies the
+`aks-evidence-v1` allowlist projection before returning a result to the model,
+records a SHA-256 digest of the raw source, and writes only sanitized invocation
+arguments to `.mocks/mcp/invocations.jsonl`; rejected calls retain operation
+metadata but omit their untrusted arguments. Every response is mechanically
+validated against the normalized evidence-envelope fields in
+`docs/capability-provider-contract.md`.
+
+The current `aks-troubleshooting` frontmatter description is 1,084 characters.
+Copilot CLI silently omits skills whose descriptions exceed its 1,024-character
+runtime limit, so this harness does not claim a successful troubleshooting-skill
+activation. It still mounts the unmodified complete folder and executes those
+journeys through `copilot-sdk`; it does not create a shortened fixture skill or
+parallel loader. The existing router eval remains the routing-contract check
+until the skill description changes in a separate product-content PR.
+
+The matrix covers Azure MCP only, AKS MCP only, both providers, neither
+provider, alias permutations, denied reads, Azure and Kubernetes context
+mismatches, approved and denied writes, unsupported-operation fallback,
+connected and offline readiness, generic DNS diagnosis, and explicitly
+approved packet capture. Static fixture tests run in CI; the agentic command
+requires an authenticated Copilot CLI like the other Vally trajectory evals.
+
+To add a case:
+
+1. Add or reuse a tool template and scenario in
+   `mocks/mcp/scenarios.json`. Keep aliases opaque and keep canonical provider
+   metadata aligned with `providers/*.yaml`.
+2. Add a named environment in `.vally.yaml`. Use a new opaque server alias and
+   set `AKS_SKILLS_MCP_SCENARIO_ID`.
+3. Add the stimulus to `tests/provider-behavior/eval.yaml`. Never put fixture
+   aliases in the prompt; assert them only in deterministic `tool-calls`
+   graders together with semantic operation arguments/results.
+4. Add a scoped CLI response table only when the contract authorizes direct
+   fallback. Do not mount one for denial, mismatch, or provider-error cases.
+5. Run `npm run test:provider-harness`, `npm run lint:agentic`, and the targeted
+   `npm run eval:provider-behavior` command.
 
 ### Selective skill context
 
@@ -235,6 +300,7 @@ Then review, rename the `.autogen.yaml` files into the curated `quality-tests.ya
 | `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | No (advisory — reports only) |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
 | `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `prompt`, `output-matches` | Manual; failed graders exit non-zero |
+| `tests/provider-behavior/eval.yaml` | Agentic — provider selection, scope, approval, fallback, redaction, and evidence envelopes | Vally `copilot-sdk` executor + deterministic stdio MCP/CLI fixtures | `skill-invocation`, `tool-calls` arguments/results/sequence/turn, `output-matches`, `output-not-matches` | Manual agentic run; fixture protocol and contract checks gate CI |
 
 ## Assertion types
 

@@ -1,0 +1,24 @@
+{
+  "responses": [
+    {
+      "match": "^az account show --query id -o tsv$",
+      "stdout": "{\"scope_digest\":\"sha256:9ba5514defd98a73e71dc537816049970904977850751cef5a8450fdae715ed0\",\"identity_kind\":\"user\",\"authorization\":\"allowed\",\"redaction_profile\":\"aks-evidence-v1\"}"
+    },
+    {
+      "match": "^kubectl config current-context$",
+      "stdout": "{\"context_digest\":\"sha256:3e741ae6d4b8e9f555c36554502823200f38e46f4b616155b2ab8cca39f92f20\",\"authorization\":\"allowed\",\"redaction_profile\":\"aks-evidence-v1\"}"
+    },
+    {
+      "match": "^az aks show --resource-group rg-aks-eval --name prod-aks$",
+      "stdout": "{\"contract_version\":\"1.0\",\"semantic_capability\":\"azure.aks.cluster.read\",\"provider\":{\"id\":\"direct-azure-cli\",\"version\":\"fixture\",\"published_operation\":\"az aks show\",\"host_alias_debug\":null},\"operation_mode\":\"read\",\"target\":{\"azure\":{\"tenant\":\"sha256:692532053426e6d13f0ca754ab4fbd00f33cb69bc95aa36cd932f8d5422b7fb7\",\"subscription\":\"sha256:9ba5514defd98a73e71dc537816049970904977850751cef5a8450fdae715ed0\",\"resource_group\":\"sha256:6b69cdbec96c469c6eb1a9b9e854c1dbb114985ec7c9b1e57e98d74d8c5ff242\",\"cluster\":\"sha256:cc5ca2c26972d8918baec91de41c40ee3d7cbdb5fdcf1b2418c82d442a0799d8\"},\"kubernetes\":{\"context\":\"sha256:3e741ae6d4b8e9f555c36554502823200f38e46f4b616155b2ab8cca39f92f20\",\"namespace\":\"payments\"}},\"identity_kind\":\"user\",\"observation\":{\"observed_at\":\"2026-08-21T18:00:00Z\",\"window\":null},\"authorization\":\"allowed\",\"approval\":\"not-required\",\"result\":\"success\",\"redaction_profile\":\"aks-evidence-v1\",\"source\":{\"excerpt\":\"cluster provisioning state Succeeded\",\"digest\":\"sha256:b9f2ef1efe6be3eef03a4dc85d996f0b12a474675213596994c077f27268db49\"},\"fallback\":{\"reason\":\"absent\",\"target\":\"direct-azure-cli\"}}"
+    },
+    {
+      "match": "^az aks nodepool show --resource-group rg-aks-eval --cluster-name prod-aks --name system$",
+      "stdout": "{\"contract_version\":\"1.0\",\"semantic_capability\":\"azure.aks.nodepool.read\",\"provider\":{\"id\":\"direct-azure-cli\",\"version\":\"fixture\",\"published_operation\":\"az aks nodepool show\",\"host_alias_debug\":null},\"operation_mode\":\"read\",\"target\":{\"azure\":{\"tenant\":\"sha256:692532053426e6d13f0ca754ab4fbd00f33cb69bc95aa36cd932f8d5422b7fb7\",\"subscription\":\"sha256:9ba5514defd98a73e71dc537816049970904977850751cef5a8450fdae715ed0\",\"resource_group\":\"sha256:6b69cdbec96c469c6eb1a9b9e854c1dbb114985ec7c9b1e57e98d74d8c5ff242\",\"cluster\":\"sha256:cc5ca2c26972d8918baec91de41c40ee3d7cbdb5fdcf1b2418c82d442a0799d8\"},\"kubernetes\":{\"context\":\"sha256:3e741ae6d4b8e9f555c36554502823200f38e46f4b616155b2ab8cca39f92f20\",\"namespace\":\"payments\"}},\"identity_kind\":\"user\",\"observation\":{\"observed_at\":\"2026-08-21T18:00:00Z\",\"window\":null},\"authorization\":\"allowed\",\"approval\":\"not-required\",\"result\":\"success\",\"redaction_profile\":\"aks-evidence-v1\",\"source\":{\"excerpt\":\"system pool Ready with three nodes\",\"digest\":\"sha256:832fe1ef57f56d133d2987a03f8c353b950e90969d5c45cc2e42f87c608071e3\"},\"fallback\":{\"reason\":\"absent\",\"target\":\"direct-azure-cli\"}}"
+    },
+    {
+      "match": "^kubectl get pods -n payments -o json$",
+      "stdout": "{\"contract_version\":\"1.0\",\"semantic_capability\":\"kubernetes.resources.read\",\"provider\":{\"id\":\"direct-kubernetes-cli\",\"version\":\"fixture\",\"published_operation\":\"kubectl get pods\",\"host_alias_debug\":null},\"operation_mode\":\"read\",\"target\":{\"azure\":{\"tenant\":\"sha256:692532053426e6d13f0ca754ab4fbd00f33cb69bc95aa36cd932f8d5422b7fb7\",\"subscription\":\"sha256:9ba5514defd98a73e71dc537816049970904977850751cef5a8450fdae715ed0\",\"resource_group\":\"sha256:6b69cdbec96c469c6eb1a9b9e854c1dbb114985ec7c9b1e57e98d74d8c5ff242\",\"cluster\":\"sha256:cc5ca2c26972d8918baec91de41c40ee3d7cbdb5fdcf1b2418c82d442a0799d8\"},\"kubernetes\":{\"context\":\"sha256:3e741ae6d4b8e9f555c36554502823200f38e46f4b616155b2ab8cca39f92f20\",\"namespace\":\"payments\"}},\"identity_kind\":\"user\",\"observation\":{\"observed_at\":\"2026-08-21T18:00:00Z\",\"window\":\"2026-08-21T17:00:00Z/2026-08-21T18:00:00Z\"},\"authorization\":\"allowed\",\"approval\":\"not-required\",\"result\":\"success\",\"redaction_profile\":\"aks-evidence-v1\",\"source\":{\"excerpt\":\"api-7d9 is CrashLoopBackOff after a failed readiness probe\",\"digest\":\"sha256:68792f4d1e38cc0035283609d6151d7fc9d2ab8d6f1f0f8331f7f36f91f26b5a\"},\"fallback\":{\"reason\":\"absent\",\"target\":\"direct-kubernetes-cli\"}}"
+    }
+  ]
+}
