@@ -4,6 +4,23 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.0.1"
+  capabilities:
+    - id: azure.aks.cluster.read
+      mode: preferred
+    - id: azure.aks.nodepool.read
+      mode: preferred
+    - id: azure.monitor.metrics.read
+      mode: preferred
+    - id: azure.monitor.logs.read
+      mode: preferred
+    - id: azure.resource-health.read
+      mode: preferred
+    - id: azure.applens.diagnostics.read
+      mode: preferred
+    - id: azure.aks.detector.read
+      mode: preferred
+    - id: kubernetes.resources.read
+      mode: live-only
   openclaw:
     emoji: "☸️"
     requires:

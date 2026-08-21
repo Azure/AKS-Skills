@@ -4,6 +4,14 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.0.1"
+  capabilities:
+    - id: azure.aks.network.read
+      mode: preferred
+    - id: kubernetes.resources.read
+      mode: live-only
+    - id: kubernetes.packet-capture.collect
+      mode: conditional
+      when: the user asks to execute a live packet capture
   openclaw:
     emoji: "🔍"
     requires:

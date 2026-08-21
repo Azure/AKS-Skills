@@ -4,6 +4,16 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.0.0"
+  capabilities:
+    - id: azure.aks.cluster.read
+      mode: preferred
+    - id: azure.aks.nodepool.read
+      mode: preferred
+    - id: azure.compute.quota.read
+      mode: conditional
+      when: diagnosing an Azure GPU vCPU quota failure
+    - id: kubernetes.resources.read
+      mode: live-only
   openclaw:
     emoji: "🎛️"
     requires:

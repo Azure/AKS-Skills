@@ -23,11 +23,15 @@ license: MIT
 metadata:
   author: Microsoft
   version: "X.Y.Z"         # semver
+  capabilities:
+    - id: azure.aks.cluster.read
+      mode: preferred
 description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quoted user utterances>. DO NOT USE FOR: <cases> (use <other-skill>)."
 ---
 ```
 
 - **`description`** carries the routing surface. It must include `WHEN:` triggers **and** a `DO NOT USE FOR:` boundary that names the sibling skill to use instead (the parenthetical-redirect grammar). No two skills may share a description or have one subsume another.
+- **`metadata.capabilities`** is the single provider-neutral capability declaration. Every registered skill declares a list, including `[]` when it has no live dependency. IDs come from [`providers/capabilities.yaml`](../providers/capabilities.yaml); modes are `required`, `preferred`, `conditional`, or `live-only`. A `conditional` entry also requires a precise `when` string. Provider tool names and host aliases are forbidden here. See the [Capability Provider and Evidence Contract](capability-provider-contract.md).
 - **Budget:** the front-matter `description` must fit host routing budgets — keep it under ~500 tokens (~2000 characters), since some hosts truncate long descriptions at routing time. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into files inside the same skill — progressive disclosure, loaded only when needed. Do not flatten every file into every prompt.
 - **Runtime hints are additive, never conflicting:** `metadata.openclaw.requires.anyBins` (openclaw gating, harmless elsewhere); the repo-root `plugin.json` + `.mcp.json` for SRE Agent / marketplace install.
 
@@ -37,6 +41,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 - **Read-only by default.** Any skill that can mutate a cluster MUST state the read-only guardrail: *do not restart, delete, cordon, drain, scale, upgrade, or reconfigure unless the user explicitly asks.*
 - **No host coupling in the body.** No "OpenClaw UI will render…", no `/home/<user>/...` paths, no host-specific assumptions.
 - **MCP product names and boundaries.** **Azure MCP Server** means `@azure/mcp`, which this repository configures through `.mcp.json`. The **AKS MCP server** means the separate `Azure/aks-mcp` product, which this repository does not configure or support. Never shorten Azure MCP Server to "AKS MCP" or "AKS-MCP." Azure MCP Server's AKS area is limited to cluster and node-pool metadata; AppLens, Azure Monitor, and Resource Health are separate areas. Select operations from host-advertised capabilities and schemas, and retain direct CLI/Kubernetes fallbacks.
+- **Provider and evidence safety.** Live operations follow the [Capability Provider and Evidence Contract](capability-provider-contract.md): target and identity preflight, readonly defaults, one-action/one-target mutation approval, allowlist projection before model ingestion, normalized evidence, and fail-closed handling for denied authorization or mismatched context.
 
 ## 4. Script rules
 
@@ -77,6 +82,7 @@ CI fails if a skill has no tests or if the configured skill context is invalid.
 - [ ] Fits section 1 (deep AKS Day-2 / AKS-specific design); does not duplicate Azure Skills.
 - [ ] Description has `WHEN:` + `DO NOT USE FOR:`; no collision with an existing skill or with Azure Skills.
 - [ ] Durable content; coaching-lint warnings resolved or justified.
+- [ ] Capability requirements use known semantic IDs and match the skill's actual live/offline behavior.
 - [ ] Read-only guardrail present if the skill can mutate.
 - [ ] Any `scripts/` change had a security review (no `eval`, validated inputs, pinned images, shellcheck-clean).
 - [ ] Tests exist and are wired; claimed behavior is supported by behavioral evidence; token budget respected.
@@ -84,7 +90,7 @@ CI fails if a skill has no tests or if the configured skill context is invalid.
 
 ## 7. What CI enforces automatically
 
-- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
+- `evals/lint-skills.js` — front matter, capability declarations and provider maps, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
 - `evals/skill-context.test.mjs` — ordered selective loading, path and symlink safety, configured path resolution, expansion guards, and unique case IDs.
 - `evals/network-script-security.test.mjs` — rendered capture-manifest least privilege and traffic-generator argument boundaries.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).
