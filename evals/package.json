@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "node lint-skills.js",
     "lint:selftest": "node lint-skills.test.js",
+    "test:provider-setup": "node provider-setup.test.js",
     "test": "node providers/llm-client.test.js",
     "test:deep-content": "node --test skill-context.test.mjs network-script-security.test.mjs",
     "eval": "promptfoo eval -o results.json",

@@ -1,6 +1,6 @@
 {
   "name": "aks",
-  "description": "Azure Kubernetes Service (AKS) agent skills with optional Azure MCP Server integration: troubleshoot live clusters, optimize cost, assess AKS Automatic readiness, operate GPU and model-inference workloads, capture packet-level evidence, and design clusters. Deep Day-2 AKS operations that complement the broader Azure Skills plugin.",
+  "description": "Azure Kubernetes Service (AKS) agent skills for deep Day-2 operations. Installation registers the exact-pinned, read-only Azure MCP Server definition; identity, trust, and tool approval remain host/operator responsibilities, and any optional local Azure/aks-mcp server is configured separately.",
   "version": "0.1.0",
   "author": {
     "name": "Microsoft",
