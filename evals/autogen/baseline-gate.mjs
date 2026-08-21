@@ -110,6 +110,37 @@ async function judge({ prompt, answer, rubric, creds }) {
   return { score: valid ? s : null, reason: parsed.reason ?? "", valid };
 }
 
+export async function evaluateCandidate(
+  candidate,
+  skillContent,
+  creds,
+  { chatFn = chat, judgeFn = judge } = {}
+) {
+  const [skillResp, baseResp] = await Promise.all([
+    chatFn({ system: SKILL_SYSTEM(skillContent), user: candidate.prompt, creds }),
+    chatFn({ system: BASELINE_SYSTEM, user: candidate.prompt, creds }),
+  ]);
+  const [skillJudge, baseJudge] = await Promise.all([
+    judgeFn({ prompt: candidate.prompt, answer: skillResp.text, rubric: candidate.rubric, creds }),
+    judgeFn({ prompt: candidate.prompt, answer: baseResp.text, rubric: candidate.rubric, creds }),
+  ]);
+
+  return {
+    withSkill: {
+      answer: skillResp.text,
+      score: skillJudge.score,
+      reason: skillJudge.reason,
+      valid: skillJudge.valid,
+    },
+    baseline: {
+      answer: baseResp.text,
+      score: baseJudge.score,
+      reason: baseJudge.reason,
+      valid: baseJudge.valid,
+    },
+  };
+}
+
 function keywordsPass(answer, keywords) {
   const lc = answer.toLowerCase();
   return (keywords ?? []).every((k) => lc.includes(String(k).toLowerCase()));
@@ -288,12 +319,7 @@ async function main() {
       withSkill = { answer: "(dry) skill answer", score: 0.95, reason: "dry-run", valid: true };
       baseline = { answer: "(dry) baseline answer", score: 0.3, reason: "dry-run", valid: true };
     } else {
-      const skillResp = await chat({ system: SKILL_SYSTEM(skillContent), user: c.prompt, creds });
-      const baseResp = await chat({ system: BASELINE_SYSTEM, user: c.prompt, creds });
-      const sJudge = await judge({ prompt: c.prompt, answer: skillResp.text, rubric: c.rubric, creds });
-      const bJudge = await judge({ prompt: c.prompt, answer: baseResp.text, rubric: c.rubric, creds });
-      withSkill = { answer: skillResp.text, score: sJudge.score, reason: sJudge.reason, valid: sJudge.valid };
-      baseline = { answer: baseResp.text, score: bJudge.score, reason: bJudge.reason, valid: bJudge.valid };
+      ({ withSkill, baseline } = await evaluateCandidate(c, skillContent, creds));
     }
 
     // Decision state, resolved below. `quarantined` means a skill-gap candidate
