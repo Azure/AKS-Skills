@@ -1,49 +1,75 @@
 # Node & Cluster Troubleshooting
 
-## Node NotReady
-
-**Diagnostics:**
+## Node NotReady — executable evidence first
 
 ```bash
-kubectl get nodes -o wide
-kubectl describe node <node-name>
-# Look for: Conditions, Taints, Events, resource usage, kubelet status
+AKS_RG="<cluster-resource-group>"
+AKS_NAME="<cluster-name>"
+NODE="<node-name>"
+
+# Kubernetes description, conditions, and node-scoped events
+kubectl describe node "$NODE"
+kubectl get node "$NODE" \
+  -o jsonpath='{range .status.conditions[*]}{.lastTransitionTime}{"\t"}{.type}{"\t"}{.status}{"\t"}{.reason}{"\t"}{.message}{"\n"}{end}'
+kubectl get events --all-namespaces \
+  --field-selector involvedObject.kind=Node,involvedObject.name="$NODE" \
+  --sort-by='.metadata.creationTimestamp'
+
+# AKS node resource group and Kubernetes node to VMSS instance mapping
+NODE_RG=$(az aks show \
+  --resource-group "$AKS_RG" \
+  --name "$AKS_NAME" \
+  --query nodeResourceGroup -o tsv)
+AGENT_POOL=$(kubectl get node "$NODE" \
+  -o jsonpath='{.metadata.labels.agentpool}')
+PROVIDER_ID=$(kubectl get node "$NODE" \
+  -o jsonpath='{.spec.providerID}')
+VMSS=$(printf '%s\n' "$PROVIDER_ID" |
+  awk -F'/virtualMachineScaleSets/' '{print $2}' | cut -d/ -f1)
+INSTANCE_ID=${PROVIDER_ID##*/}
+
+printf 'nodeResourceGroup=%s\nagentPool=%s\nvmss=%s\ninstanceId=%s\n' \
+  "$NODE_RG" "$AGENT_POOL" "$VMSS" "$INSTANCE_ID"
+
+# AKS pool state
+az aks nodepool show \
+  --resource-group "$AKS_RG" \
+  --cluster-name "$AKS_NAME" \
+  --name "$AGENT_POOL" \
+  --query '{provisioningState:provisioningState,powerState:powerState.code,nodeImageVersion:nodeImageVersion,orchestratorVersion:orchestratorVersion}' \
+  -o yaml
+
+# Exact VMSS instance view and extension statuses
+az vmss get-instance-view \
+  --resource-group "$NODE_RG" \
+  --name "$VMSS" \
+  --instance-id "$INSTANCE_ID" \
+  -o json
+az vmss get-instance-view \
+  --resource-group "$NODE_RG" \
+  --name "$VMSS" \
+  --instance-id "$INSTANCE_ID" \
+  --query 'extensions[].{name:name,statuses:statuses,substatuses:substatuses}' \
+  -o json
 ```
+
+This block is the minimum Node NotReady evidence. Collect it before narrowing the failure to kubelet, host, provisioning, pressure, or network causes.
+
+### Privileged and service mutation boundary
+
+Kubelet/service inspection through privileged node access requires explicit approval after the mandatory block identifies a node-local evidence gap. Restarting kubelet, cordoning, draining, deleting, reimaging, or replacing a node are separate remediations and require explicit approval with workload, PodDisruptionBudget, and change-control impact understood. None is part of the default evidence path.
 
 **Condition decision tree:**
 
-| Condition            | Value   | Meaning                           | Fix Path                                                      |
-| -------------------- | ------- | --------------------------------- | ------------------------------------------------------------- |
-| `Ready`              | `False` | kubelet stopped reporting         | SSH to node; if unrecoverable, consider cordon/drain/delete\* |
-| `MemoryPressure`     | `True`  | Node running out of memory        | Evict pods; scale out pool; reduce pod density                |
-| `DiskPressure`       | `True`  | OS disk or ephemeral storage full | Check logs and images; clean up or increase disk              |
-| `PIDPressure`        | `True`  | Too many processes                | App spawning excessive threads/processes; use IG `snapshot_process` |
-| `NetworkUnavailable` | `True`  | CNI plugin issue                  | Check CNI pods in kube-system; node network config            |
+| Condition | Value | Evidence boundary | Next investigation |
+|---|---|---|---|
+| `Ready` | `False` | Compare the transition time and reason with VMSS instance and extension statuses | Determine whether the failure is kubelet, host, provisioning, or network related before requesting node access |
+| `MemoryPressure` | `True` | Review allocated resources, pod requests/limits, eviction events, and metrics | Identify the workload or node-pool capacity constraint |
+| `DiskPressure` | `True` | Review eviction events, pod ephemeral-storage requests/limits, and node image/OS state | Determine whether workload storage use or node storage capacity is responsible |
+| `PIDPressure` | `True` | Correlate condition transitions with workload placement and process evidence | Use IG `snapshot_process` if process-level evidence is required |
+| `NetworkUnavailable` | `True` | Review CNI pod state and logs plus node NIC routes and NSG evidence | Continue with [Networking Troubleshooting](networking.md) |
 
-\*Only after explicit user request for remediation and confirmation of workload impact.
-
-**AKS-specific - SSH to a node:**
-
-> ⚠️ **Warning:** `kubectl debug node/...` creates a privileged debug pod on the node and is not a read-only diagnostic step. Default to read-only evidence gathering first. Only suggest or run this after the user explicitly asks for remediation or approves a privileged diagnostic action and understands the change-control impact.
-
-```bash
-# Create a privileged debug pod on the node
-kubectl debug node/<node-name> -it --image=mcr.microsoft.com/cbl-mariner/base/core:2.0
-
-# Check kubelet status inside the node
-chroot /host systemctl status kubelet
-chroot /host journalctl -u kubelet -n 50
-```
-
-**Optional remediation if kubelet can't recover (after confirmation):** cordon -> drain -> delete. AKS auto-replaces via node pool VMSS.
-
-> ⚠️ **Warning:** These commands are disruptive. By default, stay in read-only diagnostic mode. Only suggest or run them if the user has explicitly requested remediation and confirmed they understand the workload and PodDisruptionBudget impact.
-
-```bash
-kubectl cordon <node-name>
-kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
-kubectl delete node <node-name>
-```
+Do not infer that a `Ready=False` condition requires a kubelet restart or node replacement. The Kubernetes condition reason, node events, VMSS provisioning state, and extension substatus determine the next branch.
 
 ---
 
@@ -70,7 +96,7 @@ az aks nodepool show -g <rg> --cluster-name <cluster> -n <nodepool> \
 - Node pool already at `maxCount`
 - VM quota exhausted: `az vm list-usage -l <region> -o table | grep -i "DSv3\|quota"`
 - Pod `nodeAffinity` is unsatisfiable on any new node template
-- 10-minute cooldown period still active after last scale event
+- A recent autoscaler decision is still governed by the cluster's configured autoscaler profile; compare the status ConfigMap timestamps and profile settings before concluding scaling is stuck
 
 **Autoscaler won't scale down - common reasons:**
 
@@ -99,11 +125,16 @@ See [AKS resource reservations](https://learn.microsoft.com/azure/aks/concepts-c
 **Ephemeral storage pressure:**
 
 ```bash
-# Check what's consuming ephemeral storage on a node
-kubectl debug node/<node> -it --image=mcr.microsoft.com/cbl-mariner/base/core:2.0
+# Correlate node pressure with workload requests, limits, placement, and events
+kubectl describe node <node>
+kubectl get pods -A --field-selector spec.nodeName=<node> \
+  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,EPHEMERAL_REQUESTS:.spec.containers[*].resources.requests.ephemeral-storage,EPHEMERAL_LIMITS:.spec.containers[*].resources.limits.ephemeral-storage'
+kubectl get events --all-namespaces \
+  --field-selector involvedObject.kind=Node,involvedObject.name=<node> \
+  --sort-by='.metadata.creationTimestamp'
 ```
 
-Common culprit: high-volume container logs accumulating in `/var/log/containers`.
+If this evidence cannot identify the consumer, request approval before privileged node filesystem inspection.
 
 **Deep diagnostics with Inspektor Gadget** (PID pressure or unknown process load):
 
