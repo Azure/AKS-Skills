@@ -1,0 +1,51 @@
+contract_version: "1.0"
+provider:
+  id: azure-mcp
+  product: Azure MCP Server
+  package: "@azure/mcp"
+  version: "3.0.0-beta.32"
+  release_ref: Azure.Mcp.Server-3.0.0-beta.32
+  source_commit: 0fe54df28d473415d63c201b309b64eec0aa6587
+  source_url: https://github.com/microsoft/mcp/tree/Azure.Mcp.Server-3.0.0-beta.32/tools/Azure.Mcp.Tools.Aks
+operations:
+  aks_cluster_get:
+    source: provider
+    source_paths:
+      - tools/Azure.Mcp.Tools.Aks/src/Commands/Cluster/ClusterGetCommand.cs
+      - tools/Azure.Mcp.Tools.Aks/src/Options/Cluster/ClusterGetOptions.cs
+    input_schema:
+      required: []
+      optional:
+        - tenant
+        - subscription
+        - resource-group
+        - cluster
+        - retry-delay
+        - retry-max-delay
+        - retry-max-retries
+        - retry-mode
+        - retry-network-timeout
+  aks_nodepool_get:
+    source: provider
+    source_paths:
+      - tools/Azure.Mcp.Tools.Aks/src/Commands/Nodepool/NodepoolGetCommand.cs
+      - tools/Azure.Mcp.Tools.Aks/src/Options/Nodepool/NodepoolGetOptions.cs
+    input_schema:
+      required:
+        - resource-group
+        - cluster
+      optional:
+        - tenant
+        - subscription
+        - nodepool
+        - retry-delay
+        - retry-max-delay
+        - retry-max-retries
+        - retry-mode
+        - retry-network-timeout
+capability_bindings:
+  - capability: azure.aks.cluster.read
+    operation: aks_cluster_get
+  - capability: azure.aks.nodepool.read
+    operation: aks_nodepool_get
+unsupported_capabilities: []

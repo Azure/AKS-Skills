@@ -1,0 +1,36 @@
+contract_version: "1.0"
+requirement_modes:
+  - required
+  - preferred
+  - conditional
+  - live-only
+fallback_policy:
+  allowed_reasons:
+    - absent
+    - unsupported
+  stop_reasons:
+    - authorization-denied
+    - context-mismatch
+capabilities:
+  - id: azure.aks.cluster.read
+    description: Read AKS cluster configuration and provisioning state.
+  - id: azure.aks.nodepool.read
+    description: Read AKS node-pool configuration and provisioning state.
+  - id: azure.aks.network.read
+    description: Read Azure network resources associated with an AKS cluster.
+  - id: azure.aks.detector.read
+    description: Read AKS diagnostic detector definitions or results.
+  - id: azure.compute.quota.read
+    description: Read Azure compute usage and quota relevant to AKS capacity.
+  - id: azure.monitor.metrics.read
+    description: Read Azure Monitor metric observations.
+  - id: azure.monitor.logs.read
+    description: Read Azure Monitor or AKS control-plane log observations.
+  - id: azure.resource-health.read
+    description: Read Azure Resource Health observations for an AKS target.
+  - id: azure.applens.diagnostics.read
+    description: Read AppLens diagnostic observations for an AKS target.
+  - id: kubernetes.resources.read
+    description: Read Kubernetes resources, events, and logs.
+  - id: kubernetes.packet-capture.collect
+    description: Collect packet-capture data from an AKS cluster.

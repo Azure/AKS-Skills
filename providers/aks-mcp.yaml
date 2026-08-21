@@ -1,0 +1,47 @@
+contract_version: "1.0"
+provider:
+  id: aks-mcp
+  product: Azure/aks-mcp
+  version: "0.0.20"
+  release_ref: v0.0.20
+  source_commit: 8d28bece75d1f572293364d7f50a7e9d2e425efa
+  source_url: https://github.com/Azure/aks-mcp/tree/v0.0.20
+dependencies:
+  mcp-kubernetes:
+    product: Azure/mcp-kubernetes
+    version: "0.0.14"
+    release_ref: v0.0.14
+    source_commit: 39b7de1c2b8aec39a52ebade30aed981bb0725d5
+    source_url: https://github.com/Azure/mcp-kubernetes/tree/v0.0.14
+operations:
+  call_kubectl:
+    source: mcp-kubernetes
+    source_paths:
+      - pkg/kubectl/registry.go
+    input_schema:
+      required:
+        - command
+      optional: []
+    bindable: false
+    unbound_reason: >-
+      The registered tool executes against the process's current kube context
+      and exposes no target input. AKS Skills has no runtime that can enforce a
+      resolved AKS target before this provider call.
+capability_bindings: []
+unsupported_capabilities:
+  - capability: kubernetes.resources.read
+    reason: >-
+      call_kubectl has only the command input and uses the current kube context;
+      this repository cannot enforce a matching AKS target for the provider.
+    source_paths:
+      - internal/server/server.go
+      - internal/k8s/registry.go
+      - Azure/mcp-kubernetes@v0.0.14:pkg/kubectl/registry.go
+  - capability: kubernetes.packet-capture.collect
+    reason: >-
+      The pinned provider does not enforce per-capture approval, bounded
+      duration, namespace scope, or safe output projection. No provider binding
+      is published for this capability.
+    source_paths:
+      - internal/components/inspektorgadget/registry.go
+      - internal/components/inspektorgadget/handlers.go

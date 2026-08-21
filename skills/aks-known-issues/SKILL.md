@@ -4,6 +4,7 @@ license: MIT
 metadata:
   author: Microsoft
   version: "0.1.0"
+  capabilities: []
   openclaw:
     emoji: "🔖"
     requires:

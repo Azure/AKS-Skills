@@ -8,17 +8,19 @@
  *  2. Valid contract-shaped YAML front matter
  *  3. Required fields present, in the contract's declared order:
  *     name, license, metadata.author, metadata.version, description
- *  4. name === folder name (error)
- *  5. metadata.version is valid semver
- *  6. license === "MIT", metadata.author === "Microsoft" (contract §2 exact values)
- *  7. description contains a WHEN: clause and a DO NOT USE FOR: clause that
+ *  4. metadata.capabilities uses known semantic IDs and requirement modes
+ *  5. provider maps use the pinned, published compatibility surface
+ *  6. name === folder name (error)
+ *  7. metadata.version is valid semver
+ *  8. license === "MIT", metadata.author === "Microsoft" (contract §2 exact values)
+ *  9. description contains a WHEN: clause and a DO NOT USE FOR: clause that
  *     uses the parenthetical-redirect grammar ("(use X)" / "(see X)")
- *  8. description respects the contract's declared routing budget (~2000 chars)
- *  9. every skill has non-empty evals/tests/<skill>/{trigger,quality}-tests.yaml
- * 10. every skill's quality-tests.yaml is wired into evals/promptfooconfig.yaml
- * 11. every script-shaped file in scripts/ has a valid shebang and Git mode 100755
- * 12. internal file references in SKILL.md resolve to real files
- * 13. shipped guidance preserves Azure MCP host portability and product boundaries
+ * 10. description respects the contract's declared routing budget (~2000 chars)
+ * 11. every skill has non-empty evals/tests/<skill>/{trigger,quality}-tests.yaml
+ * 12. every skill's quality-tests.yaml is wired into evals/promptfooconfig.yaml
+ * 13. every script-shaped file in scripts/ has a valid shebang and Git mode 100755
+ * 14. internal file references in SKILL.md resolve to real files
+ * 15. shipped guidance preserves Azure MCP host portability and product boundaries
  *
  * Usage:
  *   node lint-skills.js [skills-dir]
@@ -28,10 +30,12 @@
  * not needed for normal use — defaults match the real repo layout):
  *   LINT_TESTS_DIR            default: <repo>/evals/tests
  *   LINT_PROMPTFOO_CONFIG     default: <repo>/evals/promptfooconfig.yaml
+ *   LINT_PROVIDERS_DIR        default: <repo>/providers
  */
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const yaml = require('js-yaml');
 
@@ -45,7 +49,7 @@ const MAX_DESCRIPTION_CHARS = 2000;
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 // Declared order from the contract's manifest example (§2).
 const REQUIRED_TOP_LEVEL_ORDER = ['name', 'license', 'metadata', 'description'];
-const REQUIRED_METADATA_ORDER = ['author', 'version'];
+const REQUIRED_METADATA_ORDER = ['author', 'version', 'capabilities'];
 const REQUIRED_TOP_LEVEL_FIELDS = ['name', 'license', 'metadata', 'description'];
 const VALID_SHEBANG_RE = /^#!\/\S+(?:\s+.*)?$/;
 const SCRIPT_EXTENSIONS = new Set(['.sh', '.py']);
@@ -70,6 +74,39 @@ const REMOVED_READINESS_API_PATTERNS = [
     pattern: /\b(?:clusterConfiguration|totalWorkloads|overallStatus|suggestedPatch|remediationGuide)\b/,
   },
 ];
+const VALID_REQUIREMENT_MODES = new Set(['required', 'preferred', 'conditional', 'live-only']);
+const ALLOWED_FALLBACK_REASONS = ['absent', 'unsupported'];
+const STOP_FALLBACK_REASONS = ['authorization-denied', 'context-mismatch'];
+const DEFAULT_PROVIDERS_DIR = path.join(__dirname, '..', 'providers');
+const PINNED_PROVIDER_PROVENANCE = {
+  'azure-mcp': {
+    product: 'Azure MCP Server',
+    version: '3.0.0-beta.32',
+    releaseRef: 'Azure.Mcp.Server-3.0.0-beta.32',
+    sourceCommit: '0fe54df28d473415d63c201b309b64eec0aa6587',
+    sourceUrl: 'https://github.com/microsoft/mcp/tree/Azure.Mcp.Server-3.0.0-beta.32/tools/Azure.Mcp.Tools.Aks',
+    package: '@azure/mcp',
+    contractDigest: '1672204c28b7c2c3bec11dc2d9c055fd50cfc6b55d1a386a2671c38b39215be5',
+  },
+  'aks-mcp': {
+    product: 'Azure/aks-mcp',
+    version: '0.0.20',
+    releaseRef: 'v0.0.20',
+    sourceCommit: '8d28bece75d1f572293364d7f50a7e9d2e425efa',
+    sourceUrl: 'https://github.com/Azure/aks-mcp/tree/v0.0.20',
+    contractDigest: '5bba8ccd8bb557fb6c6b93a45b1651d61cb49dc6c6303c80cfc64d4408ed4c58',
+    dependencies: {
+      'mcp-kubernetes': {
+        product: 'Azure/mcp-kubernetes',
+        version: '0.0.14',
+        releaseRef: 'v0.0.14',
+        sourceCommit: '39b7de1c2b8aec39a52ebade30aed981bb0725d5',
+        sourceUrl: 'https://github.com/Azure/mcp-kubernetes/tree/v0.0.14',
+      },
+    },
+  },
+};
+const HOST_ALIAS_RE = /\b(?:mcp__|mcp_azure_mcp_|plugin_aks_azure__)[A-Za-z0-9_-]*/i;
 
 /**
  * Read a text file with line endings normalized to LF. Windows checkouts
@@ -77,6 +114,484 @@ const REMOVED_READINESS_API_PATTERNS = [
  */
 function readText(filePath) {
   return fs.readFileSync(filePath, 'utf-8').replace(/\r\n?/g, '\n');
+}
+
+function isMapping(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sameStringSet(actual, expected) {
+  if (!Array.isArray(actual)) return false;
+  return actual.length === expected.length
+    && [...actual].sort().join('\n') === [...expected].sort().join('\n');
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!isMapping(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map(key => [key, stableValue(value[key])]),
+  );
+}
+
+function stableDigest(value) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(stableValue(value)))
+    .digest('hex');
+}
+
+function walkScalars(value, visit) {
+  if (Array.isArray(value)) {
+    value.forEach(item => walkScalars(item, visit));
+  } else if (isMapping(value)) {
+    Object.entries(value).forEach(([key, item]) => {
+      visit(key);
+      walkScalars(item, visit);
+    });
+  } else if (value !== null && value !== undefined) {
+    visit(String(value));
+  }
+}
+
+function parseYamlFile(filePath) {
+  return yaml.load(readText(filePath));
+}
+
+function checkAllowedKeys(value, allowedKeys, addError, filePath, location) {
+  if (!isMapping(value)) return;
+  const extras = Object.keys(value).filter(key => !allowedKeys.includes(key));
+  if (extras.length > 0) {
+    addError(filePath, `${location} contains non-canonical field(s): ${extras.join(', ')}`);
+  }
+}
+
+function loadCapabilityVocabulary(providersDir) {
+  const registry = parseYamlFile(path.join(providersDir, 'capabilities.yaml'));
+  return {
+    capabilityIds: new Set(
+      Array.isArray(registry?.capabilities)
+        ? registry.capabilities.map(capability => capability?.id).filter(Boolean)
+        : [],
+    ),
+    requirementModes: new Set(
+      Array.isArray(registry?.requirement_modes) ? registry.requirement_modes : [],
+    ),
+  };
+}
+
+function loadProviderOperationNames(providersDir) {
+  const names = new Set();
+  for (const providerId of Object.keys(PINNED_PROVIDER_PROVENANCE)) {
+    const providerPath = path.join(providersDir, `${providerId}.yaml`);
+    const binding = parseYamlFile(providerPath);
+    if (!isMapping(binding?.operations)) continue;
+    Object.keys(binding.operations).forEach(name => names.add(name));
+  }
+  return names;
+}
+
+function validateFallbackPolicy(policy, addError, filePath) {
+  if (!isMapping(policy)) {
+    addError(filePath, 'fallback_policy must be a YAML mapping');
+    return;
+  }
+  checkAllowedKeys(
+    policy,
+    ['allowed_reasons', 'stop_reasons'],
+    addError,
+    filePath,
+    'fallback_policy',
+  );
+  if (!sameStringSet(policy.allowed_reasons, ALLOWED_FALLBACK_REASONS)) {
+    addError(
+      filePath,
+      `fallback_policy.allowed_reasons must be exactly [${ALLOWED_FALLBACK_REASONS.join(', ')}]`,
+    );
+  }
+  if (!sameStringSet(policy.stop_reasons, STOP_FALLBACK_REASONS)) {
+    addError(
+      filePath,
+      `fallback_policy.stop_reasons must be exactly [${STOP_FALLBACK_REASONS.join(', ')}]`,
+    );
+  }
+}
+
+function lintProviderContracts({ providersDir, repoRoot }) {
+  const errors = [];
+  const addError = (filePath, message) => {
+    errors.push(`ERROR [${path.relative(repoRoot, filePath)}]: ${message}`);
+  };
+  const registryPath = path.join(providersDir, 'capabilities.yaml');
+
+  if (!fs.existsSync(registryPath)) {
+    addError(registryPath, 'capability registry is missing');
+    return errors;
+  }
+
+  let registry;
+  try {
+    registry = parseYamlFile(registryPath);
+  } catch (error) {
+    addError(registryPath, `invalid YAML: ${error.message}`);
+    return errors;
+  }
+
+  if (!isMapping(registry)) {
+    addError(registryPath, 'capability registry must be a YAML mapping');
+    return errors;
+  }
+  checkAllowedKeys(
+    registry,
+    ['contract_version', 'requirement_modes', 'fallback_policy', 'capabilities'],
+    addError,
+    registryPath,
+    'capability registry',
+  );
+  if (registry.contract_version !== '1.0') {
+    addError(registryPath, 'contract_version must be exactly "1.0"');
+  }
+  if (!sameStringSet(registry.requirement_modes, [...VALID_REQUIREMENT_MODES])) {
+    addError(registryPath, 'requirement_modes do not match the contract vocabulary');
+  }
+  validateFallbackPolicy(registry.fallback_policy, addError, registryPath);
+
+  if (!Array.isArray(registry.capabilities) || registry.capabilities.length === 0) {
+    addError(registryPath, 'capabilities must be a non-empty list');
+  }
+  const registryIds = Array.isArray(registry.capabilities)
+    ? registry.capabilities.map(capability => capability?.id)
+    : [];
+  if (new Set(registryIds).size !== registryIds.length) {
+    addError(registryPath, 'capability IDs must be unique');
+  }
+  if (Array.isArray(registry.capabilities)) {
+    registry.capabilities.forEach((capability, index) => {
+      const location = `capabilities[${index}]`;
+      if (!isMapping(capability)) {
+        addError(registryPath, `${location} must be a YAML mapping`);
+        return;
+      }
+      checkAllowedKeys(capability, ['id', 'description'], addError, registryPath, location);
+      if (typeof capability.id !== 'string' || capability.id.trim() === '') {
+        addError(registryPath, `${location}.id must be a non-empty string`);
+      }
+      if (typeof capability.description !== 'string' || capability.description.trim() === '') {
+        addError(registryPath, `${location}.description must be a non-empty string`);
+      }
+    });
+  }
+  const knownCapabilityIds = new Set(registryIds.filter(Boolean));
+  const parsedProviders = new Map();
+
+  for (const [providerId, expected] of Object.entries(PINNED_PROVIDER_PROVENANCE)) {
+    const filePath = path.join(providersDir, `${providerId}.yaml`);
+    if (!fs.existsSync(filePath)) {
+      addError(filePath, `provider map for "${providerId}" is missing`);
+      continue;
+    }
+
+    let binding;
+    try {
+      binding = parseYamlFile(filePath);
+    } catch (error) {
+      addError(filePath, `invalid YAML: ${error.message}`);
+      continue;
+    }
+    if (!isMapping(binding) || !isMapping(binding.provider)) {
+      addError(filePath, 'provider map and provider field must be YAML mappings');
+      continue;
+    }
+    parsedProviders.set(providerId, binding);
+    checkAllowedKeys(
+      binding,
+      [
+        'contract_version',
+        'provider',
+        'dependencies',
+        'operations',
+        'capability_bindings',
+        'unsupported_capabilities',
+      ],
+      addError,
+      filePath,
+      'provider map',
+    );
+    checkAllowedKeys(
+      binding.provider,
+      ['id', 'product', 'package', 'version', 'release_ref', 'source_commit', 'source_url'],
+      addError,
+      filePath,
+      'provider',
+    );
+    if (binding.contract_version !== '1.0') {
+      addError(filePath, 'contract_version must be exactly "1.0"');
+    }
+    if (binding.provider.id !== providerId) {
+      addError(filePath, `provider.id must be "${providerId}"`);
+    }
+    if (String(binding.provider.version) !== expected.version) {
+      addError(filePath, `provider.version must be exact tested version "${expected.version}"`);
+    }
+    if (binding.provider.release_ref !== expected.releaseRef) {
+      addError(filePath, `provider.release_ref must be "${expected.releaseRef}"`);
+    }
+    if (binding.provider.source_commit !== expected.sourceCommit) {
+      addError(filePath, `provider.source_commit must be "${expected.sourceCommit}"`);
+    }
+    if (expected.package && binding.provider.package !== expected.package) {
+      addError(filePath, `provider.package must be "${expected.package}"`);
+    }
+    if (!expected.package && Object.prototype.hasOwnProperty.call(binding.provider, 'package')) {
+      addError(filePath, 'provider.package is not part of the pinned provider provenance');
+    }
+    if (binding.provider.product !== expected.product) {
+      addError(filePath, `provider.product must be "${expected.product}"`);
+    }
+    if (binding.provider.source_url !== expected.sourceUrl) {
+      addError(filePath, `provider.source_url must be "${expected.sourceUrl}"`);
+    }
+    if (/\blatest\b|^[~^<>=*]/i.test(String(binding.provider.version))) {
+      addError(filePath, 'provider.version must not use latest or a version range');
+    }
+
+    const expectedDependencies = expected.dependencies || {};
+    const dependencies = binding.dependencies || {};
+    if (!isMapping(dependencies)) {
+      addError(filePath, 'dependencies must be a YAML mapping');
+    } else if (!sameStringSet(Object.keys(dependencies), Object.keys(expectedDependencies))) {
+      addError(filePath, 'dependencies do not match the pinned provider source graph');
+    }
+    if (isMapping(dependencies)) {
+      for (const [dependencyId, expectedDependency] of Object.entries(expectedDependencies)) {
+        const dependency = dependencies[dependencyId];
+        const location = `dependencies.${dependencyId}`;
+        if (!isMapping(dependency)) {
+          addError(filePath, `${location} must be a YAML mapping`);
+          continue;
+        }
+        checkAllowedKeys(
+          dependency,
+          ['product', 'version', 'release_ref', 'source_commit', 'source_url'],
+          addError,
+          filePath,
+          location,
+        );
+        if (String(dependency.version) !== expectedDependency.version) {
+          addError(filePath, `${location}.version must be exact tested version "${expectedDependency.version}"`);
+        }
+        if (dependency.release_ref !== expectedDependency.releaseRef) {
+          addError(filePath, `${location}.release_ref must be "${expectedDependency.releaseRef}"`);
+        }
+        if (dependency.source_commit !== expectedDependency.sourceCommit) {
+          addError(filePath, `${location}.source_commit must be "${expectedDependency.sourceCommit}"`);
+        }
+        if (dependency.product !== expectedDependency.product) {
+          addError(filePath, `${location}.product must be "${expectedDependency.product}"`);
+        }
+        if (dependency.source_url !== expectedDependency.sourceUrl) {
+          addError(filePath, `${location}.source_url must be "${expectedDependency.sourceUrl}"`);
+        }
+      }
+    }
+
+    if (!isMapping(binding.operations) || Object.keys(binding.operations).length === 0) {
+      addError(filePath, 'operations must be a non-empty YAML mapping');
+    }
+    const operations = isMapping(binding.operations) ? binding.operations : {};
+    const validSources = new Set(['provider', ...Object.keys(expectedDependencies)]);
+    for (const [operationName, operation] of Object.entries(operations)) {
+      const location = `operations.${operationName}`;
+      if (!isMapping(operation)) {
+        addError(filePath, `${location} must be a YAML mapping`);
+        continue;
+      }
+      checkAllowedKeys(
+        operation,
+        ['source', 'source_paths', 'input_schema', 'bindable', 'unbound_reason'],
+        addError,
+        filePath,
+        location,
+      );
+      if (!validSources.has(operation.source)) {
+        addError(filePath, `${location}.source must name "provider" or a pinned dependency`);
+      }
+      if (
+        !Array.isArray(operation.source_paths)
+        || operation.source_paths.length === 0
+        || operation.source_paths.some(sourcePath => (
+          typeof sourcePath !== 'string'
+          || sourcePath.trim() === ''
+          || path.isAbsolute(sourcePath)
+          || sourcePath.split('/').includes('..')
+        ))
+      ) {
+        addError(filePath, `${location}.source_paths must be a non-empty list of repository-relative paths`);
+      }
+      if (!isMapping(operation.input_schema)) {
+        addError(filePath, `${location}.input_schema must be a YAML mapping`);
+      } else {
+        checkAllowedKeys(
+          operation.input_schema,
+          ['required', 'optional'],
+          addError,
+          filePath,
+          `${location}.input_schema`,
+        );
+        const required = operation.input_schema.required;
+        const optional = operation.input_schema.optional;
+        for (const [fieldName, values] of [['required', required], ['optional', optional]]) {
+          if (!Array.isArray(values) || values.some(name => typeof name !== 'string' || name === '')) {
+            addError(filePath, `${location}.input_schema.${fieldName} must be a list of strings`);
+          } else if (new Set(values).size !== values.length) {
+            addError(filePath, `${location}.input_schema.${fieldName} must not contain duplicates`);
+          }
+        }
+        if (Array.isArray(required) && Array.isArray(optional)) {
+          const overlap = required.filter(name => optional.includes(name));
+          if (overlap.length > 0) {
+            addError(
+              filePath,
+              `${location}.input_schema inputs cannot be both required and optional: ${overlap.join(', ')}`,
+            );
+          }
+        }
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(operation, 'bindable')
+        && typeof operation.bindable !== 'boolean'
+      ) {
+        addError(filePath, `${location}.bindable must be a boolean`);
+      }
+      if (
+        operation.bindable === false
+        && (typeof operation.unbound_reason !== 'string' || operation.unbound_reason.trim() === '')
+      ) {
+        addError(filePath, `${location}.unbound_reason is required when bindable is false`);
+      }
+      if (operation.bindable !== false && Object.prototype.hasOwnProperty.call(operation, 'unbound_reason')) {
+        addError(filePath, `${location}.unbound_reason is only valid when bindable is false`);
+      }
+    }
+
+    if (!Array.isArray(binding.capability_bindings)) {
+      addError(filePath, 'capability_bindings must be a YAML list');
+    }
+    if (!Array.isArray(binding.unsupported_capabilities)) {
+      addError(filePath, 'unsupported_capabilities must be a YAML list');
+    }
+    const boundCapabilityIds = new Set();
+    if (Array.isArray(binding.capability_bindings)) {
+      binding.capability_bindings.forEach((capabilityBinding, index) => {
+        const location = `capability_bindings[${index}]`;
+        if (!isMapping(capabilityBinding)) {
+          addError(filePath, `${location} must be a YAML mapping`);
+          return;
+        }
+        checkAllowedKeys(capabilityBinding, ['capability', 'operation'], addError, filePath, location);
+        if (!knownCapabilityIds.has(capabilityBinding.capability)) {
+          addError(
+            filePath,
+            `${location}.capability "${capabilityBinding.capability}" is not a known semantic capability`,
+          );
+        }
+        if (boundCapabilityIds.has(capabilityBinding.capability)) {
+          addError(filePath, `${location}.capability "${capabilityBinding.capability}" is duplicated`);
+        }
+        boundCapabilityIds.add(capabilityBinding.capability);
+        const operation = operations[capabilityBinding.operation];
+        if (!operation) {
+          addError(
+            filePath,
+            `${location}.operation "${capabilityBinding.operation}" does not name a declared operation`,
+          );
+        } else if (operation.bindable === false) {
+          addError(filePath, `${location}.operation "${capabilityBinding.operation}" is not bindable`);
+        }
+      });
+    }
+
+    const unsupportedCapabilityIds = new Set();
+    if (Array.isArray(binding.unsupported_capabilities)) {
+      binding.unsupported_capabilities.forEach((unsupported, index) => {
+        const location = `unsupported_capabilities[${index}]`;
+        if (!isMapping(unsupported)) {
+          addError(filePath, `${location} must be a YAML mapping`);
+          return;
+        }
+        checkAllowedKeys(
+          unsupported,
+          ['capability', 'reason', 'source_paths'],
+          addError,
+          filePath,
+          location,
+        );
+        if (!knownCapabilityIds.has(unsupported.capability)) {
+          addError(
+            filePath,
+            `${location}.capability "${unsupported.capability}" is not a known semantic capability`,
+          );
+        }
+        if (unsupportedCapabilityIds.has(unsupported.capability)) {
+          addError(filePath, `${location}.capability "${unsupported.capability}" is duplicated`);
+        }
+        unsupportedCapabilityIds.add(unsupported.capability);
+        if (typeof unsupported.reason !== 'string' || unsupported.reason.trim() === '') {
+          addError(filePath, `${location}.reason must be a non-empty string`);
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(unsupported, 'source_paths')
+          && (
+            !Array.isArray(unsupported.source_paths)
+            || unsupported.source_paths.length === 0
+            || unsupported.source_paths.some(sourcePath => typeof sourcePath !== 'string' || sourcePath === '')
+          )
+        ) {
+          addError(filePath, `${location}.source_paths must be a non-empty list of strings`);
+        }
+        if (boundCapabilityIds.has(unsupported.capability)) {
+          addError(filePath, `${location}.capability "${unsupported.capability}" cannot also be bound`);
+        }
+      });
+    }
+
+    const compatibilityContract = {
+      operations: binding.operations,
+      capability_bindings: binding.capability_bindings,
+      unsupported_capabilities: binding.unsupported_capabilities,
+    };
+    if (stableDigest(compatibilityContract) !== expected.contractDigest) {
+      addError(filePath, 'compatibility contract does not match the pinned source digest');
+    }
+
+    walkScalars(binding, (scalar) => {
+      if (HOST_ALIAS_RE.test(scalar)) {
+        addError(filePath, `host-rendered alias "${scalar.match(HOST_ALIAS_RE)[0]}" is forbidden`);
+      }
+    });
+  }
+
+  const mcpConfigPath = path.join(repoRoot, '.mcp.json');
+  if (fs.existsSync(mcpConfigPath)) {
+    try {
+      const config = JSON.parse(readText(mcpConfigPath));
+      const args = config?.mcpServers?.azure?.args;
+      const packageArg = Array.isArray(args)
+        ? args.find(argument => String(argument).startsWith('@azure/mcp@'))
+        : null;
+      const azureProvider = parsedProviders.get('azure-mcp')?.provider;
+      const expectedPackage = azureProvider
+        ? `${azureProvider.package}@${azureProvider.version}`
+        : null;
+      if (packageArg !== expectedPackage) {
+        addError(mcpConfigPath, `Azure MCP package must match provider map pin "${expectedPackage}"`);
+      }
+    } catch (error) {
+      addError(mcpConfigPath, `cannot verify Azure MCP package pin: ${error.message}`);
+    }
+  }
+
+  return errors;
 }
 
 function parseYamlScalar(rawValue) {
@@ -358,6 +873,7 @@ function lintSkills({
   skillsDir,
   testsDir,
   promptfooConfigPath,
+  providersDir = null,
   gitCommand = 'git',
 }) {
   const errors = [];
@@ -369,6 +885,26 @@ function lintSkills({
   }
   function addWarning(skillPath, msg) {
     warnings.push(`WARN  [${path.relative(skillsDir, skillPath)}]: ${msg}`);
+  }
+
+  if (providersDir !== null) {
+    errors.push(...lintProviderContracts({
+      providersDir,
+      repoRoot: path.dirname(skillsDir),
+    }));
+  }
+
+  const vocabularyDir = providersDir || DEFAULT_PROVIDERS_DIR;
+  let knownCapabilityIds = new Set();
+  let requirementModes = new Set();
+  let providerToolNames = new Set();
+  try {
+    const vocabulary = loadCapabilityVocabulary(vocabularyDir);
+    knownCapabilityIds = vocabulary.capabilityIds;
+    requirementModes = vocabulary.requirementModes;
+    providerToolNames = loadProviderOperationNames(vocabularyDir);
+  } catch (error) {
+    errors.push(`ERROR [providers]: cannot load capability vocabulary: ${error.message}`);
   }
 
   // Load evals/promptfooconfig.yaml once so every skill's quality-tests.yaml
@@ -556,6 +1092,9 @@ function lintSkills({
         && fm.metadata[f] !== null && fm.metadata[f] !== undefined && fm.metadata[f] !== '';
       if (!hasMetaField('author')) addError(skillMdPath, 'Missing required field: metadata.author');
       if (!hasMetaField('version')) addError(skillMdPath, 'Missing required field: metadata.version');
+      if (!Object.prototype.hasOwnProperty.call(fm.metadata, 'capabilities')) {
+        addError(skillMdPath, 'Missing required field: metadata.capabilities');
+      }
     }
 
     // --- Declared ordering (contract §2) ---
@@ -596,6 +1135,62 @@ function lintSkills({
       const v = String(fm.metadata.version);
       if (!SEMVER_RE.test(v)) {
         addError(skillMdPath, `metadata.version "${v}" is not valid semver (expected "X.Y.Z") (contract §2)`);
+      }
+    }
+
+    // --- Provider-neutral capability requirements (contract §2) ---
+    if (hasMetadataObject && Object.prototype.hasOwnProperty.call(fm.metadata, 'capabilities')) {
+      const capabilities = fm.metadata.capabilities;
+      if (!Array.isArray(capabilities)) {
+        addError(skillMdPath, 'metadata.capabilities must be a YAML list');
+      } else {
+        const seenCapabilityIds = new Set();
+        for (const [index, capability] of capabilities.entries()) {
+          const location = `metadata.capabilities[${index}]`;
+          if (!isMapping(capability)) {
+            addError(skillMdPath, `${location} must be a YAML mapping with id and mode`);
+            continue;
+          }
+
+          const allowedKeys = capability.mode === 'conditional'
+            ? ['id', 'mode', 'when']
+            : ['id', 'mode'];
+          const extraKeys = Object.keys(capability).filter(key => !allowedKeys.includes(key));
+          if (extraKeys.length > 0) {
+            addError(
+              skillMdPath,
+              `${location} contains non-canonical field(s): ${extraKeys.join(', ')}; use only id, mode, and conditional when`,
+            );
+          }
+          if (!knownCapabilityIds.has(capability.id)) {
+            addError(skillMdPath, `${location}.id "${capability.id}" is not a known semantic capability`);
+          }
+          if (!requirementModes.has(capability.mode)) {
+            addError(skillMdPath, `${location}.mode "${capability.mode}" is not a valid requirement mode`);
+          }
+          if (seenCapabilityIds.has(capability.id)) {
+            addError(skillMdPath, `${location}.id "${capability.id}" is duplicated`);
+          }
+          seenCapabilityIds.add(capability.id);
+
+          if (
+            capability.mode === 'conditional'
+            && (typeof capability.when !== 'string' || capability.when.trim() === '')
+          ) {
+            addError(skillMdPath, `${location}.when is required for conditional capabilities`);
+          }
+          for (const value of Object.values(capability)) {
+            if (typeof value !== 'string') continue;
+            const alias = value.match(HOST_ALIAS_RE);
+            if (alias) {
+              addError(skillMdPath, `${location} contains forbidden host alias "${alias[0]}"`);
+            }
+            const toolName = [...providerToolNames].find(name => value.includes(name));
+            if (toolName) {
+              addError(skillMdPath, `${location} contains provider-specific tool name "${toolName}"`);
+            }
+          }
+        }
       }
     }
 
@@ -659,11 +1254,13 @@ if (require.main === module) {
   const SKILLS_DIR = path.resolve(process.argv[2] || path.join(__dirname, '..', 'skills'));
   const TESTS_DIR = path.resolve(process.env.LINT_TESTS_DIR || path.join(__dirname, 'tests'));
   const PROMPTFOO_CONFIG = path.resolve(process.env.LINT_PROMPTFOO_CONFIG || path.join(__dirname, 'promptfooconfig.yaml'));
+  const PROVIDERS_DIR = path.resolve(process.env.LINT_PROVIDERS_DIR || path.join(__dirname, '..', 'providers'));
 
   const { errors, warnings, skillCount } = lintSkills({
     skillsDir: SKILLS_DIR,
     testsDir: TESTS_DIR,
     promptfooConfigPath: PROMPTFOO_CONFIG,
+    providersDir: PROVIDERS_DIR,
   });
 
   if (skillCount === 0) {
@@ -701,4 +1298,7 @@ module.exports = {
   SEMVER_RE,
   REQUIRED_TOP_LEVEL_ORDER,
   REQUIRED_METADATA_ORDER,
+  VALID_REQUIREMENT_MODES,
+  PINNED_PROVIDER_PROVENANCE,
+  lintProviderContracts,
 };

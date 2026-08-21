@@ -10,8 +10,15 @@ Thanks for helping AKS customers operate their clusters. This repo is public and
 ## Adding or changing a skill
 
 - Put it at `skills/<skill-id>/SKILL.md` (`name` must equal the folder). Follow the front-matter and content rules in the Contract.
+- Declare provider-neutral requirements in `metadata.capabilities`, using only IDs and modes from `providers/capabilities.yaml`. Use `capabilities: []` when the skill has no live dependency.
 - Add `evals/tests/<skill-id>/trigger-tests.yaml` and `quality-tests.yaml`, and wire the quality tests into `evals/promptfooconfig.yaml`. CI fails a skill with no tests.
 - Keep `SKILL.md` under the token budget; put depth in `references/`.
+
+## Adding a capability or provider mapping
+
+- Add the semantic ID to `providers/capabilities.yaml`; do not encode a provider or host alias in the ID.
+- Add a source-verified operation and input schema once in `providers/<provider>.yaml`, then reference it from a capability binding. Do not add approval, authorization, target, duration, namespace, redaction, or output-projection claims that the provider does not enforce.
+- Update the exact provenance/integrity pin and add positive and negative self-tests. Floating versions, fictional inputs, unsupported bindings, and fallback from authorization denial or context mismatch are rejected.
 
 ## Scripts
 

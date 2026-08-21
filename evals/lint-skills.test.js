@@ -22,8 +22,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { lintSkills } = require('./lint-skills.js');
+const { lintSkills, lintProviderContracts } = require('./lint-skills.js');
 const LINTER = path.join(__dirname, 'lint-skills.js');
+const REPO_ROOT = path.join(__dirname, '..');
+const PROVIDERS_DIR = path.join(REPO_ROOT, 'providers');
 
 // --- Fixture helpers -------------------------------------------------------
 
@@ -48,6 +50,11 @@ function validFrontMatterLines(name, overrides = {}) {
     author = 'Microsoft',
     version = '1.0.0',
     description = validDescription(),
+    capabilityLines = [
+      '  capabilities:',
+      '    - id: azure.aks.cluster.read',
+      '      mode: preferred',
+    ],
   } = overrides;
   return [
     '---',
@@ -56,6 +63,7 @@ function validFrontMatterLines(name, overrides = {}) {
     'metadata:',
     `  author: ${author}`,
     `  version: "${version}"`,
+    ...capabilityLines,
     `description: "${description}"`,
     '---',
     '',
@@ -113,6 +121,7 @@ function runCli(root) {
       ...process.env,
       LINT_TESTS_DIR: path.join(root, 'tests'),
       LINT_PROMPTFOO_CONFIG: path.join(root, 'promptfooconfig.yaml'),
+      LINT_PROVIDERS_DIR: PROVIDERS_DIR,
     },
   });
 }
@@ -274,7 +283,13 @@ const requiredFieldCases = [
   },
   {
     label: 'metadata',
-    remove: line => line === 'metadata:' || line.startsWith('  author:') || line.startsWith('  version:'),
+    remove: line => line === 'metadata:'
+      || line.startsWith('  author:')
+      || line.startsWith('  version:')
+      || line.startsWith('  capabilities:')
+      || line.startsWith('    - id:')
+      || line.startsWith('      mode:')
+      || line.startsWith('      when:'),
     error: /Missing required field: metadata/,
   },
   {
@@ -286,6 +301,14 @@ const requiredFieldCases = [
     label: 'metadata.version',
     remove: line => line.startsWith('  version:'),
     error: /Missing required field: metadata\.version/,
+  },
+  {
+    label: 'metadata.capabilities',
+    remove: line => line.startsWith('  capabilities:')
+      || line.startsWith('    - id:')
+      || line.startsWith('      mode:')
+      || line.startsWith('      when:'),
+    error: /Missing required field: metadata\.capabilities/,
   },
   {
     label: 'description',
@@ -318,6 +341,7 @@ test('top-level front matter fields out of declared order is an error', () => {
       'metadata:',
       '  author: Microsoft',
       '  version: "1.0.0"',
+      '  capabilities: []',
       'license: MIT',
       `description: "${validDescription()}"`,
       '---',
@@ -342,6 +366,7 @@ test('metadata fields out of declared order is an error', () => {
       'metadata:',
       '  version: "1.0.0"',
       '  author: Microsoft',
+      '  capabilities: []',
       `description: "${validDescription()}"`,
       '---',
       '',
@@ -376,6 +401,7 @@ test('folded YAML description accepted by the written contract passes', () => {
       'metadata:',
       '  author: Microsoft',
       '  version: "1.0.0"',
+      '  capabilities: []',
       'description: >-',
       '  Does fixture things for AKS clusters.',
       '  WHEN: a fixture trigger phrase is present.',
@@ -498,6 +524,259 @@ test('description exceeding the ~2000 char routing budget is an error', () => {
     setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
     const { errors } = runLint(root);
     assertHasError(errors, /exceeds the contract's routing budget of ~2000 chars/);
+  });
+});
+
+// --- Provider-neutral capability contract ----------------------------------
+
+test('an empty capability list keeps an offline skill valid', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: ['  capabilities: []'],
+    }));
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('an unknown semantic capability ID is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: [
+        '  capabilities:',
+        '    - id: azure.aks.invented.read',
+        '      mode: preferred',
+      ],
+    }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /is not a known semantic capability/);
+  });
+});
+
+test('an unknown capability requirement mode is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: [
+        '  capabilities:',
+        '    - id: azure.aks.cluster.read',
+        '      mode: optional',
+      ],
+    }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /is not a valid requirement mode/);
+  });
+});
+
+test('a conditional capability without a condition is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: [
+        '  capabilities:',
+        '    - id: azure.compute.quota.read',
+        '      mode: conditional',
+      ],
+    }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /\.when is required for conditional capabilities/);
+  });
+});
+
+test('a provider-specific tool name in a skill declaration is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: [
+        '  capabilities:',
+        '    - id: azure.aks.cluster.read',
+        '      mode: preferred',
+        '      tool: call_kubectl',
+      ],
+    }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /contains provider-specific tool name "call_kubectl"/);
+  });
+});
+
+test('a provider-specific tool name embedded in a condition is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: [
+        '  capabilities:',
+        '    - id: azure.aks.cluster.read',
+        '      mode: conditional',
+        '      when: call_kubectl is available',
+      ],
+    }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /contains provider-specific tool name "call_kubectl"/);
+  });
+});
+
+test('a host-rendered alias in a skill declaration is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name, validFrontMatterLines(name, {
+      capabilityLines: [
+        '  capabilities:',
+        '    - id: azure.aks.cluster.read',
+        '      mode: conditional',
+        '      when: mcp__plugin_aks_azure__cluster_get is available',
+      ],
+    }));
+    const { errors } = runLint(root);
+    assertHasError(errors, /contains forbidden host alias/);
+  });
+});
+
+function withProviderFixture(fn) {
+  withTempRoot((root) => {
+    const providersDir = path.join(root, 'providers');
+    fs.cpSync(PROVIDERS_DIR, providersDir, { recursive: true });
+    fs.copyFileSync(path.join(REPO_ROOT, '.mcp.json'), path.join(root, '.mcp.json'));
+    fn({ root, providersDir });
+  });
+}
+
+function lintProviderFixture(root, providersDir) {
+  return lintProviderContracts({ providersDir, repoRoot: root });
+}
+
+test('the checked-in provider maps pass the compatibility contract', () => {
+  assert.deepEqual(lintProviderContracts({
+    providersDir: PROVIDERS_DIR,
+    repoRoot: REPO_ROOT,
+  }), []);
+});
+
+test('a floating provider version is an error', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'azure-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace('version: "3.0.0-beta.32"', 'version: latest');
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /must be exact tested version/);
+  });
+});
+
+test('a binding to an undeclared provider operation is an error', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'azure-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace('    operation: aks_cluster_get', '    operation: aks_cluster_assess');
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /does not name a declared operation/);
+  });
+});
+
+test('a fictional provider operation name breaks the pinned source contract', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'azure-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace('  aks_cluster_get:', '  aks_cluster_assess:')
+      .replace('    operation: aks_cluster_get', '    operation: aks_cluster_assess');
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /does not match the pinned source digest/);
+  });
+});
+
+test('a fictional call_kubectl aks_resource_id input breaks the pinned source contract', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace('      optional: []', '      optional:\n        - aks_resource_id');
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /does not match the pinned source digest/);
+  });
+});
+
+test('call_kubectl cannot bind a Kubernetes capability without an enforceable target', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace(
+        'capability_bindings: []',
+        'capability_bindings:\n'
+          + '  - capability: kubernetes.resources.read\n'
+          + '    operation: call_kubectl',
+      );
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /operation "call_kubectl" is not bindable/);
+  });
+});
+
+test('packet capture cannot claim provider-enforced safeguards', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace(
+        'capability_bindings: []',
+        'capability_bindings:\n'
+          + '  - capability: kubernetes.packet-capture.collect\n'
+          + '    operation: inspektor_gadget_observability\n'
+          + '    approval_required: true\n'
+          + '    bounded_duration: true\n'
+          + '    namespace_scoped: true\n'
+          + '    output_projection: safe',
+      );
+    fs.writeFileSync(mapPath, content);
+    const errors = lintProviderFixture(root, providersDir);
+    assertHasError(errors, /contains non-canonical field\(s\): approval_required, bounded_duration, namespace_scoped, output_projection/);
+    assertHasError(errors, /does not name a declared operation/);
+    assertHasError(errors, /cannot also be bound/);
+  });
+});
+
+test('a missing source-verified capability binding breaks the integrity pin', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'azure-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace('\n  - capability: azure.aks.nodepool.read\n    operation: aks_nodepool_get', '');
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /does not match the pinned source digest/);
+  });
+});
+
+test('a host-rendered alias in a provider map is an error', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'azure-mcp.yaml');
+    fs.appendFileSync(mapPath, 'debug_alias: mcp__plugin_aks_azure__cluster_get\n');
+    assertHasError(lintProviderFixture(root, providersDir), /host-rendered alias/);
+  });
+});
+
+test('authorization denial cannot authorize provider fallback', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'capabilities.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace(
+        '  allowed_reasons:\n    - absent\n    - unsupported',
+        '  allowed_reasons:\n    - absent\n    - unsupported\n    - authorization-denied',
+      );
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /allowed_reasons must be exactly/);
+  });
+});
+
+test('context mismatch must remain a stop reason', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'capabilities.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace('  stop_reasons:\n    - authorization-denied\n    - context-mismatch', '  stop_reasons:\n    - authorization-denied');
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /stop_reasons must be exactly/);
+  });
+});
+
+test('provider compatibility metadata cannot claim authorization enforcement', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    fs.appendFileSync(mapPath, 'authorization_enforced: true\n');
+    assertHasError(lintProviderFixture(root, providersDir), /provider map contains non-canonical field\(s\): authorization_enforced/);
   });
 });
 
@@ -849,11 +1128,11 @@ test('host capability discovery wording remains allowed for readiness guidance',
 // --- Regression: the real repo must still pass in full ---------------------
 
 test('real repo skills pass the full contract lint with zero errors', () => {
-  const repoRoot = path.join(__dirname, '..');
   const { errors, skillCount } = lintSkills({
-    skillsDir: path.join(repoRoot, 'skills'),
+    skillsDir: path.join(REPO_ROOT, 'skills'),
     testsDir: path.join(__dirname, 'tests'),
     promptfooConfigPath: path.join(__dirname, 'promptfooconfig.yaml'),
+    providersDir: PROVIDERS_DIR,
   });
   assert.ok(skillCount > 0, 'expected at least one shipped skill to be discovered');
   assert.deepEqual(errors, []);
