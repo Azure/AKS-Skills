@@ -3,32 +3,17 @@ provider:
   id: azure-mcp
   product: Azure MCP Server
   package: "@azure/mcp"
-  version: 3.0.0-beta.32
+  version: "3.0.0-beta.32"
   release_ref: Azure.Mcp.Server-3.0.0-beta.32
   source_commit: 0fe54df28d473415d63c201b309b64eec0aa6587
   source_url: https://github.com/microsoft/mcp/tree/Azure.Mcp.Server-3.0.0-beta.32/tools/Azure.Mcp.Tools.Aks
-transport:
-  type: stdio
-  trust_boundary: Host-launched local process using the provider's configured Azure identity.
-context:
-  sources:
-    - advertised-tool-schema
-    - azure-scope
-fallback_policy:
-  allowed_reasons:
-    - absent
-    - unsupported
-  stop_reasons:
-    - authorization-denied
-    - context-mismatch
-capabilities:
-  - id: azure.aks.cluster.read
-    published_operation: aks cluster get
-    class: read
-    context_sources:
-      - azure-scope
-    fallback_class: direct-azure-cli
-    tested_schema:
+operations:
+  aks_cluster_get:
+    source: provider
+    source_paths:
+      - tools/Azure.Mcp.Tools.Aks/src/Commands/Cluster/ClusterGetCommand.cs
+      - tools/Azure.Mcp.Tools.Aks/src/Options/Cluster/ClusterGetOptions.cs
+    input_schema:
       required: []
       optional:
         - tenant
@@ -40,13 +25,12 @@ capabilities:
         - retry-max-retries
         - retry-mode
         - retry-network-timeout
-  - id: azure.aks.nodepool.read
-    published_operation: aks nodepool get
-    class: read
-    context_sources:
-      - azure-scope
-    fallback_class: direct-azure-cli
-    tested_schema:
+  aks_nodepool_get:
+    source: provider
+    source_paths:
+      - tools/Azure.Mcp.Tools.Aks/src/Commands/Nodepool/NodepoolGetCommand.cs
+      - tools/Azure.Mcp.Tools.Aks/src/Options/Nodepool/NodepoolGetOptions.cs
+    input_schema:
       required:
         - resource-group
         - cluster
@@ -59,10 +43,9 @@ capabilities:
         - retry-max-retries
         - retry-mode
         - retry-network-timeout
-unsupported:
-  - AKS Automatic readiness assessment or remediation
-  - Kubernetes API operations
-  - AKS mutations
-non_goals:
-  - Map AppLens, Azure Monitor, or Resource Health as AKS-area operations; they are separate Azure MCP areas.
-  - Define host-rendered tool aliases.
+capability_bindings:
+  - capability: azure.aks.cluster.read
+    operation: aks_cluster_get
+  - capability: azure.aks.nodepool.read
+    operation: aks_nodepool_get
+unsupported_capabilities: []

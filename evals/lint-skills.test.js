@@ -593,11 +593,11 @@ test('a provider-specific tool name in a skill declaration is an error', () => {
         '  capabilities:',
         '    - id: azure.aks.cluster.read',
         '      mode: preferred',
-        '      tool: call_az',
+        '      tool: call_kubectl',
       ],
     }));
     const { errors } = runLint(root);
-    assertHasError(errors, /contains provider-specific tool name "call_az"/);
+    assertHasError(errors, /contains provider-specific tool name "call_kubectl"/);
   });
 });
 
@@ -609,11 +609,11 @@ test('a provider-specific tool name embedded in a condition is an error', () => 
         '  capabilities:',
         '    - id: azure.aks.cluster.read',
         '      mode: conditional',
-        '      when: call_az is available',
+        '      when: call_kubectl is available',
       ],
     }));
     const { errors } = runLint(root);
-    assertHasError(errors, /contains provider-specific tool name "call_az"/);
+    assertHasError(errors, /contains provider-specific tool name "call_kubectl"/);
   });
 });
 
@@ -657,49 +657,87 @@ test('a floating provider version is an error', () => {
   withProviderFixture(({ root, providersDir }) => {
     const mapPath = path.join(providersDir, 'azure-mcp.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
-      .replace('version: 3.0.0-beta.32', 'version: latest');
+      .replace('version: "3.0.0-beta.32"', 'version: latest');
     fs.writeFileSync(mapPath, content);
     assertHasError(lintProviderFixture(root, providersDir), /must be exact tested version/);
   });
 });
 
-test('an unpublished provider operation is an error', () => {
+test('a binding to an undeclared provider operation is an error', () => {
   withProviderFixture(({ root, providersDir }) => {
     const mapPath = path.join(providersDir, 'azure-mcp.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
-      .replace('published_operation: aks cluster get', 'published_operation: aks cluster assess');
+      .replace('    operation: aks_cluster_get', '    operation: aks_cluster_assess');
     fs.writeFileSync(mapPath, content);
-    assertHasError(lintProviderFixture(root, providersDir), /is not published for azure\.aks\.cluster\.read/);
+    assertHasError(lintProviderFixture(root, providersDir), /does not name a declared operation/);
   });
 });
 
-test('a published operation mapped to the wrong capability is an error', () => {
+test('a fictional provider operation name breaks the pinned source contract', () => {
   withProviderFixture(({ root, providersDir }) => {
     const mapPath = path.join(providersDir, 'azure-mcp.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
-      .replace('published_operation: aks cluster get', 'published_operation: aks nodepool get');
+      .replace('  aks_cluster_get:', '  aks_cluster_assess:')
+      .replace('    operation: aks_cluster_get', '    operation: aks_cluster_assess');
     fs.writeFileSync(mapPath, content);
-    assertHasError(lintProviderFixture(root, providersDir), /is not published for azure\.aks\.cluster\.read/);
+    assertHasError(lintProviderFixture(root, providersDir), /does not match the pinned source digest/);
   });
 });
 
-test('provider schema drift is an error', () => {
+test('a fictional call_kubectl aks_resource_id input breaks the pinned source contract', () => {
   withProviderFixture(({ root, providersDir }) => {
     const mapPath = path.join(providersDir, 'aks-mcp.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
-      .replace('        - command\n', '        - args\n');
+      .replace('      optional: []', '      optional:\n        - aks_resource_id');
     fs.writeFileSync(mapPath, content);
-    assertHasError(lintProviderFixture(root, providersDir), /tested_schema does not match/);
+    assertHasError(lintProviderFixture(root, providersDir), /does not match the pinned source digest/);
   });
 });
 
-test('a missing tested capability mapping is an error', () => {
+test('call_kubectl cannot bind a Kubernetes capability without an enforceable target', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace(
+        'capability_bindings: []',
+        'capability_bindings:\n'
+          + '  - capability: kubernetes.resources.read\n'
+          + '    operation: call_kubectl',
+      );
+    fs.writeFileSync(mapPath, content);
+    assertHasError(lintProviderFixture(root, providersDir), /operation "call_kubectl" is not bindable/);
+  });
+});
+
+test('packet capture cannot claim provider-enforced safeguards', () => {
+  withProviderFixture(({ root, providersDir }) => {
+    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    const content = fs.readFileSync(mapPath, 'utf8')
+      .replace(
+        'capability_bindings: []',
+        'capability_bindings:\n'
+          + '  - capability: kubernetes.packet-capture.collect\n'
+          + '    operation: inspektor_gadget_observability\n'
+          + '    approval_required: true\n'
+          + '    bounded_duration: true\n'
+          + '    namespace_scoped: true\n'
+          + '    output_projection: safe',
+      );
+    fs.writeFileSync(mapPath, content);
+    const errors = lintProviderFixture(root, providersDir);
+    assertHasError(errors, /contains non-canonical field\(s\): approval_required, bounded_duration, namespace_scoped, output_projection/);
+    assertHasError(errors, /does not name a declared operation/);
+    assertHasError(errors, /cannot also be bound/);
+  });
+});
+
+test('a missing source-verified capability binding breaks the integrity pin', () => {
   withProviderFixture(({ root, providersDir }) => {
     const mapPath = path.join(providersDir, 'azure-mcp.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
-      .replace(/\n  - id: azure\.aks\.nodepool\.read[\s\S]*?(?=\nunsupported:)/, '');
+      .replace('\n  - capability: azure.aks.nodepool.read\n    operation: aks_nodepool_get', '');
     fs.writeFileSync(mapPath, content);
-    assertHasError(lintProviderFixture(root, providersDir), /exact tested provider surface/);
+    assertHasError(lintProviderFixture(root, providersDir), /does not match the pinned source digest/);
   });
 });
 
@@ -713,7 +751,7 @@ test('a host-rendered alias in a provider map is an error', () => {
 
 test('authorization denial cannot authorize provider fallback', () => {
   withProviderFixture(({ root, providersDir }) => {
-    const mapPath = path.join(providersDir, 'aks-mcp.yaml');
+    const mapPath = path.join(providersDir, 'capabilities.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
       .replace(
         '  allowed_reasons:\n    - absent\n    - unsupported',
@@ -726,7 +764,7 @@ test('authorization denial cannot authorize provider fallback', () => {
 
 test('context mismatch must remain a stop reason', () => {
   withProviderFixture(({ root, providersDir }) => {
-    const mapPath = path.join(providersDir, 'azure-mcp.yaml');
+    const mapPath = path.join(providersDir, 'capabilities.yaml');
     const content = fs.readFileSync(mapPath, 'utf8')
       .replace('  stop_reasons:\n    - authorization-denied\n    - context-mismatch', '  stop_reasons:\n    - authorization-denied');
     fs.writeFileSync(mapPath, content);
@@ -734,13 +772,11 @@ test('context mismatch must remain a stop reason', () => {
   });
 });
 
-test('AKS MCP access level cannot be treated as authorization', () => {
+test('provider compatibility metadata cannot claim authorization enforcement', () => {
   withProviderFixture(({ root, providersDir }) => {
     const mapPath = path.join(providersDir, 'aks-mcp.yaml');
-    const content = fs.readFileSync(mapPath, 'utf8')
-      .replace('access_level_authorizes: false', 'access_level_authorizes: true');
-    fs.writeFileSync(mapPath, content);
-    assertHasError(lintProviderFixture(root, providersDir), /access_level_authorizes must be false/);
+    fs.appendFileSync(mapPath, 'authorization_enforced: true\n');
+    assertHasError(lintProviderFixture(root, providersDir), /provider map contains non-canonical field\(s\): authorization_enforced/);
   });
 });
 

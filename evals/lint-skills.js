@@ -35,6 +35,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const yaml = require('js-yaml');
 
@@ -74,206 +75,38 @@ const REMOVED_READINESS_API_PATTERNS = [
   },
 ];
 const VALID_REQUIREMENT_MODES = new Set(['required', 'preferred', 'conditional', 'live-only']);
-const VALID_OPERATION_CLASSES = new Set(['read', 'write', 'privileged']);
-const VALID_FALLBACK_CLASSES = new Set([
-  'direct-azure-cli',
-  'direct-kubernetes-cli',
-  'offline-input',
-  'none',
-]);
 const ALLOWED_FALLBACK_REASONS = ['absent', 'unsupported'];
 const STOP_FALLBACK_REASONS = ['authorization-denied', 'context-mismatch'];
-const KNOWN_CAPABILITY_IDS = new Set([
-  'azure.aks.cluster.read',
-  'azure.aks.nodepool.read',
-  'azure.aks.network.read',
-  'azure.aks.detector.read',
-  'azure.compute.quota.read',
-  'azure.monitor.metrics.read',
-  'azure.monitor.logs.read',
-  'azure.resource-health.read',
-  'azure.applens.diagnostics.read',
-  'kubernetes.resources.read',
-  'kubernetes.resources.write',
-  'kubernetes.packet-capture.collect',
-]);
-const PROVIDER_COMPATIBILITY = {
+const DEFAULT_PROVIDERS_DIR = path.join(__dirname, '..', 'providers');
+const PINNED_PROVIDER_PROVENANCE = {
   'azure-mcp': {
+    product: 'Azure MCP Server',
     version: '3.0.0-beta.32',
     releaseRef: 'Azure.Mcp.Server-3.0.0-beta.32',
     sourceCommit: '0fe54df28d473415d63c201b309b64eec0aa6587',
+    sourceUrl: 'https://github.com/microsoft/mcp/tree/Azure.Mcp.Server-3.0.0-beta.32/tools/Azure.Mcp.Tools.Aks',
     package: '@azure/mcp',
-    capabilities: {
-      'azure.aks.cluster.read': {
-        operation: 'aks cluster get',
-        class: 'read',
-        contextSources: ['azure-scope'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: {
-          required: [],
-          optional: [
-            'tenant',
-            'subscription',
-            'resource-group',
-            'cluster',
-            'retry-delay',
-            'retry-max-delay',
-            'retry-max-retries',
-            'retry-mode',
-            'retry-network-timeout',
-          ],
-        },
-      },
-      'azure.aks.nodepool.read': {
-        operation: 'aks nodepool get',
-        class: 'read',
-        contextSources: ['azure-scope'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: {
-          required: ['resource-group', 'cluster'],
-          optional: [
-            'tenant',
-            'subscription',
-            'nodepool',
-            'retry-delay',
-            'retry-max-delay',
-            'retry-max-retries',
-            'retry-mode',
-            'retry-network-timeout',
-          ],
-        },
-      },
-    },
+    contractDigest: '1672204c28b7c2c3bec11dc2d9c055fd50cfc6b55d1a386a2671c38b39215be5',
   },
   'aks-mcp': {
+    product: 'Azure/aks-mcp',
     version: '0.0.20',
     releaseRef: 'v0.0.20',
     sourceCommit: '8d28bece75d1f572293364d7f50a7e9d2e425efa',
-    capabilities: {
-      'azure.aks.cluster.read': {
-        operation: 'call_az',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: {
-          required: ['cli_command'],
-          command_family: ['az aks list', 'az aks show'],
-        },
-      },
-      'azure.aks.nodepool.read': {
-        operation: 'call_az',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: {
-          required: ['cli_command'],
-          command_family: ['az aks nodepool list', 'az aks nodepool show'],
-        },
-      },
-      'azure.compute.quota.read': {
-        operation: 'call_az',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: {
-          required: ['cli_command'],
-          command_family: ['az vm list-usage'],
-        },
-      },
-      'kubernetes.resources.read': {
-        operation: 'call_kubectl',
-        class: 'read',
-        contextSources: ['kubeconfig-context', 'namespace'],
-        fallbackClass: 'direct-kubernetes-cli',
-        testedSchema: {
-          required: ['command'],
-          conditional_required: [{
-            field: 'aks_resource_id',
-            unless: 'default AKS resource ID is configured',
-          }],
-          access_level: 'readonly',
-        },
-      },
-      'kubernetes.resources.write': {
-        operation: 'call_kubectl',
-        class: 'write',
-        contextSources: ['kubeconfig-context', 'namespace'],
-        fallbackClass: 'direct-kubernetes-cli',
-        testedSchema: {
-          required: ['command'],
-          conditional_required: [{
-            field: 'aks_resource_id',
-            unless: 'default AKS resource ID is configured',
-          }],
-          access_level: ['readwrite', 'admin'],
-          approval_required: true,
-        },
-      },
-      'azure.aks.network.read': {
-        operation: 'aks_network_resources',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: {
-          resource_type: [
-            'all',
-            'vnet',
-            'subnet',
-            'nsg',
-            'route_table',
-            'load_balancer',
-            'private_endpoint',
-          ],
-        },
-      },
-      'azure.monitor.metrics.read': {
-        operation: 'aks_monitoring',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: { operation: 'metrics' },
-      },
-      'azure.monitor.logs.read': {
-        operation: 'aks_monitoring',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: { operation: 'control_plane_logs' },
-      },
-      'azure.resource-health.read': {
-        operation: 'aks_monitoring',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'direct-azure-cli',
-        testedSchema: { operation: 'resource_health' },
-      },
-      'azure.aks.detector.read': {
-        operation: 'aks_detector',
-        class: 'read',
-        contextSources: ['azure-cli-context'],
-        fallbackClass: 'none',
-        testedSchema: { operation: ['list', 'run', 'run_by_category'] },
-      },
-      'kubernetes.packet-capture.collect': {
-        operation: 'inspektor_gadget_observability',
-        class: 'privileged',
-        contextSources: ['azure-cli-context', 'kubeconfig-context', 'namespace'],
-        fallbackClass: 'direct-kubernetes-cli',
-        testedSchema: {
-          action: 'run',
-          gadget_name: 'tcpdump',
-          approval_required: true,
-        },
+    sourceUrl: 'https://github.com/Azure/aks-mcp/tree/v0.0.20',
+    contractDigest: '5bba8ccd8bb557fb6c6b93a45b1651d61cb49dc6c6303c80cfc64d4408ed4c58',
+    dependencies: {
+      'mcp-kubernetes': {
+        product: 'Azure/mcp-kubernetes',
+        version: '0.0.14',
+        releaseRef: 'v0.0.14',
+        sourceCommit: '39b7de1c2b8aec39a52ebade30aed981bb0725d5',
+        sourceUrl: 'https://github.com/Azure/mcp-kubernetes/tree/v0.0.14',
       },
     },
   },
 };
 const HOST_ALIAS_RE = /\b(?:mcp__|mcp_azure_mcp_|plugin_aks_azure__)[A-Za-z0-9_-]*/i;
-const PROVIDER_TOOL_NAMES = new Set(
-  Object.values(PROVIDER_COMPATIBILITY).flatMap(provider => (
-    Object.values(provider.capabilities).map(capability => capability.operation)
-  )),
-);
 
 /**
  * Read a text file with line endings normalized to LF. Windows checkouts
@@ -301,8 +134,11 @@ function stableValue(value) {
   );
 }
 
-function sameStructure(actual, expected) {
-  return JSON.stringify(stableValue(actual)) === JSON.stringify(stableValue(expected));
+function stableDigest(value) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(stableValue(value)))
+    .digest('hex');
 }
 
 function walkScalars(value, visit) {
@@ -322,11 +158,51 @@ function parseYamlFile(filePath) {
   return yaml.load(readText(filePath));
 }
 
+function checkAllowedKeys(value, allowedKeys, addError, filePath, location) {
+  if (!isMapping(value)) return;
+  const extras = Object.keys(value).filter(key => !allowedKeys.includes(key));
+  if (extras.length > 0) {
+    addError(filePath, `${location} contains non-canonical field(s): ${extras.join(', ')}`);
+  }
+}
+
+function loadCapabilityVocabulary(providersDir) {
+  const registry = parseYamlFile(path.join(providersDir, 'capabilities.yaml'));
+  return {
+    capabilityIds: new Set(
+      Array.isArray(registry?.capabilities)
+        ? registry.capabilities.map(capability => capability?.id).filter(Boolean)
+        : [],
+    ),
+    requirementModes: new Set(
+      Array.isArray(registry?.requirement_modes) ? registry.requirement_modes : [],
+    ),
+  };
+}
+
+function loadProviderOperationNames(providersDir) {
+  const names = new Set();
+  for (const providerId of Object.keys(PINNED_PROVIDER_PROVENANCE)) {
+    const providerPath = path.join(providersDir, `${providerId}.yaml`);
+    const binding = parseYamlFile(providerPath);
+    if (!isMapping(binding?.operations)) continue;
+    Object.keys(binding.operations).forEach(name => names.add(name));
+  }
+  return names;
+}
+
 function validateFallbackPolicy(policy, addError, filePath) {
   if (!isMapping(policy)) {
     addError(filePath, 'fallback_policy must be a YAML mapping');
     return;
   }
+  checkAllowedKeys(
+    policy,
+    ['allowed_reasons', 'stop_reasons'],
+    addError,
+    filePath,
+    'fallback_policy',
+  );
   if (!sameStringSet(policy.allowed_reasons, ALLOWED_FALLBACK_REASONS)) {
     addError(
       filePath,
@@ -365,31 +241,50 @@ function lintProviderContracts({ providersDir, repoRoot }) {
     addError(registryPath, 'capability registry must be a YAML mapping');
     return errors;
   }
+  checkAllowedKeys(
+    registry,
+    ['contract_version', 'requirement_modes', 'fallback_policy', 'capabilities'],
+    addError,
+    registryPath,
+    'capability registry',
+  );
   if (registry.contract_version !== '1.0') {
     addError(registryPath, 'contract_version must be exactly "1.0"');
   }
   if (!sameStringSet(registry.requirement_modes, [...VALID_REQUIREMENT_MODES])) {
     addError(registryPath, 'requirement_modes do not match the contract vocabulary');
   }
-  if (!sameStringSet(registry.operation_classes, [...VALID_OPERATION_CLASSES])) {
-    addError(registryPath, 'operation_classes do not match the contract vocabulary');
-  }
-  if (!sameStringSet(registry.fallback_classes, [...VALID_FALLBACK_CLASSES])) {
-    addError(registryPath, 'fallback_classes do not match the contract vocabulary');
-  }
   validateFallbackPolicy(registry.fallback_policy, addError, registryPath);
 
-  const registryIds = Array.isArray(registry.capabilities)
-    ? registry.capabilities.map(capability => capability && capability.id)
-    : [];
-  if (!sameStringSet(registryIds, [...KNOWN_CAPABILITY_IDS])) {
-    addError(registryPath, 'capability IDs do not match the linter compatibility registry');
+  if (!Array.isArray(registry.capabilities) || registry.capabilities.length === 0) {
+    addError(registryPath, 'capabilities must be a non-empty list');
   }
+  const registryIds = Array.isArray(registry.capabilities)
+    ? registry.capabilities.map(capability => capability?.id)
+    : [];
   if (new Set(registryIds).size !== registryIds.length) {
     addError(registryPath, 'capability IDs must be unique');
   }
+  if (Array.isArray(registry.capabilities)) {
+    registry.capabilities.forEach((capability, index) => {
+      const location = `capabilities[${index}]`;
+      if (!isMapping(capability)) {
+        addError(registryPath, `${location} must be a YAML mapping`);
+        return;
+      }
+      checkAllowedKeys(capability, ['id', 'description'], addError, registryPath, location);
+      if (typeof capability.id !== 'string' || capability.id.trim() === '') {
+        addError(registryPath, `${location}.id must be a non-empty string`);
+      }
+      if (typeof capability.description !== 'string' || capability.description.trim() === '') {
+        addError(registryPath, `${location}.description must be a non-empty string`);
+      }
+    });
+  }
+  const knownCapabilityIds = new Set(registryIds.filter(Boolean));
+  const parsedProviders = new Map();
 
-  for (const [providerId, expected] of Object.entries(PROVIDER_COMPATIBILITY)) {
+  for (const [providerId, expected] of Object.entries(PINNED_PROVIDER_PROVENANCE)) {
     const filePath = path.join(providersDir, `${providerId}.yaml`);
     if (!fs.existsSync(filePath)) {
       addError(filePath, `provider map for "${providerId}" is missing`);
@@ -407,6 +302,28 @@ function lintProviderContracts({ providersDir, repoRoot }) {
       addError(filePath, 'provider map and provider field must be YAML mappings');
       continue;
     }
+    parsedProviders.set(providerId, binding);
+    checkAllowedKeys(
+      binding,
+      [
+        'contract_version',
+        'provider',
+        'dependencies',
+        'operations',
+        'capability_bindings',
+        'unsupported_capabilities',
+      ],
+      addError,
+      filePath,
+      'provider map',
+    );
+    checkAllowedKeys(
+      binding.provider,
+      ['id', 'product', 'package', 'version', 'release_ref', 'source_commit', 'source_url'],
+      addError,
+      filePath,
+      'provider',
+    );
     if (binding.contract_version !== '1.0') {
       addError(filePath, 'contract_version must be exactly "1.0"');
     }
@@ -425,79 +342,226 @@ function lintProviderContracts({ providersDir, repoRoot }) {
     if (expected.package && binding.provider.package !== expected.package) {
       addError(filePath, `provider.package must be "${expected.package}"`);
     }
-    if (
-      typeof binding.provider.source_url !== 'string'
-      || !binding.provider.source_url.startsWith('https://github.com/')
-    ) {
-      addError(filePath, 'provider.source_url must be a GitHub source URL');
+    if (!expected.package && Object.prototype.hasOwnProperty.call(binding.provider, 'package')) {
+      addError(filePath, 'provider.package is not part of the pinned provider provenance');
+    }
+    if (binding.provider.product !== expected.product) {
+      addError(filePath, `provider.product must be "${expected.product}"`);
+    }
+    if (binding.provider.source_url !== expected.sourceUrl) {
+      addError(filePath, `provider.source_url must be "${expected.sourceUrl}"`);
     }
     if (/\blatest\b|^[~^<>=*]/i.test(String(binding.provider.version))) {
       addError(filePath, 'provider.version must not use latest or a version range');
     }
-    if (
-      !isMapping(binding.transport)
-      || binding.transport.type !== 'stdio'
-      || typeof binding.transport.trust_boundary !== 'string'
-      || binding.transport.trust_boundary.trim() === ''
-    ) {
-      addError(filePath, 'transport must declare stdio and a non-empty trust_boundary');
-    }
-    if (!isMapping(binding.context) || !Array.isArray(binding.context.sources) || binding.context.sources.length === 0) {
-      addError(filePath, 'context.sources must be a non-empty list');
-    }
-    validateFallbackPolicy(binding.fallback_policy, addError, filePath);
 
-    if (providerId === 'aks-mcp' && binding.access_level_authorizes !== false) {
-      addError(filePath, 'access_level_authorizes must be false');
+    const expectedDependencies = expected.dependencies || {};
+    const dependencies = binding.dependencies || {};
+    if (!isMapping(dependencies)) {
+      addError(filePath, 'dependencies must be a YAML mapping');
+    } else if (!sameStringSet(Object.keys(dependencies), Object.keys(expectedDependencies))) {
+      addError(filePath, 'dependencies do not match the pinned provider source graph');
     }
-    if (!Array.isArray(binding.capabilities) || binding.capabilities.length === 0) {
-      addError(filePath, 'capabilities must be a non-empty list');
-      continue;
+    if (isMapping(dependencies)) {
+      for (const [dependencyId, expectedDependency] of Object.entries(expectedDependencies)) {
+        const dependency = dependencies[dependencyId];
+        const location = `dependencies.${dependencyId}`;
+        if (!isMapping(dependency)) {
+          addError(filePath, `${location} must be a YAML mapping`);
+          continue;
+        }
+        checkAllowedKeys(
+          dependency,
+          ['product', 'version', 'release_ref', 'source_commit', 'source_url'],
+          addError,
+          filePath,
+          location,
+        );
+        if (String(dependency.version) !== expectedDependency.version) {
+          addError(filePath, `${location}.version must be exact tested version "${expectedDependency.version}"`);
+        }
+        if (dependency.release_ref !== expectedDependency.releaseRef) {
+          addError(filePath, `${location}.release_ref must be "${expectedDependency.releaseRef}"`);
+        }
+        if (dependency.source_commit !== expectedDependency.sourceCommit) {
+          addError(filePath, `${location}.source_commit must be "${expectedDependency.sourceCommit}"`);
+        }
+        if (dependency.product !== expectedDependency.product) {
+          addError(filePath, `${location}.product must be "${expectedDependency.product}"`);
+        }
+        if (dependency.source_url !== expectedDependency.sourceUrl) {
+          addError(filePath, `${location}.source_url must be "${expectedDependency.sourceUrl}"`);
+        }
+      }
     }
 
-    const mappedCapabilityIds = new Set();
-    for (const [index, capability] of binding.capabilities.entries()) {
-      const location = `capabilities[${index}]`;
-      if (!isMapping(capability)) {
+    if (!isMapping(binding.operations) || Object.keys(binding.operations).length === 0) {
+      addError(filePath, 'operations must be a non-empty YAML mapping');
+    }
+    const operations = isMapping(binding.operations) ? binding.operations : {};
+    const validSources = new Set(['provider', ...Object.keys(expectedDependencies)]);
+    for (const [operationName, operation] of Object.entries(operations)) {
+      const location = `operations.${operationName}`;
+      if (!isMapping(operation)) {
         addError(filePath, `${location} must be a YAML mapping`);
         continue;
       }
-      if (!KNOWN_CAPABILITY_IDS.has(capability.id)) {
-        addError(filePath, `${location}.id "${capability.id}" is not a known semantic capability`);
+      checkAllowedKeys(
+        operation,
+        ['source', 'source_paths', 'input_schema', 'bindable', 'unbound_reason'],
+        addError,
+        filePath,
+        location,
+      );
+      if (!validSources.has(operation.source)) {
+        addError(filePath, `${location}.source must name "provider" or a pinned dependency`);
       }
-      if (mappedCapabilityIds.has(capability.id)) {
-        addError(filePath, `${location}.id "${capability.id}" is duplicated`);
+      if (
+        !Array.isArray(operation.source_paths)
+        || operation.source_paths.length === 0
+        || operation.source_paths.some(sourcePath => (
+          typeof sourcePath !== 'string'
+          || sourcePath.trim() === ''
+          || path.isAbsolute(sourcePath)
+          || sourcePath.split('/').includes('..')
+        ))
+      ) {
+        addError(filePath, `${location}.source_paths must be a non-empty list of repository-relative paths`);
       }
-      mappedCapabilityIds.add(capability.id);
-      const expectedCapability = expected.capabilities[capability.id];
-      if (!expectedCapability) {
-        addError(
-          filePath,
-          `${location}.id "${capability.id}" is not mapped for tested ${providerId} ${expected.version}`,
-        );
+      if (!isMapping(operation.input_schema)) {
+        addError(filePath, `${location}.input_schema must be a YAML mapping`);
       } else {
-        if (capability.published_operation !== expectedCapability.operation) {
-          addError(
-            filePath,
-            `${location}.published_operation "${capability.published_operation}" is not published for ${capability.id} on tested ${providerId} ${expected.version}; expected "${expectedCapability.operation}"`,
-          );
+        checkAllowedKeys(
+          operation.input_schema,
+          ['required', 'optional'],
+          addError,
+          filePath,
+          `${location}.input_schema`,
+        );
+        const required = operation.input_schema.required;
+        const optional = operation.input_schema.optional;
+        for (const [fieldName, values] of [['required', required], ['optional', optional]]) {
+          if (!Array.isArray(values) || values.some(name => typeof name !== 'string' || name === '')) {
+            addError(filePath, `${location}.input_schema.${fieldName} must be a list of strings`);
+          } else if (new Set(values).size !== values.length) {
+            addError(filePath, `${location}.input_schema.${fieldName} must not contain duplicates`);
+          }
         }
-        if (capability.class !== expectedCapability.class) {
-          addError(filePath, `${location}.class must be "${expectedCapability.class}"`);
+        if (Array.isArray(required) && Array.isArray(optional)) {
+          const overlap = required.filter(name => optional.includes(name));
+          if (overlap.length > 0) {
+            addError(
+              filePath,
+              `${location}.input_schema inputs cannot be both required and optional: ${overlap.join(', ')}`,
+            );
+          }
         }
-        if (!sameStringSet(capability.context_sources, expectedCapability.contextSources)) {
-          addError(filePath, `${location}.context_sources do not match the tested binding`);
-        }
-        if (capability.fallback_class !== expectedCapability.fallbackClass) {
-          addError(filePath, `${location}.fallback_class must be "${expectedCapability.fallbackClass}"`);
-        }
-        if (!sameStructure(capability.tested_schema, expectedCapability.testedSchema)) {
-          addError(filePath, `${location}.tested_schema does not match the tested operation schema`);
-        }
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(operation, 'bindable')
+        && typeof operation.bindable !== 'boolean'
+      ) {
+        addError(filePath, `${location}.bindable must be a boolean`);
+      }
+      if (
+        operation.bindable === false
+        && (typeof operation.unbound_reason !== 'string' || operation.unbound_reason.trim() === '')
+      ) {
+        addError(filePath, `${location}.unbound_reason is required when bindable is false`);
+      }
+      if (operation.bindable !== false && Object.prototype.hasOwnProperty.call(operation, 'unbound_reason')) {
+        addError(filePath, `${location}.unbound_reason is only valid when bindable is false`);
       }
     }
-    if (!sameStringSet([...mappedCapabilityIds], Object.keys(expected.capabilities))) {
-      addError(filePath, 'capability mappings do not match the exact tested provider surface');
+
+    if (!Array.isArray(binding.capability_bindings)) {
+      addError(filePath, 'capability_bindings must be a YAML list');
+    }
+    if (!Array.isArray(binding.unsupported_capabilities)) {
+      addError(filePath, 'unsupported_capabilities must be a YAML list');
+    }
+    const boundCapabilityIds = new Set();
+    if (Array.isArray(binding.capability_bindings)) {
+      binding.capability_bindings.forEach((capabilityBinding, index) => {
+        const location = `capability_bindings[${index}]`;
+        if (!isMapping(capabilityBinding)) {
+          addError(filePath, `${location} must be a YAML mapping`);
+          return;
+        }
+        checkAllowedKeys(capabilityBinding, ['capability', 'operation'], addError, filePath, location);
+        if (!knownCapabilityIds.has(capabilityBinding.capability)) {
+          addError(
+            filePath,
+            `${location}.capability "${capabilityBinding.capability}" is not a known semantic capability`,
+          );
+        }
+        if (boundCapabilityIds.has(capabilityBinding.capability)) {
+          addError(filePath, `${location}.capability "${capabilityBinding.capability}" is duplicated`);
+        }
+        boundCapabilityIds.add(capabilityBinding.capability);
+        const operation = operations[capabilityBinding.operation];
+        if (!operation) {
+          addError(
+            filePath,
+            `${location}.operation "${capabilityBinding.operation}" does not name a declared operation`,
+          );
+        } else if (operation.bindable === false) {
+          addError(filePath, `${location}.operation "${capabilityBinding.operation}" is not bindable`);
+        }
+      });
+    }
+
+    const unsupportedCapabilityIds = new Set();
+    if (Array.isArray(binding.unsupported_capabilities)) {
+      binding.unsupported_capabilities.forEach((unsupported, index) => {
+        const location = `unsupported_capabilities[${index}]`;
+        if (!isMapping(unsupported)) {
+          addError(filePath, `${location} must be a YAML mapping`);
+          return;
+        }
+        checkAllowedKeys(
+          unsupported,
+          ['capability', 'reason', 'source_paths'],
+          addError,
+          filePath,
+          location,
+        );
+        if (!knownCapabilityIds.has(unsupported.capability)) {
+          addError(
+            filePath,
+            `${location}.capability "${unsupported.capability}" is not a known semantic capability`,
+          );
+        }
+        if (unsupportedCapabilityIds.has(unsupported.capability)) {
+          addError(filePath, `${location}.capability "${unsupported.capability}" is duplicated`);
+        }
+        unsupportedCapabilityIds.add(unsupported.capability);
+        if (typeof unsupported.reason !== 'string' || unsupported.reason.trim() === '') {
+          addError(filePath, `${location}.reason must be a non-empty string`);
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(unsupported, 'source_paths')
+          && (
+            !Array.isArray(unsupported.source_paths)
+            || unsupported.source_paths.length === 0
+            || unsupported.source_paths.some(sourcePath => typeof sourcePath !== 'string' || sourcePath === '')
+          )
+        ) {
+          addError(filePath, `${location}.source_paths must be a non-empty list of strings`);
+        }
+        if (boundCapabilityIds.has(unsupported.capability)) {
+          addError(filePath, `${location}.capability "${unsupported.capability}" cannot also be bound`);
+        }
+      });
+    }
+
+    const compatibilityContract = {
+      operations: binding.operations,
+      capability_bindings: binding.capability_bindings,
+      unsupported_capabilities: binding.unsupported_capabilities,
+    };
+    if (stableDigest(compatibilityContract) !== expected.contractDigest) {
+      addError(filePath, 'compatibility contract does not match the pinned source digest');
     }
 
     walkScalars(binding, (scalar) => {
@@ -515,7 +579,10 @@ function lintProviderContracts({ providersDir, repoRoot }) {
       const packageArg = Array.isArray(args)
         ? args.find(argument => String(argument).startsWith('@azure/mcp@'))
         : null;
-      const expectedPackage = `@azure/mcp@${PROVIDER_COMPATIBILITY['azure-mcp'].version}`;
+      const azureProvider = parsedProviders.get('azure-mcp')?.provider;
+      const expectedPackage = azureProvider
+        ? `${azureProvider.package}@${azureProvider.version}`
+        : null;
       if (packageArg !== expectedPackage) {
         addError(mcpConfigPath, `Azure MCP package must match provider map pin "${expectedPackage}"`);
       }
@@ -827,6 +894,19 @@ function lintSkills({
     }));
   }
 
+  const vocabularyDir = providersDir || DEFAULT_PROVIDERS_DIR;
+  let knownCapabilityIds = new Set();
+  let requirementModes = new Set();
+  let providerToolNames = new Set();
+  try {
+    const vocabulary = loadCapabilityVocabulary(vocabularyDir);
+    knownCapabilityIds = vocabulary.capabilityIds;
+    requirementModes = vocabulary.requirementModes;
+    providerToolNames = loadProviderOperationNames(vocabularyDir);
+  } catch (error) {
+    errors.push(`ERROR [providers]: cannot load capability vocabulary: ${error.message}`);
+  }
+
   // Load evals/promptfooconfig.yaml once so every skill's quality-tests.yaml
   // wiring can be checked against it (contract §5 "wired into promptfooconfig.yaml").
   let promptfooTests = null; // null = could not read/parse; array = tests: list
@@ -1082,10 +1162,10 @@ function lintSkills({
               `${location} contains non-canonical field(s): ${extraKeys.join(', ')}; use only id, mode, and conditional when`,
             );
           }
-          if (!KNOWN_CAPABILITY_IDS.has(capability.id)) {
+          if (!knownCapabilityIds.has(capability.id)) {
             addError(skillMdPath, `${location}.id "${capability.id}" is not a known semantic capability`);
           }
-          if (!VALID_REQUIREMENT_MODES.has(capability.mode)) {
+          if (!requirementModes.has(capability.mode)) {
             addError(skillMdPath, `${location}.mode "${capability.mode}" is not a valid requirement mode`);
           }
           if (seenCapabilityIds.has(capability.id)) {
@@ -1105,7 +1185,7 @@ function lintSkills({
             if (alias) {
               addError(skillMdPath, `${location} contains forbidden host alias "${alias[0]}"`);
             }
-            const toolName = [...PROVIDER_TOOL_NAMES].find(name => value.includes(name));
+            const toolName = [...providerToolNames].find(name => value.includes(name));
             if (toolName) {
               addError(skillMdPath, `${location} contains provider-specific tool name "${toolName}"`);
             }
@@ -1218,8 +1298,7 @@ module.exports = {
   SEMVER_RE,
   REQUIRED_TOP_LEVEL_ORDER,
   REQUIRED_METADATA_ORDER,
-  KNOWN_CAPABILITY_IDS,
   VALID_REQUIREMENT_MODES,
-  PROVIDER_COMPATIBILITY,
+  PINNED_PROVIDER_PROVENANCE,
   lintProviderContracts,
 };
