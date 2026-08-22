@@ -13,7 +13,7 @@ lab or the author's environment. **Zero npm dependencies** — Node built-ins on
 | File | Role |
 |------|------|
 | `scaffold-eval.mjs` | Step 1. Bundles the skill (`skill-context.mjs`) and asks the model to propose quality test cases + routing/trigger cases. Writes `candidates.json`. |
-| `baseline-gate.mjs` | Step 2. For each candidate, scores the prompt **with** vs **without** the skill (using **SKILL.md only**, matching `evals/providers/skill-provider.js`); keeps only tests the skill flips fail→pass, auto-calibrates a g-eval threshold, and renders the YAML + a wiring snippet. |
+| `baseline-gate.mjs` | Step 2. For each candidate, scores the prompt **with** vs **without** the skill (using **SKILL.md only**, matching `evals/providers/skill-provider.js`); the answer pair and judge pair run concurrently while candidates stay sequential. Keeps only tests the skill flips fail→pass, auto-calibrates a g-eval threshold, and renders the YAML + a wiring snippet. |
 | `skill-context.mjs` | Bundles `SKILL.md` + sibling `references/*.md` and `*.yaml` under a character budget (cost guard) so the **generation** step is grounded in the whole skill. |
 | `prompts/quality.md` | Prompt for proposing behavior (quality) tests. |
 | `prompts/trigger.md` | Prompt for routing positives + reciprocal boundary near-misses (expected route pulled from the skill's DO-NOT-USE-FOR section). |
