@@ -63,6 +63,9 @@ if ! command -v az >/dev/null 2>&1; then
 fi
 
 OUTPUT_FILE="${OUTPUT_DIR}/azure-network-info-${CLUSTER_NAME}-${TIMESTAMP}.json"
+COLLECTION_DIR=$(mktemp -d)
+cleanup() { rm -rf "$COLLECTION_DIR"; }
+trap cleanup EXIT
 mkdir -p "$OUTPUT_DIR"
 
 echo "Collecting Azure network configuration for AKS cluster: $CLUSTER_NAME"
@@ -93,80 +96,125 @@ echo "  Network Plugin: $NETWORK_PLUGIN"
 echo "  Network Policy: $NETWORK_POLICY"
 echo ""
 
-# Initialize JSON output
-cat > "$OUTPUT_FILE" <<EOF
-{
-  "cluster": {
-    "name": "$CLUSTER_NAME",
-    "resourceGroup": "$RESOURCE_GROUP",
-    "nodeResourceGroup": "$NODE_RESOURCE_GROUP",
-    "networkPlugin": "$NETWORK_PLUGIN",
-    "networkPolicy": "$NETWORK_POLICY",
-    "timestamp": "$TIMESTAMP"
-  },
-  "vnet": {},
-  "subnets": [],
-  "nsgs": [],
-  "routeTables": [],
-  "loadBalancers": [],
-  "publicIPs": [],
-  "vnetPeerings": [],
-  "privateDnsZones": []
+# Each Azure network query is independent once the cluster metadata is known.
+# Write results to isolated files so the control-plane requests can overlap safely.
+collect_json() {
+  local fallback=$1 output=$2
+  shift 2
+  if ! "$@" > "$output" 2>/dev/null; then
+    printf '%s\n' "$fallback" > "$output"
+  fi
 }
-EOF
+
+declare -a COLLECTION_PIDS=()
+collect_json_async() {
+  collect_json "$@" &
+  COLLECTION_PIDS+=("$!")
+}
+
+printf '{}\n' > "$COLLECTION_DIR/vnet.json"
+printf '{}\n' > "$COLLECTION_DIR/node-subnet.json"
+for collection in subnets nsgs route-tables load-balancers public-ips vnet-peerings private-dns-zones; do
+  printf '[]\n' > "$COLLECTION_DIR/${collection}.json"
+done
 
 # Get VNET and subnet information
+VNET_NAME=""
+SUBNET_NAME=""
+VNET_RG=""
 if [ -n "$VNET_SUBNET_ID" ]; then
   echo "Collecting VNET and subnet information..."
   VNET_NAME=$(echo "$VNET_SUBNET_ID" | awk -F'/' '{for(i=1;i<=NF;i++) if ($i=="virtualNetworks") print $(i+1)}')
   SUBNET_NAME=$(echo "$VNET_SUBNET_ID" | awk -F'/' '{for(i=1;i<=NF;i++) if ($i=="subnets") print $(i+1)}')
   VNET_RG=$(echo "$VNET_SUBNET_ID" | awk -F'/' '{for(i=1;i<=NF;i++) if ($i=="resourceGroups") print $(i+1)}')
-  
-  VNET_INFO=$(az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" -o json 2>/dev/null || echo "{}")
-  SUBNETS=$(az network vnet subnet list --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" -o json 2>/dev/null || echo "[]")
-  # Scoped detail for the cluster's own subnet: the effective UDR, NSG, and delegations.
-  NODE_SUBNET=$(az network vnet subnet show --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" --name "$SUBNET_NAME" \
-    --query "{name:name, addressPrefix:addressPrefix, udr:routeTable, nsg:networkSecurityGroup, delegations:delegations}" \
-    -o json 2>/dev/null || echo "{}")
 
-  jq --argjson vnet "$VNET_INFO" '.vnet = $vnet' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
-  jq --argjson subnets "$SUBNETS" '.subnets = $subnets' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
-  jq --argjson node_subnet "$NODE_SUBNET" '.nodeSubnet = $node_subnet' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
-  
+  collect_json_async "{}" "$COLLECTION_DIR/vnet.json" \
+    az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" -o json
+  collect_json_async "[]" "$COLLECTION_DIR/subnets.json" \
+    az network vnet subnet list --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" -o json
+  # Scoped detail for the cluster's own subnet: the effective UDR, NSG, and delegations.
+  collect_json_async "{}" "$COLLECTION_DIR/node-subnet.json" \
+    az network vnet subnet show --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" --name "$SUBNET_NAME" \
+      --query "{name:name, addressPrefix:addressPrefix, udr:routeTable, nsg:networkSecurityGroup, delegations:delegations}" \
+      -o json
+
   # Get VNET peerings
   echo "Collecting VNET peering information..."
-  PEERINGS=$(az network vnet peering list --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" -o json 2>/dev/null || echo "[]")
-  jq --argjson peerings "$PEERINGS" '.vnetPeerings = $peerings' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+  collect_json_async "[]" "$COLLECTION_DIR/vnet-peerings.json" \
+    az network vnet peering list --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" -o json
 fi
 
 # Get NSGs in node resource group
 echo "Collecting Network Security Groups..."
-NSGS=$(az network nsg list --resource-group "$NODE_RESOURCE_GROUP" -o json 2>/dev/null || echo "[]")
-jq --argjson nsgs "$NSGS" '.nsgs = $nsgs' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+collect_json_async "[]" "$COLLECTION_DIR/nsgs.json" \
+  az network nsg list --resource-group "$NODE_RESOURCE_GROUP" -o json
 
 # Get route tables in node resource group
 echo "Collecting Route Tables..."
-ROUTE_TABLES=$(az network route-table list --resource-group "$NODE_RESOURCE_GROUP" -o json 2>/dev/null || echo "[]")
-jq --argjson routes "$ROUTE_TABLES" '.routeTables = $routes' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+collect_json_async "[]" "$COLLECTION_DIR/route-tables.json" \
+  az network route-table list --resource-group "$NODE_RESOURCE_GROUP" -o json
 
 # Get load balancers in node resource group
 echo "Collecting Load Balancers..."
-LBS=$(az network lb list --resource-group "$NODE_RESOURCE_GROUP" -o json 2>/dev/null || echo "[]")
-jq --argjson lbs "$LBS" '.loadBalancers = $lbs' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+collect_json_async "[]" "$COLLECTION_DIR/load-balancers.json" \
+  az network lb list --resource-group "$NODE_RESOURCE_GROUP" -o json
 
 # Get public IPs in node resource group
 echo "Collecting Public IPs..."
-PUBLIC_IPS=$(az network public-ip list --resource-group "$NODE_RESOURCE_GROUP" -o json 2>/dev/null || echo "[]")
-jq --argjson ips "$PUBLIC_IPS" '.publicIPs = $ips' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+collect_json_async "[]" "$COLLECTION_DIR/public-ips.json" \
+  az network public-ip list --resource-group "$NODE_RESOURCE_GROUP" -o json
 
 # Get private DNS zones. Enumerate subscription-wide (no --resource-group): a zone
 # linked to the cluster VNET frequently lives in a DIFFERENT resource group than the
 # cluster, so scoping to the cluster RG silently misses it.
 if [ -n "$VNET_NAME" ]; then
   echo "Collecting Private DNS Zones (subscription-wide)..."
-  DNS_ZONES=$(az network private-dns zone list -o json 2>/dev/null || echo "[]")
-  jq --argjson zones "$DNS_ZONES" '.privateDnsZones = $zones' "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+  collect_json_async "[]" "$COLLECTION_DIR/private-dns-zones.json" \
+    az network private-dns zone list -o json
 fi
+
+for collection_pid in "${COLLECTION_PIDS[@]}"; do
+  wait "$collection_pid"
+done
+
+HAS_VNET=false
+[ -n "$VNET_SUBNET_ID" ] && HAS_VNET=true
+jq -n \
+  --arg cluster_name "$CLUSTER_NAME" \
+  --arg resource_group "$RESOURCE_GROUP" \
+  --arg node_resource_group "$NODE_RESOURCE_GROUP" \
+  --arg network_plugin "$NETWORK_PLUGIN" \
+  --arg network_policy "$NETWORK_POLICY" \
+  --arg timestamp "$TIMESTAMP" \
+  --argjson has_vnet "$HAS_VNET" \
+  --slurpfile vnet "$COLLECTION_DIR/vnet.json" \
+  --slurpfile subnets "$COLLECTION_DIR/subnets.json" \
+  --slurpfile node_subnet "$COLLECTION_DIR/node-subnet.json" \
+  --slurpfile nsgs "$COLLECTION_DIR/nsgs.json" \
+  --slurpfile route_tables "$COLLECTION_DIR/route-tables.json" \
+  --slurpfile load_balancers "$COLLECTION_DIR/load-balancers.json" \
+  --slurpfile public_ips "$COLLECTION_DIR/public-ips.json" \
+  --slurpfile vnet_peerings "$COLLECTION_DIR/vnet-peerings.json" \
+  --slurpfile private_dns_zones "$COLLECTION_DIR/private-dns-zones.json" \
+  '{
+    cluster: {
+      name: $cluster_name,
+      resourceGroup: $resource_group,
+      nodeResourceGroup: $node_resource_group,
+      networkPlugin: $network_plugin,
+      networkPolicy: $network_policy,
+      timestamp: $timestamp
+    },
+    vnet: $vnet[0],
+    subnets: $subnets[0],
+    nsgs: $nsgs[0],
+    routeTables: $route_tables[0],
+    loadBalancers: $load_balancers[0],
+    publicIPs: $public_ips[0],
+    vnetPeerings: $vnet_peerings[0],
+    privateDnsZones: $private_dns_zones[0]
+  } + if $has_vnet then {nodeSubnet: $node_subnet[0]} else {} end' \
+  > "$OUTPUT_FILE"
 
 echo ""
 echo "=== Azure Network Info Collection Complete ==="

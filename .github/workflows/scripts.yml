@@ -46,6 +46,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Run packet-capture injection regression test
         run: bash evals/tests/aks-network-capture/injection.test.sh
+      - name: Run Azure network inventory performance regression test
+        run: bash evals/tests/aks-network-capture/network-info.test.sh
 
   readiness-redaction-test:
     runs-on: ubuntu-latest
