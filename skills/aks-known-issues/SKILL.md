@@ -4,12 +4,6 @@ license: MIT
 metadata:
   author: Microsoft
   version: "0.1.0"
-  openclaw:
-    emoji: "🔖"
-    requires:
-      anyBins:
-        - az
-        - kubectl
 description: "Match exact AKS operation-failure signatures to documented causes and fixes. WHEN: an AKS create, scale, upgrade, node-image, or image-pull failure names VMCannotFitEphemeralOSDisk, LinkedAuthorizationFailed, NodePoolMcVersionIncompatible, 'NodeImageVersion is not accepted', SkuNotAvailable, ZonalAllocationFailed, OverconstrainedAllocationRequest, or an AKS vmssCSE/CSE nested signature: VMExtensionError_OutboundConnFail (exit 50), VMExtensionError_K8SAPIServerConnFail (exit 51), or VMExtensionError_K8SAPIServerDNSLookupFail (exit 52); also questions asking what a named AKS error means, and AllocationFailed only when its nested Azure message states internal error or insufficient capacity. DO NOT USE FOR: bare VMExtensionProvisioningError or AllocationFailed wrappers; numeric exit codes without AKS vmssCSE/CSE context; generic pod, node, DNS, ingress, timeout, SKU, capacity, or upgrade incidents without a cataloged signature (use aks-troubleshooting); non-AKS failures, which must not route to an AKS skill."
 ---
 

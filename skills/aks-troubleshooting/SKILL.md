@@ -4,12 +4,6 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.0.1"
-  openclaw:
-    emoji: "☸️"
-    requires:
-      anyBins:
-        - kubectl
-        - az
 description: "Debug and root-cause live Azure Kubernetes Service (AKS) incidents with a read-only, evidence-first investigation and structured report. WHEN: pod crashes or Pending, CrashLoopBackOff, OOMKilled, ImagePullBackOff, node NotReady, DNS failure, ingress 502/503, connectivity timeout, network policy, SNAT exhaustion, upgrade stuck, cordon/drain failure, spot or zone disruption, expired certificate, or 'investigate my AKS cluster'. DO NOT USE FOR: packet capture (use aks-network-capture); GPU or model-serving issues (use aks-gpu-inference); cluster creation or provisioning (use aks-cluster-setup); cost or rightsizing (use aks-cost-optimization); an exact documented AKS error code, nested VM-extension/CSE signature, or message-qualified allocation failure (use aks-known-issues). Bare wrappers or codes without the nested cataloged signature, generic failures without a stable signature, and open-ended incidents stay here."
 ---
 

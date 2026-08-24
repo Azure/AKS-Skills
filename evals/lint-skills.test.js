@@ -354,6 +354,38 @@ test('metadata fields out of declared order is an error', () => {
   });
 });
 
+test('string metadata extension is accepted', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const lines = validFrontMatterLines(name);
+    const descriptionIndex = lines.findIndex(line => line.startsWith('description: '));
+    lines.splice(descriptionIndex, 0, '  example-extension: "enabled"');
+    setupValidScenario(root, name, lines);
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+for (const metadataCase of [
+  { label: 'nested object', value: '{ nested: value }' },
+  { label: 'array', value: '[one, two]' },
+  { label: 'number', value: '42' },
+  { label: 'boolean', value: 'true' },
+  { label: 'null', value: 'null' },
+]) {
+  test(`metadata ${metadataCase.label} value is rejected`, () => {
+    withTempRoot((root) => {
+      const name = 'aks-fixture-skill';
+      const lines = validFrontMatterLines(name);
+      const descriptionIndex = lines.findIndex(line => line.startsWith('description: '));
+      lines.splice(descriptionIndex, 0, `  extension: ${metadataCase.value}`);
+      setupValidScenario(root, name, lines);
+      const { errors } = runLint(root);
+      assertHasError(errors, /metadata\.extension must be a string/);
+    });
+  });
+}
+
 test('malformed YAML front matter is an error', () => {
   withTempRoot((root) => {
     const name = 'aks-fixture-skill';

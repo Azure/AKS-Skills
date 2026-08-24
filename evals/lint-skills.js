@@ -501,6 +501,14 @@ function lintSkills({
         && fm.metadata[f] !== null && fm.metadata[f] !== undefined && fm.metadata[f] !== '';
       if (!hasMetaField('author')) addError(skillMdPath, 'Missing required field: metadata.author');
       if (!hasMetaField('version')) addError(skillMdPath, 'Missing required field: metadata.version');
+      for (const [key, value] of Object.entries(fm.metadata)) {
+        if (typeof value !== 'string') {
+          addError(
+            skillMdPath,
+            `metadata.${key} must be a string (Agent Skills metadata values are string-to-string)`,
+          );
+        }
+      }
     }
 
     // --- Declared ordering (contract §2) ---
