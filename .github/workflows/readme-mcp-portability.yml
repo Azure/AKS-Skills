@@ -12,6 +12,8 @@ on:
       - '.claude-plugin/**'
       - 'evals/lint-skills.js'
       - 'evals/lint-skills.test.js'
+      - 'evals/provider-setup.test.js'
+      - 'evals/package.json'
       - '.github/workflows/readme-mcp-portability.yml'
 
 permissions:
@@ -40,3 +42,4 @@ jobs:
         run: |
           node lint-skills.js
           node lint-skills.test.js
+          node provider-setup.test.js

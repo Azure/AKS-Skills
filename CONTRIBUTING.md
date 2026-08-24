@@ -19,6 +19,7 @@ Thanks for helping AKS customers operate their clusters. This repo is public and
 - Add the semantic ID to `providers/capabilities.yaml`; do not encode a provider or host alias in the ID.
 - Add a source-verified operation and input schema once in `providers/<provider>.yaml`, then reference it from a capability binding. Do not add approval, authorization, target, duration, namespace, redaction, or output-projection claims that the provider does not enforce.
 - Update the exact provenance/integrity pin and add positive and negative self-tests. Floating versions, fictional inputs, unsupported bindings, and fallback from authorization denial or context mismatch are rejected.
+- Keep operator-facing host configuration in `docs/provider-setup.md`. Do not duplicate setup snippets in skills or provider maps; update `evals/provider-setup.test.js` with every supported config shape or source boundary.
 
 ## Scripts
 
@@ -35,6 +36,7 @@ Scripts get extra scrutiny because they run against customer clusters:
 cd evals && npm ci
 node lint-skills.js                                 # front matter, coverage, coaching lint
 node lint-skills.test.js                            # contract linter self-test (fixture-based, no network)
+node provider-setup.test.js                         # host snippets, pins, boundaries, and links
 find ../skills -name '*.sh' -exec shellcheck -S warning {} +
 bash tests/aks-network-capture/injection.test.sh    # script security regression
 npm run eval && npm run eval:trigger                 # quality + routing (needs Azure OpenAI env)
