@@ -6,9 +6,8 @@
 // active scenario's fixture (resolved from the agent's cwd so each scenario is
 // auto-selected), and emit a canned response.
 //
-// Design invariant: an UNMATCHED command returns empty stdout + exit 0 (a bland
-// "nothing here") rather than an error, so a rabbit-holing agent's off-target
-// calls stay observable in the trajectory instead of crashing the run.
+// Missing or unmatched fixture evidence fails closed so an unsupported command
+// cannot masquerade as a successful tool call in the evaluated trajectory.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,24 +18,36 @@ const cmd = [tool, ...args].join(" ");
 // Prefer an explicit override (used by the custom-executor fallback); otherwise
 // resolve the fixture from `.mocks/responses.json` under the current workspace.
 const dir = process.env.VALLY_MOCK_DIR || join(process.cwd(), ".mocks");
+const fixturePath = join(dir, "responses.json");
+
+function fail(message) {
+  process.stderr.write(`${message}\n`);
+  process.exit(1);
+}
 
 let spec;
 try {
-  spec = JSON.parse(readFileSync(join(dir, "responses.json"), "utf8"));
-} catch {
-  process.exit(0); // no fixtures here → behave as a no-op
+  spec = JSON.parse(readFileSync(fixturePath, "utf8"));
+} catch (error) {
+  fail(`Unable to load mock responses from ${fixturePath}: ${error.message}`);
 }
 
-for (const r of spec.responses ?? []) {
-  // A non-string `match` would coerce in surprising ways (e.g. `undefined` →
-  // /(?:)/, which matches everything), so require an explicit string pattern.
-  if (typeof r.match !== "string") continue;
+if (!Array.isArray(spec.responses)) {
+  fail(`Mock responses in ${fixturePath} must contain a responses array`);
+}
+
+for (const [index, r] of spec.responses.entries()) {
+  if (typeof r?.match !== "string") {
+    fail(`Mock response ${index} in ${fixturePath} must define a string match`);
+  }
+
   let re;
   try {
     re = new RegExp(r.match);
-  } catch {
-    continue; // skip invalid regex so one bad fixture line can't crash the run
+  } catch (error) {
+    fail(`Invalid match in mock response ${index} from ${fixturePath}: ${error.message}`);
   }
+
   if (re.test(cmd)) {
     if (typeof r.stdout === "string") {
       process.stdout.write(r.stdout.endsWith("\n") ? r.stdout : r.stdout + "\n");
@@ -48,4 +59,4 @@ for (const r of spec.responses ?? []) {
   }
 }
 
-process.exit(0); // unmatched → empty success (observable, not an error)
+fail(`No mock response matched command: ${cmd}`);
