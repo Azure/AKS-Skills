@@ -21,9 +21,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const yaml = require('js-yaml');
 
-const { lintSkills, MAX_DESCRIPTION_CHARS } = require('./lint-skills.js');
+const { lintSkills, extractFrontMatterBlock, MAX_DESCRIPTION_CHARS } = require('./lint-skills.js');
 const LINTER = path.join(__dirname, 'lint-skills.js');
+const ASTRAL_CODE_POINT = '\u{1F680}';
 
 // --- Fixture helpers -------------------------------------------------------
 
@@ -95,6 +97,13 @@ function setupValidScenario(root, skillName = 'aks-fixture-skill', frontMatterLi
   writeSkill(root, skillName, lines);
   writeTests(root, skillName);
   writePromptfooConfig(root, [`file://tests/${skillName}/quality-tests.yaml`]);
+}
+
+function readParsedDescription(root, skillName) {
+  const skillPath = path.join(root, 'skills', skillName, 'SKILL.md');
+  const rawFrontMatter = extractFrontMatterBlock(fs.readFileSync(skillPath, 'utf8'));
+  assert.notEqual(rawFrontMatter, null, 'expected fixture to contain YAML front matter');
+  return yaml.load(rawFrontMatter).description;
 }
 
 function runLint(root, overrides = {}) {
@@ -540,6 +549,45 @@ test('description at 1025 characters is rejected', () => {
     const desc = `${'A'.repeat(MAX_DESCRIPTION_CHARS + 1 - base.length)}${base}`;
     assert.equal(desc.length, 1025);
     setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+    const { errors } = runLint(root);
+    assertHasError(
+      errors,
+      /description is 1025 characters, exceeds the contract's maximum of 1024 characters/,
+    );
+  });
+});
+
+test('description with exactly 1024 astral Unicode code points is accepted', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const base = validDescription();
+    const desc = `${ASTRAL_CODE_POINT.repeat(
+      MAX_DESCRIPTION_CHARS - Array.from(base).length,
+    )}${base}`;
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+
+    const parsedDescription = readParsedDescription(root, name);
+    assert.equal(Array.from(parsedDescription).length, 1024);
+    assert.ok(parsedDescription.length > MAX_DESCRIPTION_CHARS);
+
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('description with exactly 1025 astral Unicode code points is rejected', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const base = validDescription();
+    const desc = `${ASTRAL_CODE_POINT.repeat(
+      MAX_DESCRIPTION_CHARS + 1 - Array.from(base).length,
+    )}${base}`;
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+
+    const parsedDescription = readParsedDescription(root, name);
+    assert.equal(Array.from(parsedDescription).length, 1025);
+    assert.ok(parsedDescription.length > MAX_DESCRIPTION_CHARS + 1);
+
     const { errors } = runLint(root);
     assertHasError(
       errors,

@@ -558,11 +558,12 @@ function lintSkills({
         addError(skillMdPath, 'description must be a string');
       } else {
         const desc = fm.description;
+        const descriptionLength = Array.from(desc).length;
 
-        if (desc.length > MAX_DESCRIPTION_CHARS) {
+        if (descriptionLength > MAX_DESCRIPTION_CHARS) {
           addError(
             skillMdPath,
-            `description is ${desc.length} characters, exceeds the contract's maximum of ${MAX_DESCRIPTION_CHARS} characters (contract §2 "Budget")`,
+            `description is ${descriptionLength} characters, exceeds the contract's maximum of ${MAX_DESCRIPTION_CHARS} characters (contract §2 "Budget")`,
           );
         }
 
