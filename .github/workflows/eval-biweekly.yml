@@ -1,0 +1,116 @@
+name: Biweekly Eval Report
+
+# Runs the eval suite on a schedule, generates a committable trend report via
+# scripts/generate-report.mjs, and opens a PR with the result for human review.
+# Tier-1 (public) reporting only: derived entirely from the repo's own skills +
+# committed evals. No ICM / incident data is involved here.
+#
+# Cadence: 1st and 15th of each month (~biweekly). GitHub cron has no native
+# "every two weeks", so 1,15 is the standard approximation.
+# Cost note: makes real LLM calls (same AZURE_OPENAI_* / OPENAI_API_KEY secrets
+# as skill-eval.yml). Trigger manually with "Run workflow" to validate.
+
+on:
+  schedule:
+    - cron: '0 6 1,15 * *'   # 06:00 UTC on the 1st and 15th
+  workflow_dispatch: {}
+
+permissions:
+  contents: write            # push the report branch (PR opened manually)
+
+concurrency:
+  group: biweekly-eval-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: evals/package-lock.json
+
+      - name: Install dependencies
+        working-directory: evals
+        run: npm ci
+
+      - name: Cache promptfoo results
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/promptfoo
+          key: ${{ runner.os }}-promptfoo-v1
+          restore-keys: |
+            ${{ runner.os }}-promptfoo-
+
+      # Produce the artifacts generate-report.mjs consumes. Non-blocking: a report
+      # should still render even if a suite errors (the report buckets failures).
+      - name: Run quality evals
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx promptfoo eval -o results.json --no-progress-bar || true
+
+      - name: Run routing evals
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx promptfoo eval -c promptfoo-routing.yaml -o routing-results.json --no-progress-bar || true
+
+      - name: Run baseline comparison
+        working-directory: evals
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar || true
+
+      - name: Generate report
+        working-directory: evals
+        env:
+          EVAL_MODEL: ${{ vars.EVAL_MODEL || 'gpt-5' }}
+          JUDGE_MODEL: ${{ vars.JUDGE_MODEL || vars.EVAL_MODEL || 'gpt-5' }}
+        run: npm run report -- --type biweekly
+
+      # Org policy blocks GITHUB_TOKEN from creating PRs, so we push a branch and
+      # surface a one-click compare link; a maintainer opens + merges the PR.
+      - name: Push report branch
+        id: push
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y-%m-%d)
+          BRANCH="report/biweekly-${DATE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add evals/history/
+          if git diff --cached --quiet; then
+            echo "No report changes to commit — skipping push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "chore(report): biweekly eval report ${DATE}"
+          git push -u origin "$BRANCH"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          COMPARE="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${BRANCH}?expand=1"
+          {
+            echo "### Biweekly eval report ready"
+            echo ""
+            echo "Open a PR: [$BRANCH]($COMPARE)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: biweekly-eval-report
+          path: evals/history/
+          if-no-files-found: warn
