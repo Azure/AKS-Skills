@@ -8,11 +8,11 @@ Automated quality and routing checks for AKS skills. Runs on every PR that touch
 - **Quality eval** — sends test prompts to the model with the skill loaded, then grades the response with `icontains` and `g-eval` assertions.
 - **Trigger eval** — asks the model which skill should handle a query (router-provider), asserts with deterministic `equals`.
 - **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
-- **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the skill available, and grades the trajectory. Two tiers:
-  - `tier: smoke` — fast routing gate: did the agent invoke the right skill (`skill-invocation`) and finish without crashing (`output-not-matches`). No cluster, cheap.
-  - `tier: mock` — full investigation against a **fake-broken cluster**: `az`/`kubectl` are intercepted by shims that return canned fixtures, so the agent investigates a real fault with no live Azure resources. Grades the actual trajectory — required vs. disallowed tool calls (`tool-calls`), call budget (`tool-call-count`), and root-cause correctness via an LLM judge (`prompt` rubric).
+- **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the full AKS skill pool available, and grades the trajectory. Two tiers:
+  - `tier: smoke` — competitive routing check: did the agent invoke the required skill, avoid the colliding skill (`skill-invocation`), and finish without crashing (`output-not-matches`)? No cluster.
+  - `tier: mock` — investigation against a **canned cluster substrate**: `az`/`kubectl` are intercepted by shims that return fixtures, so the eval can grade required/disallowed tool calls and root-cause reasoning without live Azure resources. It proves trajectory behavior against those fixtures, not live AKS success.
 
-  Uses the GitHub Copilot CLI, not Azure OpenAI.
+  Uses the GitHub Copilot CLI, not Azure OpenAI. Agentic specs omit eval-level score thresholds so every configured grader must pass; a hard trajectory violation produces a non-zero process exit.
 
 ## Quick start
 
@@ -44,8 +44,8 @@ npm install -g @github/copilot   # one-time, cross-platform (macOS/Linux/Windows
 copilot                          # launch the CLI, then run /login inside it for one-time auth
 
 npm run lint:agentic                                                          # validate all eval.yaml specs (instant, no auth)
-npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml --tag tier=smoke  # one skill, routing tier only
-npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml                   # one skill, all tiers
+npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml --tag tier=smoke  # one spec, routing tier only
+npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml                   # one spec, all tiers
 npm run eval:mock                                                             # all mock-tier investigations (all skills)
 ```
 
@@ -58,8 +58,9 @@ Pass the skill's spec path with `--eval-spec`; add `--tag tier=smoke` for the fa
 The mock tier proves the agent can *investigate*, not just route — without any live Azure resources. It works by intercepting the agent's shell calls:
 
 - `evals/mocks/bin/{az,kubectl}` are shims placed first on `PATH` (the `eval:mock` script prepends `$PWD/mocks/bin`). They forward to `evals/mocks/lib/dispatch.mjs`.
-- The dispatcher reads `.mocks/responses.json` from the scenario's working dir, matches the full command line against an ordered regex table, and returns the canned `stdout`/`stderr`/`exit`. Unmatched commands return empty with exit 0 — so the agent *can* wander, and that wandering stays visible in the trajectory.
+- The dispatcher reads `.mocks/responses.json` from the scenario's working dir, matches the full command line against an ordered regex table, and returns the canned `stdout`/`stderr`/`exit`. Missing or malformed fixtures and unmatched commands fail non-zero, so absent canned evidence cannot masquerade as a successful tool call.
 - Each scenario lives at `evals/scenarios/<skill>/<fault>/responses.json` and is mounted into the run via the stimulus's `environment.files` (`dest: .mocks/responses.json`). Fixtures encode one real fault plus healthy *distractors* so the agent must reach the true root cause instead of stopping at the first red herring.
+- Mock results must be described as canned-substrate trajectory evidence. Live packet-capture behavior requires `evals/tests/aks-network-capture/smoke-live-cluster.sh`.
 
 ## Environment variables
 
@@ -128,7 +129,7 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
 ```
 
 3. Add quality tests to `promptfooconfig.yaml` under `tests:`. Trigger tests are auto-discovered via glob (`file://tests/*/trigger-tests.yaml`).
-4. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the skill and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
+4. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the full competing skill pool and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
 
 ```yaml
 # eval.yaml — does the agent invoke the skill and respond well?
@@ -136,25 +137,23 @@ name: <your-skill-name>-agentic-eval
 environment:
   skills:
     - ../../../skills/<your-skill-name>
+    - ../../../skills/<colliding-skill-name>
 defaults:
   runs: 1
-  timeout: "5m"
   executor: copilot-sdk
   model: claude-sonnet-4.6
-scoring:
-  threshold: 0.8
 stimuli:
   - name: "Routing: <scenario>"
     prompt: "A user question that should route to this skill"
     tags: { tier: smoke, area: routing }
     graders:
       - type: skill-invocation
-        config: { required: [<your-skill-name>] }
-    constraints:
-      expect_skills: [<your-skill-name>]
+        config:
+          required: [<your-skill-name>]
+          disallowed: [<colliding-skill-name>]
 ```
 
-For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade the trajectory with `tool-calls` (required + disallowed), `tool-call-count`, and a `prompt` rubric. See `tests/aks-troubleshooting/eval.yaml` for a complete example.
+For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade both skill invocation and required/disallowed tool calls. Add a call, token, turn, or time limit only when an existing product or platform contract supplies that exact value. See `tests/aks-troubleshooting/eval.yaml` for complete examples.
 
 ## Autogen — draft eval coverage from a SKILL.md
 
@@ -206,7 +205,7 @@ Then review, rename the `.autogen.yaml` files into the curated `quality-tests.ya
 | `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (loads SKILL.md) | `icontains`, `g-eval` | No (advisory — retries 2x, reports only) |
 | `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | No (advisory — reports only) |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
-| `tests/<skill>/eval.yaml` | Agentic — real agent routes to skill (smoke) + investigates a fake-broken cluster (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `tool-call-count`, `prompt`, `output-matches` | No (run manually) |
+| `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `prompt`, `output-matches` | Manual; failed graders exit non-zero |
 
 ## Assertion types
 
