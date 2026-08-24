@@ -4,6 +4,11 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.1.0"
+  capabilities:
+    - id: azure.aks.cluster.read
+      mode: live-only
+    - id: kubernetes.resources.read
+      mode: live-only
 description: "Assess Kubernetes workloads and cluster configuration for AKS Automatic compatibility. Identifies incompatibilities, generates fixes, and guides migration from AKS Standard to AKS Automatic. WHEN: migrate to AKS Automatic, check AKS Automatic readiness, validate manifests for Automatic, assess cluster for Automatic compatibility, fix deployment for Automatic compatibility, identify AKS Automatic migration blockers, is my cluster ready for AKS Automatic. DO NOT USE FOR: creating a brand-new cluster (use aks-cluster-setup); debugging a running cluster (use aks-troubleshooting)."
 ---
 

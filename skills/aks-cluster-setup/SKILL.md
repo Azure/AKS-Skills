@@ -4,6 +4,7 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.0.0"
+  capabilities: []
 description: "Make the AKS-specific design decisions for a new production Azure Kubernetes Service (AKS) cluster — SKU (Automatic vs Standard), pod IP model (Azure CNI Overlay vs kubenet), API-server access, egress, identity, upgrades, node pools, and reliability — then delegate the actual provisioning to the Azure Skills deployment engine. WHEN: create AKS cluster, provision AKS environment, design AKS networking, choose AKS SKU, Day-0 AKS checklist, plan a production AKS cluster. DO NOT USE FOR: debugging a running cluster (use aks-troubleshooting); assessing an existing cluster for AKS Automatic (use aks-automatic-readiness); GPU / model-serving setup (see azure-skills airunway-aks-setup); generic non-AKS Azure resource deployment (use azure-skills azure-deploy directly)."
 ---
 
