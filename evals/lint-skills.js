@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Skill Contract Linter — validates SKILL.md against docs/skill-contract.md.
+ * Skill Contract Linter — validates registered skill bundles against docs/skill-contract.md.
  * Uses js-yaml for front-matter parsing and Git for index-mode checks.
  *
  * Checks (see docs/skill-contract.md for the authoritative rule):
@@ -19,6 +19,8 @@
  * 11. every script-shaped file in scripts/ has a valid shebang and Git mode 100755
  * 12. internal file references in SKILL.md resolve to real files
  * 13. shipped guidance preserves Azure MCP host portability and product boundaries
+ * 14. non-SKILL Markdown over 100 lines starts its topic sections with a TOC
+ * 15. Markdown commands avoid interactive TTY flags and execute only digest-pinned MCR images
  *
  * Usage:
  *   node lint-skills.js [skills-dir]
@@ -48,6 +50,10 @@ const REQUIRED_METADATA_ORDER = ['author', 'version'];
 const REQUIRED_TOP_LEVEL_FIELDS = ['name', 'license', 'metadata', 'description'];
 const VALID_SHEBANG_RE = /^#!\/\S+(?:\s+.*)?$/;
 const SCRIPT_EXTENSIONS = new Set(['.sh', '.py']);
+const MAX_REFERENCE_LINES_WITHOUT_TOC = 100;
+const COMMAND_NAME_RE = /\b(?:kubectl|docker|podman|nerdctl)\b/;
+const INTERACTIVE_TTY_FLAG_RE = /(?:^|\s)(?:-(?:it|ti)|--(?:interactive|tty)(?:=\S+)?)(?=\s|$)/;
+const MCR_DIGEST_IMAGE_RE = /^mcr\.microsoft\.com\/[A-Za-z0-9._/-]+(?::[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
 const HARDCODED_AZURE_MCP_NAME_RE = /\bmcp_azure_mcp_[A-Za-z0-9_]+\b/i;
 const AKS_MCP_PRODUCT_NAME_RE = /\bAKS[- ]MCP\b/i;
 const EXPLICIT_AKS_MCP_PRODUCT_RE = /\bAzure\/aks-mcp\b/i;
@@ -216,6 +222,167 @@ function findMarkdownFiles(target) {
     if (entry.isDirectory()) return findMarkdownFiles(child);
     return entry.isFile() && entry.name.endsWith('.md') ? [child] : [];
   });
+}
+
+function countTextLines(content) {
+  if (content === '') return 0;
+  const lines = content.split('\n');
+  return content.endsWith('\n') ? lines.length - 1 : lines.length;
+}
+
+function hasLeadingContentsSection(content) {
+  for (const line of content.split('\n')) {
+    const heading = line.match(/^#{2,6}\s+(.+?)\s*#*\s*$/);
+    if (!heading) continue;
+    return /^(?:Contents|Table of contents)$/i.test(heading[1]);
+  }
+  return false;
+}
+
+/**
+ * Extract command-bearing Markdown snippets without treating passive prose or
+ * manifest image fields as executable shell commands.
+ */
+function extractMarkdownCommandSnippets(content) {
+  const snippets = [];
+  const lines = content.split('\n');
+  let fence = null;
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (fence) {
+      const closing = new RegExp(`^\\s{0,3}\\${fence.marker}{${fence.length},}\\s*$`);
+      if (closing.test(line)) {
+        snippets.push({ text: fence.lines.join('\n'), line: fence.startLine });
+        fence = null;
+      } else {
+        fence.lines.push(line);
+      }
+      continue;
+    }
+
+    const opening = line.match(/^\s{0,3}(`{3,}|~{3,})[^`~]*$/);
+    if (opening) {
+      fence = {
+        marker: opening[1][0],
+        length: opening[1].length,
+        startLine: index + 2,
+        lines: [],
+      };
+      continue;
+    }
+
+    const inlineCode = /`([^`\n]+)`/g;
+    let inlineMatch;
+    while ((inlineMatch = inlineCode.exec(line)) !== null) {
+      if (COMMAND_NAME_RE.test(inlineMatch[1])) {
+        snippets.push({ text: inlineMatch[1], line: index + 1 });
+      }
+    }
+
+    const bareCommand = line.replace(/^\s*(?:>\s*)?(?:[-*+]\s+)?(?:\$\s*)?/, '');
+    if (/^(?:sudo\s+)?(?:kubectl|docker|podman|nerdctl)\b/.test(bareCommand)) {
+      snippets.push({ text: bareCommand, line: index + 1 });
+    }
+  }
+
+  return {
+    snippets,
+    unterminatedFenceLine: fence ? fence.startLine - 1 : null,
+  };
+}
+
+function extractImageArguments(command) {
+  const images = [];
+  const imageFlag = /--image(?:(=)|\s+)/g;
+  let match;
+
+  while ((match = imageFlag.exec(command)) !== null) {
+    let cursor = imageFlag.lastIndex;
+    while (cursor < command.length && /\s/.test(command[cursor])) cursor++;
+    if (cursor >= command.length) return { images, malformed: true };
+
+    const quote = command[cursor] === '"' || command[cursor] === "'" ? command[cursor] : null;
+    if (quote) {
+      const end = command.indexOf(quote, cursor + 1);
+      if (end === -1) return { images, malformed: true };
+      images.push(command.slice(cursor + 1, end));
+      imageFlag.lastIndex = end + 1;
+      continue;
+    }
+
+    const token = command.slice(cursor).match(/^[^\s\\]+/);
+    if (!token) return { images, malformed: true };
+    images.push(token[0]);
+    imageFlag.lastIndex = cursor + token[0].length;
+  }
+
+  return { images, malformed: false };
+}
+
+function tokenizeShellWords(command) {
+  const words = [];
+  let word = '';
+  let quote = null;
+  let escaped = false;
+
+  for (const char of command) {
+    if (escaped) {
+      word += char;
+      escaped = false;
+    } else if (char === '\\' && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = null;
+      else word += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (/\s/.test(char)) {
+      if (word !== '') {
+        words.push(word);
+        word = '';
+      }
+    } else {
+      word += char;
+    }
+  }
+
+  if (escaped || quote) return null;
+  if (word !== '') words.push(word);
+  return words;
+}
+
+function extractRuntimeImage(command) {
+  const runtime = command.match(/\b(?:docker|podman|nerdctl)\s+run\b(.*)$/);
+  if (!runtime) return { image: null, malformed: false };
+
+  const words = tokenizeShellWords(runtime[1]);
+  if (!words) return { image: null, malformed: true };
+  const booleanOptions = new Set([
+    '--detach',
+    '--disable-content-trust',
+    '--init',
+    '--oom-kill-disable',
+    '--privileged',
+    '--read-only',
+    '--rm',
+    '--sig-proxy',
+  ]);
+
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index];
+    if (word === '--') {
+      return words[index + 1]
+        ? { image: words[index + 1], malformed: false }
+        : { image: null, malformed: true };
+    }
+    if (booleanOptions.has(word) || /^-[d]+$/.test(word)) continue;
+    if (word.startsWith('--') && word.includes('=')) continue;
+    if (word.startsWith('-')) return { image: null, malformed: true };
+    return { image: word, malformed: false };
+  }
+
+  return { image: null, malformed: true };
 }
 
 function checkAzureMcpGuidanceContract(skillsDir, addError) {
@@ -464,6 +631,78 @@ function lintSkills({
     }
   }
 
+  function checkBundleMarkdown(skillDir) {
+    for (const filePath of findMarkdownFiles(skillDir).sort()) {
+      const content = readText(filePath);
+      if (path.basename(filePath) !== 'SKILL.md'
+        && countTextLines(content) > MAX_REFERENCE_LINES_WITHOUT_TOC
+        && !hasLeadingContentsSection(content)) {
+        addError(
+          filePath,
+          `Markdown reference is longer than ${MAX_REFERENCE_LINES_WITHOUT_TOC} lines and must place a Contents or Table of contents section before its topic sections (contract §3)`,
+        );
+      }
+
+      const { snippets, unterminatedFenceLine } = extractMarkdownCommandSnippets(content);
+      if (unterminatedFenceLine !== null) {
+        addError(
+          filePath,
+          `line ${unterminatedFenceLine} starts an unterminated fenced code block; command safety cannot be verified (contract §4)`,
+        );
+      }
+
+      for (const snippet of snippets) {
+        const commandLines = snippet.text
+          .split('\n')
+          .filter(line => !/^\s*#/.test(line))
+          .join('\n')
+          .replace(/\\\s*\n\s*/g, ' ')
+          .split('\n');
+
+        for (const [offset, rawCommand] of commandLines.entries()) {
+          if (!COMMAND_NAME_RE.test(rawCommand)) continue;
+          const command = rawCommand.trim();
+          const optionSegment = command.split(/\s+--\s+/, 1)[0];
+
+          if (INTERACTIVE_TTY_FLAG_RE.test(optionSegment)) {
+            addError(
+              filePath,
+              `line ${snippet.line + offset} uses an interactive TTY flag in an agent-run Markdown command (contract §4)`,
+            );
+          }
+
+          let images = [];
+          let malformed = false;
+          const executesKubectlImage = /\bkubectl\b.*\b(?:run|debug)\b/.test(optionSegment);
+          if (executesKubectlImage && /--image(?:=|\s|$)/.test(optionSegment)) {
+            ({ images, malformed } = extractImageArguments(optionSegment));
+          }
+
+          const runtimeImage = extractRuntimeImage(optionSegment);
+          if (runtimeImage.malformed) malformed = true;
+          if (runtimeImage.image) images.push(runtimeImage.image);
+
+          if (malformed) {
+            addError(
+              filePath,
+              `line ${snippet.line + offset} has a malformed executable image argument; command safety cannot be verified (contract §4)`,
+            );
+            continue;
+          }
+
+          for (const image of images) {
+            if (!MCR_DIGEST_IMAGE_RE.test(image)) {
+              addError(
+                filePath,
+                `line ${snippet.line + offset} executes container image "${image}"; executable images must be MCR-hosted and pinned by sha256 digest (contract §4)`,
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
   /**
    * Check that file references in SKILL.md (backtick-quoted paths) actually exist.
    */
@@ -510,6 +749,7 @@ function lintSkills({
     const folderName = path.basename(skillDir);
 
     const content = readText(skillMdPath);
+    checkBundleMarkdown(skillDir);
     const rawFrontMatter = extractFrontMatterBlock(content);
 
     if (rawFrontMatter === null) {
@@ -705,6 +945,7 @@ module.exports = {
   EXPECTED_LICENSE,
   EXPECTED_AUTHOR,
   MAX_DESCRIPTION_CHARS,
+  MAX_REFERENCE_LINES_WITHOUT_TOC,
   SEMVER_RE,
   REQUIRED_TOP_LEVEL_ORDER,
   REQUIRED_METADATA_ORDER,

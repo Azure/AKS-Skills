@@ -22,7 +22,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { lintSkills, MAX_DESCRIPTION_CHARS } = require('./lint-skills.js');
+const {
+  lintSkills,
+  MAX_DESCRIPTION_CHARS,
+  MAX_REFERENCE_LINES_WITHOUT_TOC,
+} = require('./lint-skills.js');
 const LINTER = path.join(__dirname, 'lint-skills.js');
 
 // --- Fixture helpers -------------------------------------------------------
@@ -87,6 +91,23 @@ function writeTests(root, skillName, overrides = {}) {
 function writePromptfooConfig(root, testEntries) {
   const body = ['tests:', ...testEntries.map(e => `  - ${e}`), ''].join('\n');
   fs.writeFileSync(path.join(root, 'promptfooconfig.yaml'), body);
+}
+
+function writeSkillMarkdown(root, skillName, relativePath, content) {
+  const filePath = path.join(root, 'skills', skillName, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+  return filePath;
+}
+
+function referenceWithExactLineCount(lineCount, { withContents = false } = {}) {
+  const lines = ['# Fixture Reference', '', 'Fixture introduction.'];
+  if (withContents) {
+    lines.push('', '## Contents', '', '- [Details](#details)', '', '## Details');
+  }
+  while (lines.length < lineCount) lines.push(`Reference line ${lines.length + 1}.`);
+  assert.equal(lines.length, lineCount);
+  return lines.join('\n');
 }
 
 /** Sets up a fully valid single-skill fixture tree (skill + tests + wiring). */
@@ -223,6 +244,10 @@ test('CRLF fixtures produce the same errors and warnings as LF fixtures', () => 
     const skillName = 'aks-fixture-skill';
     fs.appendFileSync(path.join(lfRoot, 'skills', skillName, 'SKILL.md'), 'Be concise when answering.\n');
     fs.appendFileSync(path.join(crlfRoot, 'skills', skillName, 'SKILL.md'), 'Be concise when answering.\n');
+    const reference = `${referenceWithExactLineCount(MAX_REFERENCE_LINES_WITHOUT_TOC + 1)}\n`
+      + '```bash\nkubectl exec -it fixture-pod -- printenv\n```\n';
+    writeSkillMarkdown(lfRoot, skillName, 'references/parity.md', reference);
+    writeSkillMarkdown(crlfRoot, skillName, 'references/parity.md', reference);
     rewriteTreeEol(crlfRoot, '\r\n');
 
     assert.deepEqual(runLint(crlfRoot), runLint(lfRoot));
@@ -717,6 +742,147 @@ test('missing Git executable reports that index mode cannot be verified', () => 
     });
     assert.deepEqual(errors, []);
     assertHasWarning(warnings, /Git executable is unavailable/);
+  });
+});
+
+// --- Complete-bundle Markdown contract --------------------------------------
+
+test('non-SKILL Markdown at exactly 100 lines does not require a TOC', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/exactly-100.md',
+      referenceWithExactLineCount(MAX_REFERENCE_LINES_WITHOUT_TOC),
+    );
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('non-SKILL Markdown at 101 lines without a TOC is an error', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/over-100.md',
+      referenceWithExactLineCount(MAX_REFERENCE_LINES_WITHOUT_TOC + 1),
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /longer than 100 lines.*Contents or Table of contents/);
+  });
+});
+
+test('non-SKILL Markdown at 101 lines with a leading Contents section passes', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/over-100.md',
+      referenceWithExactLineCount(MAX_REFERENCE_LINES_WITHOUT_TOC + 1, { withContents: true }),
+    );
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('interactive TTY flags in nested skill Markdown commands are errors', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/commands.md',
+      '```bash\nkubectl exec -it fixture-pod -- printenv\n```\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /interactive TTY flag/);
+  });
+});
+
+test('tag-only MCR images in executable Markdown commands are errors', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/commands.md',
+      '```bash\nkubectl debug node/fixture --image=mcr.microsoft.com/cbl-mariner/base/core:2.0 -- true\n```\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /executes container image "mcr\.microsoft\.com.*:2\.0".*pinned by sha256 digest/);
+  });
+});
+
+test('Docker Hub images in executable Markdown commands are errors', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/commands.md',
+      '```bash\ndocker run --rm busybox:1.36 true\n```\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /executes container image "busybox:1\.36".*MCR-hosted/);
+  });
+});
+
+test('digest-pinned MCR images in executable Markdown commands pass', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/commands.md',
+      '```bash\n'
+        + 'kubectl debug node/fixture '
+        + '--image=mcr.microsoft.com/cbl-mariner/base/core@sha256:c833841d2dcfd3081d2ee807050d19368854f70d9b6faef027463e2c6f45ee41 '
+        + '-- true\n'
+        + '```\n',
+    );
+    const { errors } = runLint(root);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('malformed executable image arguments fail closed', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/commands.md',
+      '```bash\nkubectl run fixture --image=\n```\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /malformed executable image argument/);
+  });
+});
+
+test('unterminated Markdown command fences fail closed', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    writeSkillMarkdown(
+      root,
+      name,
+      'references/commands.md',
+      '```bash\nkubectl get pods\n',
+    );
+    const { errors } = runLint(root);
+    assertHasError(errors, /unterminated fenced code block/);
   });
 });
 

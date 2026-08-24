@@ -1,5 +1,12 @@
 # Node & Cluster Troubleshooting
 
+## Contents
+
+- [Node NotReady](#node-notready)
+- [Node Pool Not Scaling](#node-pool-not-scaling)
+- [Resource Pressure & Capacity Planning](#resource-pressure--capacity-planning)
+- [Detailed Node And Cluster Guides](#detailed-node-and-cluster-guides)
+
 ## Node NotReady
 
 **Diagnostics:**
@@ -27,12 +34,10 @@ kubectl describe node <node-name>
 > ⚠️ **Warning:** `kubectl debug node/...` creates a privileged debug pod on the node and is not a read-only diagnostic step. Default to read-only evidence gathering first. Only suggest or run this after the user explicitly asks for remediation or approves a privileged diagnostic action and understands the change-control impact.
 
 ```bash
-# Create a privileged debug pod on the node
-kubectl debug node/<node-name> -it --image=mcr.microsoft.com/cbl-mariner/base/core:2.0
-
-# Check kubelet status inside the node
-chroot /host systemctl status kubelet
-chroot /host journalctl -u kubelet -n 50
+# Create a privileged debug pod and capture kubelet status noninteractively
+kubectl debug node/<node-name> --profile=sysadmin --attach --quiet \
+  --image=mcr.microsoft.com/cbl-mariner/base/core@sha256:c833841d2dcfd3081d2ee807050d19368854f70d9b6faef027463e2c6f45ee41 -- \
+  chroot /host sh -c 'systemctl status kubelet; journalctl -u kubelet -n 50'
 ```
 
 **Optional remediation if kubelet can't recover (after confirmation):** cordon -> drain -> delete. AKS auto-replaces via node pool VMSS.
@@ -98,9 +103,13 @@ See [AKS resource reservations](https://learn.microsoft.com/azure/aks/concepts-c
 
 **Ephemeral storage pressure:**
 
+> ⚠️ **Warning:** The following command creates a privileged debug pod. Only run it after the user explicitly approves the diagnostic action and understands the change-control impact.
+
 ```bash
-# Check what's consuming ephemeral storage on a node
-kubectl debug node/<node> -it --image=mcr.microsoft.com/cbl-mariner/base/core:2.0
+# Capture the largest container-log paths without opening an interactive shell
+kubectl debug node/<node> --profile=sysadmin --attach --quiet \
+  --image=mcr.microsoft.com/cbl-mariner/base/core@sha256:c833841d2dcfd3081d2ee807050d19368854f70d9b6faef027463e2c6f45ee41 -- \
+  chroot /host sh -c 'du -x -h /var/log/containers/*' | sort -h | tail -20
 ```
 
 Common culprit: high-volume container logs accumulating in `/var/log/containers`.

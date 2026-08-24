@@ -2,6 +2,16 @@
 
 Use Inspektor Gadget for real-time, low-level node/pod diagnostics when `kubectl` is insufficient.
 
+## Contents
+
+- [IG Version](#ig-version)
+- [Base Command Pattern](#base-command-pattern)
+- [Common Filters](#common-filters)
+- [Gadget Catalog](#gadget-catalog)
+- [Symptom-to-Gadget Map](#symptom-to-gadget-map)
+- [Gadget Type Reference](#gadget-type-reference)
+- [Guardrails](#guardrails)
+
 ## IG Version
 
 `<ig-version>` = `v0.51.0` — substitute this exact tag (with `v` prefix) wherever `<ig-version>` appears. Bump this line only.
@@ -10,7 +20,7 @@ Use Inspektor Gadget for real-time, low-level node/pod diagnostics when `kubectl
 
 ```bash
 kubectl debug --profile=sysadmin node/<node-name> --attach --quiet \
-  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig:<ig-version> \
+  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig@sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4 \
   -- ig run <gadget>:<ig-version> -o json --timeout <seconds> [filters...]
 ```
 
@@ -61,7 +71,7 @@ Outputs raw pcap-ng data. Pipe to `tcpdump` for readable output:
 
 ```bash
 kubectl debug --profile=sysadmin node/<node-name> --attach --quiet \
-  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig:<ig-version> \
+  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig@sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4 \
   -- ig run tcpdump:<ig-version> -o pcap-ng --k8s-namespace <ns> --k8s-podname <pod> \
      --timeout 30 --pf "port 80" \
   | tcpdump -nvr -

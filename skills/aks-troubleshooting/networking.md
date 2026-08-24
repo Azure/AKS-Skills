@@ -11,10 +11,8 @@ For CNI-specific issues, check CNI pod health and review [AKS networking concept
 kubectl get svc <service-name> -n <ns>
 kubectl get endpoints <service-name> -n <ns>
 
-# 2. Optional connectivity test from inside the namespace
-# This creates a temporary pod. Prefer read-only checks first.
-# Only use it after the user explicitly approves a mutating test.
-kubectl run netdebug --image=curlimages/curl -it --rm -n <ns> -- \
+# 2. Optional connectivity test from an existing pod that already has curl
+kubectl exec -n <ns> <existing-pod> -- \
   curl -sv http://<service>.<ns>.svc.cluster.local:<port>/healthz
 ```
 
@@ -46,15 +44,15 @@ See [references/inspektor-gadget.md](references/inspektor-gadget.md).
 
 **Diagnostics:**
 
-The live DNS test creates a temporary pod. Prefer `get`, `describe`, `logs`, or `exec` into an existing pod first. Only use it after the user explicitly approves creating the test pod.
+Prefer `get`, `describe`, and `logs`, then use an existing pod that already has `nslookup` if a live DNS query is necessary.
 
 ```bash
 # Confirm CoreDNS is running and healthy (read-only)
 kubectl get pods -n kube-system -l k8s-app=kube-dns -o wide
 kubectl top pod -n kube-system -l k8s-app=kube-dns
 
-# Optional live DNS test from the same namespace as the failing pod
-kubectl run dnstest --image=busybox:1.28 -it --rm -n <ns> -- \
+# Optional live DNS test from an existing pod in the failing namespace
+kubectl exec -n <ns> <existing-pod> -- \
   nslookup <service-name>.<ns>.svc.cluster.local
 
 # CoreDNS logs - errors show here first

@@ -2,6 +2,15 @@
 
 Recommend and create Spot VM node pools for batch, dev/test, or fault-tolerant workloads (60-90% cost reduction vs regular nodes).
 
+## Contents
+
+- [Check Existing Node Pools](#check-existing-node-pools)
+- [Identify Spot-Suitable Workloads](#identify-spot-suitable-workloads)
+- [Mixed Node Pool Pattern](#mixed-node-pool-pattern-spot--regular)
+- [Workload Toleration and Preference](#workload-toleration-and-preference-add-to-deployment-yaml)
+- [Suitability](#suitability)
+- [Handling Eviction Gracefully](#handling-eviction-gracefully)
+
 ## Check Existing Node Pools
 
 ```bash

@@ -4,6 +4,15 @@ Loaded when discovering Azure MCP capabilities, collecting live cluster metadata
 
 Azure MCP Server is the `@azure/mcp` package configured by this repository. The **AKS MCP server** is the separate `Azure/aks-mcp` product and is not configured or supported here; do not apply its Kubernetes tools or `--access-level` behavior to Azure MCP Server.
 
+## Contents
+
+- [Capability Discovery](#capability-discovery)
+- [Role in Readiness Assessment](#role-in-readiness-assessment)
+- [Fallback Chain](#fallback-chain)
+- [Azure SRE Agent](#azure-sre-agent)
+- [Other Hosts](#other-hosts)
+- [Common Errors](#common-errors)
+
 ---
 
 ## Capability Discovery

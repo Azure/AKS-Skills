@@ -48,10 +48,8 @@ Also: `az aks stop` / `az aks start` is **not fully supported** with active KAIT
 Test the endpoint once ready:
 
 ```bash
-SERVICE_IP=$(kubectl get svc <name> -o jsonpath='{.spec.clusterIP}')
-kubectl run -it --rm --restart=Never curl --image=curlimages/curl -- \
-  curl -X POST http://$SERVICE_IP/v1/completions -H 'Content-Type: application/json' \
-  -d '{"model":"<model>","prompt":"hi","max_tokens":10}'
+kubectl exec <workspace-pod> -- python3 -c \
+  'import json, urllib.request; data=json.dumps({"model":"<model>","prompt":"hi","max_tokens":10}).encode(); request=urllib.request.Request("http://127.0.0.1:<port>/v1/completions", data=data, headers={"Content-Type":"application/json"}); print(urllib.request.urlopen(request).read().decode())'
 ```
 
 Limitations to remember: Windows and Azure Linux node OS SKUs are unsupported as KAITO Workspace nodes; AMD GPU SKUs are not valid `instanceType`s; the add-on runs in public Azure regions only. The add-on pins a specific KAITO version (docs have shown 0.3.1 / 0.4.4 / 0.6.0 across pages) — confirm the live pin, since it gates model availability.

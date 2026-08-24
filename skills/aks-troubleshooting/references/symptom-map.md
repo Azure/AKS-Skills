@@ -2,6 +2,25 @@
 
 Look up the symptom, run the commands in order. Each section is self-contained.
 
+## Contents
+
+- [Pod Pending](#pod-pending)
+- [Pod CrashLoopBackOff](#pod-crashloopbackoff)
+- [Node NotReady](#node-notready)
+- [Image Pull Failure](#image-pull-failure-errimagepull--imagepullbackoff)
+- [OOMKilled](#oomkilled-exit-code-137)
+- [Service Not Reachable](#service-not-reachable--connection-refused)
+- [DNS Resolution Failure](#dns-resolution-failure)
+- [Load Balancer Not Working](#load-balancer-not-working)
+- [Storage / PVC Stuck](#storage--pvc-stuck)
+- [Managed Identity / Permission Denied](#managed-identity--permission-denied)
+- [Node Pool Scaling Failure](#node-pool-scaling-failure)
+- [API Server Unreachable](#api-server-unreachable--kubectl-cant-connect)
+- [Cluster Create / Start Failure](#cluster-create--start-failure-vm-extension-errors)
+- [Upgrade Stuck / Slow](#upgrade-stuck--slow)
+- [Egress / SNAT Exhaustion](#egress--snat-exhaustion-intermittent-outbound-failures)
+- [Certificate Expiration / Rotation](#certificate-expiration--rotation)
+
 ---
 
 ## Pod Pending

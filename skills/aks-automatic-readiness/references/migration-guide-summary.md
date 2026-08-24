@@ -2,6 +2,13 @@
 
 Loaded when user asks about migration steps or after assessment is complete.
 
+## Contents
+
+- [Migration Checklist](#migration-checklist)
+- [Day-0 Decisions](#day-0-decisions--cluster-level-configuration-requirements)
+- [What AKS Automatic Auto-Enables](#what-aks-automatic-auto-enables)
+- [Post-Migration Verification Commands](#post-migration-verification-commands)
+
 ---
 
 ## Migration Checklist

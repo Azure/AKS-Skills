@@ -2,6 +2,14 @@
 
 Identify pods requesting far more CPU/memory than they use and recommend reduced resource requests.
 
+## Contents
+
+- [Prerequisites](#prerequisites--check-monitoring-state-first)
+- [Detection](#detection)
+- [Historical Metrics](#historical-metrics-azure-monitor--use-when-prometheus-or-container-insights-is-enabled)
+- [Optimization Rules](#optimization-rules)
+- [YAML Patch Format](#yaml-patch-format)
+
 ## Prerequisites — Check Monitoring State First
 
 Before collecting usage data, determine what monitoring is available on the cluster:

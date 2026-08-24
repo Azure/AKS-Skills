@@ -9,7 +9,7 @@
 
 ```bash
 # nvidia-smi inside a running GPU pod (utilization + VRAM, per process)
-kubectl exec -it <gpu-pod> -- nvidia-smi
+kubectl exec <gpu-pod> -- nvidia-smi
 
 # Scrape the DCGM exporter directly (managed = 19400, upstream/GPU-Operator = 9400)
 kubectl exec -n kube-system <dcgm-exporter-pod> -- \

@@ -3,6 +3,21 @@
 Loaded on demand when generating YAML fixes during assessment.
 Maps to constraint IDs in `constraint-spec-v1.yaml`.
 
+## Contents
+
+- [`safeguard-container-resource-requests`](#safeguard-container-resource-requests--add-resource-requestslimits)
+- [`safeguard-no-privilege-escalation`](#safeguard-no-privilege-escalation--disable-privilege-escalation)
+- [`safeguard-container-capabilities`](#safeguard-container-capabilities--drop-all-capabilities)
+- [`safeguard-allowed-seccomp-profiles`](#safeguard-allowed-seccomp-profiles--add-seccomp-profile)
+- [`safeguard-enforce-apparmor`](#safeguard-enforce-apparmor--add-apparmor-annotation)
+- [`safeguard-images-no-latest`](#safeguard-images-no-latest--pin-image-tag-llm-reasoned--ask-user)
+- [`safeguard-probes-configured`](#safeguard-probes-configured--add-probes-best-practice-recommendation--warning-only-not-blocked-at-admission)
+- [`safeguard-pod-enforce-antiaffinity`](#safeguard-pod-enforce-antiaffinity--add-topology-spread-llm-reasoned--ask-user-for-label)
+- [`safeguard-csi-driver-storage-class`](#safeguard-csi-driver-storage-class--migrate-in-tree-to-csi)
+- [Add a missing PodDisruptionBudget](#poddisruptionbudget--add-missing-pdb)
+- [Fix a blocking `maxUnavailable: 0`](#poddisruptionbudget--fix-blocking-maxunavailable-0)
+- [`safeguard-no-host-path-volumes`](#safeguard-no-host-path-volumes--replace-hostpath-incompatible--suggest-alternatives)
+
 ---
 
 ## `safeguard-container-resource-requests` — Add resource requests/limits
