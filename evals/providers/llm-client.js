@@ -76,9 +76,10 @@
  *
  * Prefer Entra over keys. CI should obtain a token via OIDC federated
  * credentials (azure/login with id-token: write, then
- * `az account get-access-token --resource https://cognitiveservices.azure.com`)
- * so no long-lived secret is stored, and so newer Claude deployments — which do
- * not accept API keys at all — work without a second auth path.
+ * `az account get-access-token --scope https://ai.azure.com/.default`)
+ * so no long-lived secret is stored. The unified Foundry scope is used for both
+ * the OpenAI-compatible and Anthropic protocols, including deployments that
+ * accept Microsoft Entra ID only.
  *
  * The per-call model can be overridden with chat(system, user, { model }) — the
  * judge uses this to score with a fixed grader (EVAL_JUDGE_MODEL) while the model

@@ -1,0 +1,225 @@
+name: Trusted Skill Evaluation
+
+on:
+  workflow_run:
+    workflows: ["Skill Evaluation"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  anchor:
+    name: Anchor trusted commit check
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    outputs:
+      check_id: ${{ steps.check.outputs.check_id }}
+      commit_sha: ${{ steps.check.outputs.commit_sha }}
+      external_id: ${{ steps.check.outputs.external_id }}
+      head_ref: ${{ steps.check.outputs.head_ref }}
+      head_repository: ${{ steps.check.outputs.head_repository }}
+      upstream_conclusion: ${{ steps.check.outputs.upstream_conclusion }}
+    steps:
+      - name: Create fail-closed check on workflow_run head
+        id: check
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if (
+              context.payload.action !== 'completed' ||
+              context.payload.repository?.full_name !== `${context.repo.owner}/${context.repo.repo}` ||
+              run?.name !== 'Skill Evaluation' ||
+              run?.path !== '.github/workflows/skill-eval.yml' ||
+              run?.event !== 'pull_request' ||
+              !/^[0-9a-f]{40}$/.test(run?.head_sha || '') ||
+              !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(run?.head_repository?.full_name || '') ||
+              typeof run?.head_branch !== 'string' ||
+              run.head_branch.length === 0 ||
+              /[\r\n]/.test(run.head_branch) ||
+              !/^[1-9][0-9]*$/.test(String(run?.id || '')) ||
+              !/^[1-9][0-9]*$/.test(String(run?.run_attempt || '')) ||
+              typeof run?.conclusion !== 'string'
+            ) {
+              throw new Error('workflow_run cannot establish a trusted pull-request head');
+            }
+            const externalId = `trusted-skill-eval:${run.id}:${run.run_attempt}`;
+            const detailsUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: check } = await github.rest.checks.create({
+              ...context.repo,
+              name: 'Trusted Skill Evaluation',
+              head_sha: run.head_sha,
+              status: 'completed',
+              conclusion: 'failure',
+              external_id: externalId,
+              details_url: detailsUrl,
+              output: {
+                title: 'Trusted evaluation is fail-closed',
+                summary: 'This platform-supplied workflow_run head remains failed unless trusted resolution and every required evaluation phase succeed.',
+              },
+            });
+            core.setOutput('check_id', String(check.id));
+            core.setOutput('commit_sha', run.head_sha);
+            core.setOutput('external_id', externalId);
+            core.setOutput('head_ref', run.head_branch);
+            core.setOutput('head_repository', run.head_repository.full_name);
+            core.setOutput('upstream_conclusion', run.conclusion);
+
+  resolve:
+    name: Resolve trusted target
+    needs: anchor
+    if: needs.anchor.outputs.upstream_conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      commit_sha: ${{ steps.target.outputs.commit_sha }}
+      pr_number: ${{ steps.target.outputs.pr_number }}
+      head_repository: ${{ steps.target.outputs.head_repository }}
+      pr_url: ${{ steps.target.outputs.pr_url }}
+      requires_model_eval: ${{ steps.target.outputs.requires_model_eval }}
+    steps:
+      - name: Checkout trusted resolver
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      - name: Download validation target from this upstream run only
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: validation-target-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: ${{ runner.temp }}/validation-target
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Verify exact target
+        id: target
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node evals/scripts/trusted-eval-policy.mjs --target "$RUNNER_TEMP/validation-target/target.json"
+
+  evaluate:
+    name: Trusted model evaluation
+    needs: resolve
+    if: needs.resolve.outputs.requires_model_eval == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: trusted-skill-eval
+      url: ${{ needs.resolve.outputs.pr_url }}
+    concurrency:
+      group: trusted-skill-eval-pr-${{ needs.resolve.outputs.pr_number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Verify OIDC and model configuration
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          FOUNDRY_ENDPOINT: ${{ vars.FOUNDRY_ENDPOINT }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+        run: |
+          set -euo pipefail
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID FOUNDRY_ENDPOINT EVAL_MODEL; do
+            [ -n "${!name}" ] || { echo "::error::trusted-skill-eval environment variable ${name} is missing"; exit 1; }
+          done
+
+      - name: Checkout exact evaluated commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.resolve.outputs.head_repository }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      - name: Install exact locked dependencies
+        working-directory: evals
+        run: npm ci
+
+      - name: Acquire short-lived Foundry identity
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run required quality and routing evaluations
+        working-directory: evals
+        env:
+          EVALUATED_COMMIT: ${{ needs.resolve.outputs.commit_sha }}
+          EVAL_PROVIDER: foundry
+          EVAL_PROTOCOL: ${{ vars.EVAL_PROTOCOL }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+          EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL }}
+          EVAL_REQUIRE_FOUNDRY: '1'
+          FOUNDRY_ENDPOINT: ${{ vars.FOUNDRY_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          access_token="$(az account get-access-token --scope https://ai.azure.com/.default --query accessToken --output tsv)"
+          echo "::add-mask::$access_token"
+          export FOUNDRY_ACCESS_TOKEN="$access_token"
+          node scripts/run-trusted-evals.mjs
+
+  finalize:
+    name: Finalize trusted commit check
+    if: always()
+    needs: [anchor, resolve, evaluate]
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout trusted publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      - name: Publish exact-SHA check result
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CHECK_ID: ${{ needs.anchor.outputs.check_id || 'missing' }}
+          COMMIT_SHA: ${{ needs.anchor.outputs.commit_sha || github.event.workflow_run.head_sha }}
+          EXTERNAL_ID: ${{ needs.anchor.outputs.external_id || format('trusted-skill-eval:{0}:{1}', github.event.workflow_run.id, github.event.workflow_run.run_attempt) }}
+          HEAD_REF: ${{ needs.anchor.outputs.head_ref || github.event.workflow_run.head_branch }}
+          HEAD_REPOSITORY: ${{ needs.anchor.outputs.head_repository || github.event.workflow_run.head_repository.full_name }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number || 'unknown' }}
+          UPSTREAM_CONCLUSION: ${{ needs.anchor.outputs.upstream_conclusion || github.event.workflow_run.conclusion }}
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
+          EVALUATE_RESULT: ${{ needs.evaluate.result }}
+          MODEL_REQUIRED: ${{ needs.resolve.outputs.requires_model_eval || 'unknown' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node evals/scripts/publish-trusted-check.mjs \
+            --check-id "$CHECK_ID" \
+            --commit "$COMMIT_SHA" \
+            --external-id "$EXTERNAL_ID" \
+            --head-ref "$HEAD_REF" \
+            --head-repository "$HEAD_REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            --upstream-conclusion "$UPSTREAM_CONCLUSION" \
+            --resolve-result "$RESOLVE_RESULT" \
+            --evaluate-result "$EVALUATE_RESULT" \
+            --model-required "$MODEL_REQUIRED" \
+            --run-url "$RUN_URL"

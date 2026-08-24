@@ -85,6 +85,13 @@ function sanitize(text) {
     .replace(/\b[a-f0-9]{32,}\b/gi, '[redacted-key]');
 }
 
+function escapeCell(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, '<br>');
+}
+
 // A failing case can be an *infrastructure* error (judge/API 5xx, rate limit,
 // timeout) rather than a real quality regression. These are noise on a trend
 // line, and their bodies can leak internal details, so we detect and bucket
@@ -276,10 +283,10 @@ function buildReport({ type, date }, promptfoo, vally) {
   for (const s of promptfoo) {
     const errs = s.errors ?? 0;
     // Pass % excludes infra/judge errors so a 5xx can't read as a skill regression.
-    out.push(`| promptfoo | ${s.label} | ${s.pass} | ${errs} | ${s.total} | ${pct(s.pass, s.total - errs)} |`);
+    out.push(`| promptfoo | ${escapeCell(s.label)} | ${s.pass} | ${errs} | ${s.total} | ${pct(s.pass, s.total - errs)} |`);
   }
   for (const g of vally) {
-    out.push(`| vally (agentic) | ${g.tier} | ${g.pass} | 0 | ${g.total} | ${pct(g.pass, g.total)} |`);
+    out.push(`| vally (agentic) | ${escapeCell(g.tier)} | ${g.pass} | 0 | ${g.total} | ${pct(g.pass, g.total)} |`);
   }
   out.push('');
 
@@ -312,7 +319,7 @@ function buildReport({ type, date }, promptfoo, vally) {
     out.push('| Test | With skill | Baseline |');
     out.push('|---|---|---|');
     for (const row of quality.rows) {
-      out.push(`| ${row.name} | ${cell(row)} | ${cell(byName.get(row.name))} |`);
+      out.push(`| ${escapeCell(row.name)} | ${cell(row)} | ${cell(byName.get(row.name))} |`);
     }
     out.push('');
   }
@@ -338,7 +345,7 @@ function buildReport({ type, date }, promptfoo, vally) {
         : row.ok
           ? ''
           : sanitize(row.reason || '').replace(/\s+/g, ' ').slice(0, 160);
-      out.push(`| ${row.name} | ${verdict} | ${score} | ${notes} |`);
+      out.push(`| ${escapeCell(row.name)} | ${verdict} | ${score} | ${escapeCell(notes)} |`);
     }
     out.push('');
   }
@@ -355,7 +362,7 @@ function buildReport({ type, date }, promptfoo, vally) {
       const verdict = r.passed ? '✅' : '❌';
       const score = r.score === null ? '' : r.score;
       const graders = sanitize(r.graders).replace(/\s+/g, ' ').slice(0, 80);
-      out.push(`| ${r.evalName} | ${r.stimulus} | ${graders} | ${score} | ${verdict} |`);
+      out.push(`| ${escapeCell(r.evalName)} | ${escapeCell(r.stimulus)} | ${escapeCell(graders)} | ${score} | ${verdict} |`);
     }
     out.push('');
   }
