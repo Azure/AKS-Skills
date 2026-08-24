@@ -4,6 +4,7 @@
   metadata:
     skill: aks-network-capture
     type: quality
+    case_id: network-capture-safe-scope
   vars:
     skill_path: "aks-network-capture/SKILL.md"
     prompt: "Pods can reach each other but egress to Azure SQL fails. I want packet-level proof of where it drops."

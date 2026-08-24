@@ -9,28 +9,60 @@
 #
 # Each test needs: description, vars (prompt + skill_path), assert.
 
-- description: "CrashLoopBackOff response includes proper diagnostics"
+- description: "CrashLoopBackOff follows the symptom map's ordered diagnostic chain"
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-crashloop
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
-    prompt: "A pod named web-frontend in the production namespace is in CrashLoopBackOff. Help me investigate."
+    skill_files:
+      - "references/symptom-map.md"
+    prompt: "A multi-container pod named web-frontend in the production namespace is in CrashLoopBackOff, but I do not yet know which container or why. Give me the shortest ordered investigation that preserves the first causal evidence and the distinct causes I should discriminate."
   assert:
     - type: icontains
-      value: "logs"
+      value: "--all-containers"
     - type: icontains
       value: "previous"
     - type: g-eval
-      value: "Response mentions checking container exit codes or restart reasons, not just suggesting to look at logs generically"
+      value: "Response follows the production symptom map's CrashLoop order: current logs for all containers, previous logs for all containers, pod description for exit codes and restart count, then pod-scoped events. It distinguishes missing environment/secret, an unmounted config, OOM exit 137, an unreachable dependency, and a liveness probe killing healthy startup as separate causes. It does not collapse the investigation to generic logging advice."
+      threshold: 0.8
+
+- description: "CrashLoop exit codes distinguish OOM from graceful termination context"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-crashloop-exit-codes
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "pod-failures.md"
+    prompt: "Two replicas of the same long-running app are restarting. One reports exit code 137 and the other exit code 143. Interpret each code and give the different next check or remediation path; do not treat both as generic crashes."
+  assert:
+    - type: icontains
+      value: "137"
+    - type: icontains
+      value: "143"
+    - type: g-eval
+      value: "Response maps 137 to OOMKilled/SIGKILL and checks the memory limit, actual usage, and possible leak before changing resources. It maps 143 to SIGTERM/graceful termination context and checks why the pod was terminated, including whether a liveness probe killed it. It does not claim that 143 itself proves OOM or an application exception."
       threshold: 0.8
 
 - description: "Pending pod response identifies scheduling root causes"
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-pending
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "pod-failures.md"
+      - "references/symptom-map.md"
     prompt: "My pod has been stuck in Pending state for 10 minutes. What should I check?"
   assert:
     - type: icontains
@@ -43,8 +75,14 @@
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-oomkilled
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "pod-failures.md"
+      - "references/symptom-map.md"
     prompt: "Container keeps getting OOMKilled. How do I investigate?"
   assert:
     - type: icontains
@@ -59,8 +97,13 @@
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-node-notready
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "node-issues.md"
     prompt: "One of my AKS nodes went NotReady during a cluster upgrade. Investigate."
   assert:
     - type: g-eval
@@ -71,8 +114,13 @@
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-dns-chain
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "networking.md"
     prompt: "Pods can't resolve DNS names. Internal service discovery and external DNS both failing."
   assert:
     - type: icontains
@@ -85,8 +133,13 @@
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-network-policy
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "network-policy.md"
     prompt: "Traffic between pods in different namespaces is being dropped. Pods in the same namespace communicate fine."
   assert:
     - type: icontains
@@ -99,10 +152,121 @@
   metadata:
     skill: aks-troubleshooting
     type: quality
+    case_id: troubleshoot-external-connectivity
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "networking.md"
     prompt: "My AKS pods can reach other pods but cannot reach external Azure services like Azure SQL."
   assert:
     - type: g-eval
       value: "Response investigates Azure-level networking: NSG rules on the subnet, route tables, service/private endpoints, and Azure Firewall if applicable"
+      threshold: 0.8
+
+- description: "Pending LoadBalancer decodes the Azure event before changing anything"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-load-balancer-events
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "load-balancer-and-ingress.md"
+    prompt: "A Service of type LoadBalancer is stuck Pending. Its event says InsufficientFreeAddresses. Diagnose it and distinguish it from public-IP quota or identity failures."
+  assert:
+    - type: g-eval
+      value: "Response maps InsufficientFreeAddresses to subnet IP exhaustion, while distinguishing public IP quota errors and a no-events identity/CCM failure. It starts with Service description/events and offers subnet expansion, Azure CNI Overlay, or a NAT gateway as context-dependent remediation rather than blindly recreating the Service."
+      threshold: 0.8
+
+- description: "Zonal PVC conflict gets a storage-topology fix"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-zone-pvc
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "spot-and-zone-issues.md"
+    prompt: "After a zone failure, a pod cannot reschedule and reports 'volume node affinity conflict'. What is the AKS-specific cause and fix?"
+  assert:
+    - type: g-eval
+      value: "Response identifies Azure Disk as zonal and the replacement pod as scheduled in a different zone. It recommends aligning pod/PV topology or using an appropriate ZRS storage class for future resilience, and does not misdiagnose this as a generic Spot eviction."
+      threshold: 0.8
+
+- description: "Upgrade diagnosis stays read-only until approval"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-upgrade-boundary
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "upgrade-operations.md"
+    prompt: "My AKS version upgrade is stuck draining nodes. Investigate, but I have not approved any changes."
+  assert:
+    - type: g-eval
+      value: "Response performs read-only checks for PDBs, deprecated APIs, admission webhooks, control-plane state, available upgrade paths, and maxSurge. It treats nodepool upgrade and max-surge update commands as mutations and does not recommend running them until the user approves remediation/change control."
+      threshold: 0.8
+
+- description: "Structured warning-event input produces an evidence-backed report"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-structured-report
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "general-diagnostics.md"
+      - "references/structured-input-modes.md"
+      - "references/command-flows.md"
+      - "references/report-template.md"
+    prompt: "I supplied a list of AKS Warning events. Explain how you would rank them, gather only the missing baseline evidence, and structure the final investigation report."
+  assert:
+    - type: g-eval
+      value: "Response uses Warning Events mode, groups repeated events by resource/reason, separates root-cause candidates from downstream symptoms, and gathers missing Azure/Kubernetes baseline evidence in the documented order. The final report has inspected resources/commands/findings, one root cause, evidence, an approval-gated fix, additional findings, and prevention; it does not present every warning as an independent root cause."
+      threshold: 0.8
+
+- description: "AKS MCP fallback keeps discovery and CLI scope explicit"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-mcp-fallback
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "references/azure-mcp.md"
+      - "references/command-flows.md"
+    prompt: "The host exposes an AKS MCP server but its detector action is unavailable. How should the investigation discover tools and fall back without abandoning the AKS/Kubernetes baseline?"
+  assert:
+    - type: g-eval
+      value: "Response discovers the exposed AKS MCP tool surface first and uses focused read operations where available. For the missing detector action it falls back explicitly to az aks/Azure activity-log reads and kubectl Kubernetes baseline commands, without fabricating an MCP action or skipping cluster, node-pool, events, affected-namespace, and previous-log evidence."
+      threshold: 0.8
+
+- description: "Inspektor Gadget is approval-gated and symptom-scoped"
+  metadata:
+    skill: aks-troubleshooting
+    type: quality
+    case_id: troubleshoot-inspektor-gadget
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-troubleshooting/SKILL.md"
+    skill_files:
+      - "references/inspektor-gadget.md"
+    prompt: "Standard read-only checks did not explain intermittent TCP retransmits from one pod. Show the narrow Inspektor Gadget path, but do not assume I approved privileged debug access."
+  assert:
+    - type: g-eval
+      value: "Response requests explicit approval because Inspektor Gadget uses kubectl debug with a sysadmin/privileged node pod. After approval it scopes by namespace and pod, selects trace_tcpretrans (not a catch-all capture), bounds a trace with the documented timeout, and explains how to retrieve/correlate output; it does not run the privileged path by default."
       threshold: 0.8
