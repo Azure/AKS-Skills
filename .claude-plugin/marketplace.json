@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "aks",
-      "description": "Azure Kubernetes Service (AKS) agent skills and MCP integration for troubleshooting, cost, AKS Automatic readiness, GPU/inference operations, packet capture, and cluster design.",
+      "description": "Azure Kubernetes Service (AKS) agent skills with optional Azure MCP Server integration for troubleshooting, cost, AKS Automatic readiness, GPU/inference operations, packet capture, and cluster design.",
       "source": ".",
       "homepage": "https://github.com/Azure/AKS-Skills"
     }
