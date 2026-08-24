@@ -108,34 +108,51 @@ jobs:
         run: node evals/scripts/trusted-eval-policy.mjs --target "$RUNNER_TEMP/validation-target/target.json"
 
   evaluate:
-    name: Trusted model evaluation
+    name: Advisory model eval (${{ matrix.id }})
     needs: resolve
     if: needs.resolve.outputs.requires_model_eval == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: gpt-5-6-sol
+            availability: supported
+            generator_model: gpt-5.6-sol
+            judge_model: gpt-5.6-terra
+          - id: gpt-5-6-luna
+            availability: supported
+            generator_model: gpt-5.6-luna
+            judge_model: gpt-5.6-terra
+          - id: gpt-5-6-terra
+            availability: supported
+            generator_model: gpt-5.6-terra
+            judge_model: gpt-5.6-sol
     runs-on: ubuntu-latest
     environment:
       name: trusted-skill-eval
       url: ${{ needs.resolve.outputs.pr_url }}
     concurrency:
-      group: trusted-skill-eval-pr-${{ needs.resolve.outputs.pr_number }}
+      group: trusted-skill-eval-pr-${{ needs.resolve.outputs.pr_number }}-${{ matrix.id }}
       cancel-in-progress: true
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Verify OIDC and model configuration
+      - name: Verify OIDC configuration
+        id: configuration
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           FOUNDRY_ENDPOINT: ${{ vars.FOUNDRY_ENDPOINT }}
-          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
         run: |
           set -euo pipefail
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID FOUNDRY_ENDPOINT EVAL_MODEL; do
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID FOUNDRY_ENDPOINT; do
             [ -n "${!name}" ] || { echo "::error::trusted-skill-eval environment variable ${name} is missing"; exit 1; }
           done
 
       - name: Checkout exact evaluated commit
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.resolve.outputs.head_repository }}
@@ -143,42 +160,279 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
+        id: setup
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
 
       - name: Install exact locked dependencies
+        id: install
         working-directory: evals
         run: npm ci
 
-      - name: Acquire short-lived Foundry identity
+      - name: Authenticate Azure OIDC
+        id: login
         uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Run required quality and routing evaluations
-        working-directory: evals
+      - name: Acquire short-lived Foundry token
+        id: token
         env:
-          EVALUATED_COMMIT: ${{ needs.resolve.outputs.commit_sha }}
-          EVAL_PROVIDER: foundry
-          EVAL_PROTOCOL: ${{ vars.EVAL_PROTOCOL }}
-          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
-          EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL }}
-          EVAL_REQUIRE_FOUNDRY: '1'
-          FOUNDRY_ENDPOINT: ${{ vars.FOUNDRY_ENDPOINT }}
+          TOKEN_FILE: ${{ runner.temp }}/foundry-access-token
         run: |
           set -euo pipefail
           access_token="$(az account get-access-token --scope https://ai.azure.com/.default --query accessToken --output tsv)"
           echo "::add-mask::$access_token"
-          export FOUNDRY_ACCESS_TOKEN="$access_token"
+          umask 077
+          printf '%s' "$access_token" > "$TOKEN_FILE"
+
+      - name: Run advisory quality and routing evaluations
+        id: evaluation
+        working-directory: evals
+        env:
+          EVALUATED_COMMIT: ${{ needs.resolve.outputs.commit_sha }}
+          EVAL_PROVIDER: foundry
+          EVAL_PROTOCOL: openai
+          EVAL_MODEL: ${{ matrix.generator_model }}
+          EVAL_JUDGE_MODEL: ${{ matrix.judge_model }}
+          EVAL_REQUIRE_FOUNDRY: '1'
+          FOUNDRY_ENDPOINT: ${{ vars.FOUNDRY_ENDPOINT }}
+          TOKEN_FILE: ${{ runner.temp }}/foundry-access-token
+        run: |
+          set -euo pipefail
+          trap 'rm -f "$TOKEN_FILE"' EXIT
+          export FOUNDRY_ACCESS_TOKEN="$(cat "$TOKEN_FILE")"
           node scripts/run-trusted-evals.mjs
+
+      - name: Record advisory cell identity and result
+        if: always()
+        env:
+          RESULT_DIR: ${{ runner.temp }}/advisory-model-results
+          CELL_ID: ${{ matrix.id }}
+          AVAILABILITY: ${{ matrix.availability }}
+          GENERATOR_MODEL: ${{ matrix.generator_model }}
+          JUDGE_MODEL: ${{ matrix.judge_model }}
+          CONFIGURATION_OUTCOME: ${{ steps.configuration.outcome }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          LOGIN_OUTCOME: ${{ steps.login.outcome }}
+          TOKEN_OUTCOME: ${{ steps.token.outcome }}
+          EVALUATION_OUTCOME: ${{ steps.evaluation.outcome }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+          import path from "node:path";
+
+          const infrastructure = [
+            ["configuration", process.env.CONFIGURATION_OUTCOME],
+            ["checkout", process.env.CHECKOUT_OUTCOME],
+            ["setup", process.env.SETUP_OUTCOME],
+            ["install", process.env.INSTALL_OUTCOME],
+            ["login", process.env.LOGIN_OUTCOME],
+            ["token", process.env.TOKEN_OUTCOME],
+          ].find(([, outcome]) => outcome !== "success");
+          let status = "passed";
+          let detail = "quality and routing evaluations passed";
+          if (infrastructure) {
+            status = "infrastructure-error";
+            detail = `${infrastructure[0]} step ${infrastructure[1]}`;
+          } else if (process.env.EVALUATION_OUTCOME === "failure") {
+            status = "evaluation-failed";
+            detail = "quality or routing evaluation failed";
+          } else if (process.env.EVALUATION_OUTCOME !== "success") {
+            status = "infrastructure-error";
+            detail = `evaluation step ${process.env.EVALUATION_OUTCOME}`;
+          }
+          const result = {
+            schemaVersion: 1,
+            cellId: process.env.CELL_ID,
+            availability: process.env.AVAILABILITY,
+            generatorModel: process.env.GENERATOR_MODEL,
+            judgeModel: process.env.JUDGE_MODEL,
+            status,
+            detail,
+          };
+          mkdirSync(process.env.RESULT_DIR, { recursive: true });
+          writeFileSync(
+            path.join(process.env.RESULT_DIR, `${result.cellId}.json`),
+            `${JSON.stringify(result, null, 2)}\n`,
+          );
+          appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `### ${result.cellId}\n\n` +
+              `- Generator: \`${result.generatorModel}\`\n` +
+              `- Judge: \`${result.judgeModel}\`\n` +
+              `- Result: **${result.status}** (${result.detail})\n`,
+          );
+          NODE
+
+      - name: Upload advisory cell result
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: advisory-model-result-${{ matrix.id }}
+          path: ${{ runner.temp }}/advisory-model-results/${{ matrix.id }}.json
+          if-no-files-found: error
+
+  unavailable:
+    name: Model unavailable (${{ matrix.id }})
+    needs: resolve
+    if: needs.resolve.outputs.requires_model_eval == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: claude-opus-5
+            availability: unavailable
+            deployment_model: claude-opus-5
+            reason: not-provisioned
+          - id: claude-opus-4-8
+            availability: unavailable
+            deployment_model: claude-opus-4-8
+            reason: not-provisioned
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Record unavailable deployment
+        env:
+          RESULT_DIR: ${{ runner.temp }}/advisory-model-results
+          CELL_ID: ${{ matrix.id }}
+          AVAILABILITY: ${{ matrix.availability }}
+          DEPLOYMENT_MODEL: ${{ matrix.deployment_model }}
+          REASON: ${{ matrix.reason }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+          import path from "node:path";
+
+          const result = {
+            schemaVersion: 1,
+            cellId: process.env.CELL_ID,
+            availability: process.env.AVAILABILITY,
+            generatorModel: process.env.DEPLOYMENT_MODEL,
+            judgeModel: null,
+            status: "unavailable",
+            detail: process.env.REASON,
+          };
+          mkdirSync(process.env.RESULT_DIR, { recursive: true });
+          writeFileSync(
+            path.join(process.env.RESULT_DIR, `${result.cellId}.json`),
+            `${JSON.stringify(result, null, 2)}\n`,
+          );
+          appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `### ${result.cellId}\n\n` +
+              `- Deployment: \`${result.generatorModel}\`\n` +
+              `- Result: **${result.status}** (${result.detail})\n`,
+          );
+          NODE
+
+      - name: Upload unavailable classification
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: advisory-model-result-${{ matrix.id }}
+          path: ${{ runner.temp }}/advisory-model-results/${{ matrix.id }}.json
+          if-no-files-found: error
+
+  advisory_summary:
+    name: Summarize advisory model matrix
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.requires_model_eval == 'true'
+    needs: [resolve, evaluate, unavailable]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Download advisory cell results
+        id: download
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: advisory-model-result-*
+          path: ${{ runner.temp }}/advisory-model-results
+          merge-multiple: true
+
+      - name: Publish advisory matrix summary
+        if: always()
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9
+        env:
+          RESULTS_ROOT: ${{ runner.temp }}/advisory-model-results
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          SUPPORTED_JOB_RESULT: ${{ needs.evaluate.result }}
+          UNAVAILABLE_JOB_RESULT: ${{ needs.unavailable.result }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const expected = [
+              { cellId: 'gpt-5-6-sol', availability: 'supported', generatorModel: 'gpt-5.6-sol', judgeModel: 'gpt-5.6-terra' },
+              { cellId: 'gpt-5-6-luna', availability: 'supported', generatorModel: 'gpt-5.6-luna', judgeModel: 'gpt-5.6-terra' },
+              { cellId: 'gpt-5-6-terra', availability: 'supported', generatorModel: 'gpt-5.6-terra', judgeModel: 'gpt-5.6-sol' },
+              { cellId: 'claude-opus-5', availability: 'unavailable', generatorModel: 'claude-opus-5', judgeModel: null },
+              { cellId: 'claude-opus-4-8', availability: 'unavailable', generatorModel: 'claude-opus-4-8', judgeModel: null },
+            ];
+            const results = expected.map((identity) => {
+              const file = path.join(process.env.RESULTS_ROOT, `${identity.cellId}.json`);
+              try {
+                const result = JSON.parse(fs.readFileSync(file, 'utf8'));
+                const statuses = identity.availability === 'supported'
+                  ? new Set(['passed', 'evaluation-failed', 'infrastructure-error'])
+                  : new Set(['unavailable']);
+                const matches = result.schemaVersion === 1 &&
+                  result.cellId === identity.cellId &&
+                  result.availability === identity.availability &&
+                  result.generatorModel === identity.generatorModel &&
+                  result.judgeModel === identity.judgeModel &&
+                  statuses.has(result.status) &&
+                  typeof result.detail === 'string' &&
+                  result.detail.length > 0;
+                return matches
+                  ? result
+                  : { ...identity, status: 'infrastructure-error', detail: 'result identity mismatch' };
+              } catch {
+                return { ...identity, status: 'infrastructure-error', detail: 'result artifact missing or invalid' };
+              }
+            });
+            const labels = {
+              passed: 'passed',
+              'evaluation-failed': 'evaluation failed',
+              'infrastructure-error': 'infrastructure error',
+              unavailable: 'unavailable',
+            };
+            await core.summary
+              .addHeading('Advisory model durability matrix')
+              .addRaw(
+                'These results are advisory until calibrated. Only currently deployable models run; unavailable deployments are classified rather than failed.\n\n',
+              )
+              .addRaw(
+                `Collection=${process.env.DOWNLOAD_OUTCOME}; supported jobs=${process.env.SUPPORTED_JOB_RESULT}; unavailable jobs=${process.env.UNAVAILABLE_JOB_RESULT}.\n\n`,
+              )
+              .addTable([
+                [
+                  { data: 'Cell', header: true },
+                  { data: 'Availability', header: true },
+                  { data: 'Generator/deployment', header: true },
+                  { data: 'Judge', header: true },
+                  { data: 'Result', header: true },
+                  { data: 'Detail', header: true },
+                ],
+                ...results.map((result) => [
+                  result.cellId,
+                  result.availability,
+                  result.generatorModel,
+                  result.judgeModel || 'not run',
+                  labels[result.status] || result.status,
+                  result.detail,
+                ]),
+              ])
+              .write();
 
   finalize:
     name: Finalize trusted commit check
     if: always()
-    needs: [anchor, resolve, evaluate]
+    needs: [anchor, resolve, advisory_summary]
     runs-on: ubuntu-latest
     permissions:
       checks: write
@@ -207,7 +461,7 @@ jobs:
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number || 'unknown' }}
           UPSTREAM_CONCLUSION: ${{ needs.anchor.outputs.upstream_conclusion || github.event.workflow_run.conclusion }}
           RESOLVE_RESULT: ${{ needs.resolve.result }}
-          EVALUATE_RESULT: ${{ needs.evaluate.result }}
+          ADVISORY_RESULT: ${{ needs.advisory_summary.result }}
           MODEL_REQUIRED: ${{ needs.resolve.outputs.requires_model_eval || 'unknown' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -220,6 +474,6 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --upstream-conclusion "$UPSTREAM_CONCLUSION" \
             --resolve-result "$RESOLVE_RESULT" \
-            --evaluate-result "$EVALUATE_RESULT" \
+            --advisory-result "$ADVISORY_RESULT" \
             --model-required "$MODEL_REQUIRED" \
             --run-url "$RUN_URL"
