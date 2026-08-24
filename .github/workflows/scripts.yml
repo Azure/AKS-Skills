@@ -50,6 +50,6 @@ jobs:
   readiness-redaction-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run readiness redaction regression test
         run: bash evals/tests/aks-automatic-readiness/readiness-redaction.test.sh
