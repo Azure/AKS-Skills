@@ -23,16 +23,14 @@ license: MIT
 metadata:
   author: Microsoft
   version: "X.Y.Z"         # semver
-  capabilities:
-    - id: azure.aks.cluster.read
-      mode: preferred
+  capabilities: '[{"id":"azure.aks.cluster.read","mode":"preferred"}]'
 description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quoted user utterances>. DO NOT USE FOR: <cases> (use <other-skill>)."
 ---
 ```
 
-- **`metadata`** follows the Agent Skills string-to-string contract. Host-specific nested metadata is not part of the portable contract.
+- **`metadata`** follows the Agent Skills string-to-string contract. Every direct value, including extension values such as `capabilities`, must be a YAML string; host-specific nested metadata is not part of the portable contract.
 - **`description`** carries the routing surface. It must include `WHEN:` triggers **and** a `DO NOT USE FOR:` boundary that names the sibling skill to use instead (the parenthetical-redirect grammar). No two skills may share a description or have one subsume another.
-- **`metadata.capabilities`** is the single provider-neutral capability declaration. Every registered skill declares a list, including `[]` when it has no live dependency. IDs come from [`providers/capabilities.yaml`](../providers/capabilities.yaml); modes are `required`, `preferred`, `conditional`, or `live-only`. A `conditional` entry also requires a precise `when` string. Provider tool names and host aliases are forbidden here. See the [Capability Provider and Evidence Contract](capability-provider-contract.md).
+- **`metadata.capabilities`** is a JSON-array string containing the provider-neutral capability declaration. Every registered skill declares it, using `"[]"` when the skill has no live dependency. IDs come from [`providers/capabilities.yaml`](../providers/capabilities.yaml); modes are `required`, `preferred`, `conditional`, or `live-only`. A `conditional` entry also requires a precise `when` string. Provider tool names and host aliases are forbidden here. See the [Capability and Provider Compatibility Contract](capability-provider-contract.md).
 - **Budget:** the front-matter `description` must be 1024 characters or fewer to remain portable across Agent Skills-compatible hosts. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into files inside the same skill — progressive disclosure, loaded only when needed. Do not flatten every file into every prompt.
 - **Runtime hints are additive, never conflicting:** the repo-root `plugin.json` + `.mcp.json` supplies SRE Agent / marketplace install without changing the portable skill front matter.
 
@@ -42,7 +40,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 - **Read-only by default.** Any skill that can mutate a cluster MUST state the read-only guardrail: *do not restart, delete, cordon, drain, scale, upgrade, or reconfigure unless the user explicitly asks.*
 - **No host coupling in the body.** No "OpenClaw UI will render…", no `/home/<user>/...` paths, no host-specific assumptions.
 - **MCP product names and boundaries.** **Azure MCP Server** means `@azure/mcp`, which this repository configures through `.mcp.json`. The **AKS MCP server** means the separate `Azure/aks-mcp` product, which this repository does not configure or support. Never shorten Azure MCP Server to "AKS MCP" or "AKS-MCP." Azure MCP Server's AKS area is limited to cluster and node-pool metadata; AppLens, Azure Monitor, and Resource Health are separate areas. Select operations from host-advertised capabilities and schemas, and retain direct CLI/Kubernetes fallbacks.
-- **Provider and evidence safety.** Live operations follow the [Capability Provider and Evidence Contract](capability-provider-contract.md): target and identity preflight, readonly defaults, one-action/one-target mutation approval, allowlist projection before model ingestion, normalized evidence, and fail-closed handling for denied authorization or mismatched context.
+- **Provider compatibility is not enforcement.** A provider map proves only the pinned operation name and input schema. It does not prove target selection, authorization, approval, bounded execution, namespace scope, redaction, or output projection. Unsupported bindings remain unavailable and follow the [fail-closed fallback rules](capability-provider-contract.md#2-fail-closed-fallback).
 
 ## 4. Script rules
 

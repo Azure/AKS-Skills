@@ -2,159 +2,46 @@ contract_version: "1.0"
 provider:
   id: aks-mcp
   product: Azure/aks-mcp
-  version: 0.0.20
+  version: "0.0.20"
   release_ref: v0.0.20
   source_commit: 8d28bece75d1f572293364d7f50a7e9d2e425efa
   source_url: https://github.com/Azure/aks-mcp/tree/v0.0.20
-transport:
-  type: stdio
-  trust_boundary: Local subprocess for one trusted user with the process identity's Azure and Kubernetes authority.
-  supported_deployment: local-trusted-user
-access_level_authorizes: false
-context:
-  sources:
-    - azure-cli-context
-    - kubeconfig-context
-    - namespace
-fallback_policy:
-  allowed_reasons:
-    - absent
-    - unsupported
-  stop_reasons:
-    - authorization-denied
-    - context-mismatch
-capabilities:
-  - id: azure.aks.cluster.read
-    published_operation: call_az
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      required:
-        - cli_command
-      command_family:
-        - az aks list
-        - az aks show
-  - id: azure.aks.nodepool.read
-    published_operation: call_az
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      required:
-        - cli_command
-      command_family:
-        - az aks nodepool list
-        - az aks nodepool show
-  - id: azure.compute.quota.read
-    published_operation: call_az
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      required:
-        - cli_command
-      command_family:
-        - az vm list-usage
-  - id: kubernetes.resources.read
-    published_operation: call_kubectl
-    class: read
-    context_sources:
-      - kubeconfig-context
-      - namespace
-    fallback_class: direct-kubernetes-cli
-    tested_schema:
+dependencies:
+  mcp-kubernetes:
+    product: Azure/mcp-kubernetes
+    version: "0.0.14"
+    release_ref: v0.0.14
+    source_commit: 39b7de1c2b8aec39a52ebade30aed981bb0725d5
+    source_url: https://github.com/Azure/mcp-kubernetes/tree/v0.0.14
+operations:
+  call_kubectl:
+    source: mcp-kubernetes
+    source_paths:
+      - pkg/kubectl/registry.go
+    input_schema:
       required:
         - command
-      conditional_required:
-        - field: aks_resource_id
-          unless: default AKS resource ID is configured
-      access_level: readonly
-  - id: kubernetes.resources.write
-    published_operation: call_kubectl
-    class: write
-    context_sources:
-      - kubeconfig-context
-      - namespace
-    fallback_class: direct-kubernetes-cli
-    tested_schema:
-      required:
-        - command
-      conditional_required:
-        - field: aks_resource_id
-          unless: default AKS resource ID is configured
-      access_level:
-        - readwrite
-        - admin
-      approval_required: true
-  - id: azure.aks.network.read
-    published_operation: aks_network_resources
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      resource_type:
-        - all
-        - vnet
-        - subnet
-        - nsg
-        - route_table
-        - load_balancer
-        - private_endpoint
-  - id: azure.monitor.metrics.read
-    published_operation: aks_monitoring
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      operation: metrics
-  - id: azure.monitor.logs.read
-    published_operation: aks_monitoring
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      operation: control_plane_logs
-  - id: azure.resource-health.read
-    published_operation: aks_monitoring
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: direct-azure-cli
-    tested_schema:
-      operation: resource_health
-  - id: azure.aks.detector.read
-    published_operation: aks_detector
-    class: read
-    context_sources:
-      - azure-cli-context
-    fallback_class: none
-    tested_schema:
-      operation:
-        - list
-        - run
-        - run_by_category
-  - id: kubernetes.packet-capture.collect
-    published_operation: inspektor_gadget_observability
-    class: privileged
-    context_sources:
-      - azure-cli-context
-      - kubeconfig-context
-      - namespace
-    fallback_class: direct-kubernetes-cli
-    tested_schema:
-      action: run
-      gadget_name: tcpdump
-      approval_required: true
-unsupported:
-  - Remote, HTTP, SSE, proxy, gateway, container-service, Helm, or Kubernetes deployment.
-  - Per-caller authorization or sandboxing.
-non_goals:
-  - Treat --access-level as authentication, authorization, or user approval.
-  - Define host-rendered tool aliases.
+      optional: []
+    bindable: false
+    unbound_reason: >-
+      The registered tool executes against the process's current kube context
+      and exposes no target input. AKS Skills has no runtime that can enforce a
+      resolved AKS target before this provider call.
+capability_bindings: []
+unsupported_capabilities:
+  - capability: kubernetes.resources.read
+    reason: >-
+      call_kubectl has only the command input and uses the current kube context;
+      this repository cannot enforce a matching AKS target for the provider.
+    source_paths:
+      - internal/server/server.go
+      - internal/k8s/registry.go
+      - Azure/mcp-kubernetes@v0.0.14:pkg/kubectl/registry.go
+  - capability: kubernetes.packet-capture.collect
+    reason: >-
+      The pinned provider does not enforce per-capture approval, bounded
+      duration, namespace scope, or safe output projection. No provider binding
+      is published for this capability.
+    source_paths:
+      - internal/components/inspektorgadget/registry.go
+      - internal/components/inspektorgadget/handlers.go

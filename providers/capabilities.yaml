@@ -4,15 +4,6 @@ requirement_modes:
   - preferred
   - conditional
   - live-only
-operation_classes:
-  - read
-  - write
-  - privileged
-fallback_classes:
-  - direct-azure-cli
-  - direct-kubernetes-cli
-  - offline-input
-  - none
 fallback_policy:
   allowed_reasons:
     - absent
@@ -32,16 +23,14 @@ capabilities:
   - id: azure.compute.quota.read
     description: Read Azure compute usage and quota relevant to AKS capacity.
   - id: azure.monitor.metrics.read
-    description: Read bounded Azure Monitor metric observations.
+    description: Read Azure Monitor metric observations.
   - id: azure.monitor.logs.read
-    description: Read bounded Azure Monitor or AKS control-plane log observations.
+    description: Read Azure Monitor or AKS control-plane log observations.
   - id: azure.resource-health.read
     description: Read Azure Resource Health observations for an AKS target.
   - id: azure.applens.diagnostics.read
     description: Read AppLens diagnostic observations for an AKS target.
   - id: kubernetes.resources.read
-    description: Read allowlisted Kubernetes resources, events, and logs.
-  - id: kubernetes.resources.write
-    description: Apply one explicitly approved Kubernetes mutation.
+    description: Read Kubernetes resources, events, and logs.
   - id: kubernetes.packet-capture.collect
-    description: Run one explicitly approved, bounded packet capture.
+    description: Collect packet-capture data from an AKS cluster.

@@ -4,6 +4,7 @@ license: MIT
 metadata:
   author: Microsoft
   version: "1.0.0"
+  capabilities: '[{"id":"azure.aks.cluster.read","mode":"preferred"},{"id":"azure.aks.nodepool.read","mode":"preferred"},{"id":"azure.compute.quota.read","mode":"conditional","when":"diagnosing an Azure GPU vCPU quota failure"},{"id":"kubernetes.resources.read","mode":"live-only"}]'
 description: "Day-2 operations for GPU and model-inference workloads on Azure Kubernetes Service (AKS): diagnose GPU pods stuck Pending, missing nvidia.com/gpu, CUDA/driver mismatches, model OOM on weight load, GPU vCPU-quota failures, KAITO (AI toolchain operator) Workspaces stuck not-ready, and GPU cost / scale-to-zero / spot eviction. WHEN: GPU pod Pending 'Insufficient nvidia.com/gpu', no nvidia.com/gpu on node, CUDA driver version insufficient, model OOMKilled loading weights, GPU node pool quota exceeded, KAITO Workspace never becomes ready, idle GPU cost, autoscale GPU on DCGM, spot GPU eviction, right-size a GPU SKU for a model. DO NOT USE FOR: initial GPU/AI setup or enablement (use azure-skills airunway-aks-setup); non-GPU pod/node/network incidents (use aks-troubleshooting); non-GPU cost (use aks-cost-optimization)."
 ---
 
