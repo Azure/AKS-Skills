@@ -13,7 +13,7 @@
  *  6. license === "MIT", metadata.author === "Microsoft" (contract §2 exact values)
  *  7. description contains a WHEN: clause and a DO NOT USE FOR: clause that
  *     uses the parenthetical-redirect grammar ("(use X)" / "(see X)")
- *  8. description respects the contract's declared routing budget (~2000 chars)
+ *  8. description respects the contract's 1024-character maximum
  *  9. every skill has non-empty evals/tests/<skill>/{trigger,quality}-tests.yaml
  * 10. every skill's quality-tests.yaml is wired into evals/promptfooconfig.yaml
  * 11. every script-shaped file in scripts/ has a valid shebang and Git mode 100755
@@ -39,9 +39,8 @@ const yaml = require('js-yaml');
 // Do not invent new thresholds here; these mirror the contract's own numbers.
 const EXPECTED_LICENSE = 'MIT';
 const EXPECTED_AUTHOR = 'Microsoft';
-// "keep it under ~500 tokens (~2000 characters)" — the contract's only declared
-// budget is the character approximation; that's what CI can enforce mechanically.
-const MAX_DESCRIPTION_CHARS = 2000;
+// Agent Skills-compatible hosts accept descriptions up to 1024 characters.
+const MAX_DESCRIPTION_CHARS = 1024;
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 // Declared order from the contract's manifest example (§2).
 const REQUIRED_TOP_LEVEL_ORDER = ['name', 'license', 'metadata', 'description'];
@@ -555,7 +554,7 @@ function lintSkills({
         if (desc.length > MAX_DESCRIPTION_CHARS) {
           addError(
             skillMdPath,
-            `description is ${desc.length} chars, exceeds the contract's routing budget of ~${MAX_DESCRIPTION_CHARS} chars (contract §2 "Budget")`,
+            `description is ${desc.length} characters, exceeds the contract's maximum of ${MAX_DESCRIPTION_CHARS} characters (contract §2 "Budget")`,
           );
         }
 

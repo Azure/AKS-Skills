@@ -22,7 +22,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { lintSkills } = require('./lint-skills.js');
+const { lintSkills, MAX_DESCRIPTION_CHARS } = require('./lint-skills.js');
 const LINTER = path.join(__dirname, 'lint-skills.js');
 
 // --- Fixture helpers -------------------------------------------------------
@@ -489,15 +489,30 @@ test('description DO NOT USE FOR: clause without parenthetical-redirect grammar 
   });
 });
 
-test('description exceeding the ~2000 char routing budget is an error', () => {
+test('description at the 1024-character maximum is accepted', () => {
   withTempRoot((root) => {
     const name = 'aks-fixture-skill';
-    const filler = 'A'.repeat(2100);
-    const desc = `${filler} WHEN: a fixture trigger phrase is present. `
-      + 'DO NOT USE FOR: an unrelated case (use aks-fixture-sibling).';
+    const base = validDescription();
+    const desc = `${'A'.repeat(MAX_DESCRIPTION_CHARS - base.length)}${base}`;
+    assert.equal(desc.length, 1024);
     setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
     const { errors } = runLint(root);
-    assertHasError(errors, /exceeds the contract's routing budget of ~2000 chars/);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test('description at 1025 characters is rejected', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    const base = validDescription();
+    const desc = `${'A'.repeat(MAX_DESCRIPTION_CHARS + 1 - base.length)}${base}`;
+    assert.equal(desc.length, 1025);
+    setupValidScenario(root, name, validFrontMatterLines(name, { description: desc }));
+    const { errors } = runLint(root);
+    assertHasError(
+      errors,
+      /description is 1025 characters, exceeds the contract's maximum of 1024 characters/,
+    );
   });
 });
 
