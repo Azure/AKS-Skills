@@ -3,6 +3,9 @@ name: Skill Evaluation
 on:
   pull_request:
     paths:
+      - '.github/workflows/skill-eval.yml'
+      - 'docs/capability-provider-contract.md'
+      - 'providers/**'
       - 'skills/**'
       - 'evals/**'
   workflow_dispatch:
@@ -48,7 +51,7 @@ jobs:
 
       - name: Test mock dispatcher fail-closed behavior
         working-directory: evals
-        run: node --test mocks/lib/dispatch.test.mjs
+        run: npm run test:provider-harness
 
       - name: Test selective skill context
         working-directory: evals

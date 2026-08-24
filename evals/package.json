@@ -9,6 +9,7 @@
     "test:provider-setup": "node provider-setup.test.js",
     "test": "node providers/llm-client.test.js",
     "test:deep-content": "node --test skill-context.test.mjs network-script-security.test.mjs",
+    "test:provider-harness": "node --test mocks/mcp/*.test.mjs mocks/lib/dispatch.test.mjs",
     "eval": "promptfoo eval -o results.json",
     "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
     "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",
@@ -17,6 +18,7 @@
     "lint:agentic": "vally lint --eval-spec tests",
     "eval:agentic": "vally eval --workers 2",
     "eval:mock": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --tag tier=mock",
+    "eval:provider-behavior": "PATH=\"$PWD/mocks/bin:$PATH\" vally eval --timeout 5m --eval-spec tests/provider-behavior/eval.yaml",
     "report": "node scripts/generate-report.mjs"
   },
   "devDependencies": {

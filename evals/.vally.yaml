@@ -1,0 +1,166 @@
+environments:
+  provider-azure-alpha:
+    files:
+      - src: "../../scenarios/provider-behavior/azure-only-cli/responses.json"
+        dest: ".mocks/responses.json"
+    mcpServers:
+      catalog-sapphire:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "azure-only-alpha"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-azure-zeta:
+    files:
+      - src: "../../scenarios/provider-behavior/azure-only-cli/responses.json"
+        dest: ".mocks/responses.json"
+    mcpServers:
+      catalog-copper:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "azure-only-zeta"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-aks-only:
+    mcpServers:
+      operations-lantern:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "aks-only"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-both:
+    mcpServers:
+      evidence-marigold:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "both-providers"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-neither:
+    files:
+      - src: "../../scenarios/provider-behavior/neither-provider/responses.json"
+        dest: ".mocks/responses.json"
+    mcpServers:
+      empty-catalog-slate:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "neither-provider"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-offline:
+    mcpServers:
+      offline-catalog-pearl:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "neither-provider"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-denied-read:
+    mcpServers:
+      denial-indigo:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "denied-read"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-wrong-azure:
+    mcpServers:
+      scope-violet:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "wrong-azure-scope"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-wrong-kube:
+    mcpServers:
+      context-silver:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "wrong-kube-context"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-approved-write:
+    mcpServers:
+      change-cerulean:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "approved-write"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-denied-write:
+    mcpServers:
+      change-crimson:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "denied-write"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-approved-pcap:
+    mcpServers:
+      trace-topaz:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "approved-packet-capture"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-unsupported:
+    files:
+      - src: "../../scenarios/provider-behavior/unsupported-operation/responses.json"
+        dest: ".mocks/responses.json"
+    mcpServers:
+      schema-teal:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "unsupported-cluster"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"
+
+  provider-secret-readiness:
+    mcpServers:
+      readiness-quartz:
+        type: stdio
+        command: node
+        args: [".mocks/mcp/server.mjs"]
+        env:
+          AKS_SKILLS_MCP_SCENARIO_PATH: ".mocks/mcp/scenarios.json"
+          AKS_SKILLS_MCP_SCENARIO_ID: "secret-readiness"
+          AKS_SKILLS_MCP_INVOCATION_LOG_PATH: ".mocks/mcp/invocations.jsonl"

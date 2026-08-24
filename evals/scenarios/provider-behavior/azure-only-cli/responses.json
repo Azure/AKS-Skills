@@ -1,0 +1,8 @@
+{
+  "responses": [
+    {
+      "match": "^kubectl get pods -n payments -o json$",
+      "stdout": "{\"contract_version\":\"1.0\",\"semantic_capability\":\"kubernetes.resources.read\",\"provider\":{\"id\":\"direct-kubernetes-cli\",\"version\":\"fixture\",\"published_operation\":\"kubectl get pods\",\"host_alias_debug\":null},\"operation_mode\":\"read\",\"target\":{\"azure\":{\"tenant\":\"sha256:692532053426e6d13f0ca754ab4fbd00f33cb69bc95aa36cd932f8d5422b7fb7\",\"subscription\":\"sha256:9ba5514defd98a73e71dc537816049970904977850751cef5a8450fdae715ed0\",\"resource_group\":\"sha256:6b69cdbec96c469c6eb1a9b9e854c1dbb114985ec7c9b1e57e98d74d8c5ff242\",\"cluster\":\"sha256:cc5ca2c26972d8918baec91de41c40ee3d7cbdb5fdcf1b2418c82d442a0799d8\"},\"kubernetes\":{\"context\":\"sha256:3e741ae6d4b8e9f555c36554502823200f38e46f4b616155b2ab8cca39f92f20\",\"namespace\":\"payments\"}},\"identity_kind\":\"user\",\"observation\":{\"observed_at\":\"2026-08-21T18:00:00Z\",\"window\":\"2026-08-21T17:00:00Z/2026-08-21T18:00:00Z\"},\"authorization\":\"allowed\",\"approval\":\"not-required\",\"result\":\"success\",\"redaction_profile\":\"aks-evidence-v1\",\"source\":{\"excerpt\":\"api-7d9 is CrashLoopBackOff after a failed readiness probe\",\"digest\":\"sha256:68792f4d1e38cc0035283609d6151d7fc9d2ab8d6f1f0f8331f7f36f91f26b5a\"},\"fallback\":{\"reason\":\"absent\",\"target\":\"direct-kubernetes-cli\"}}"
+    }
+  ]
+}
