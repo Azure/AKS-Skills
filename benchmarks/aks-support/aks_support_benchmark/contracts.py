@@ -12,6 +12,40 @@ from .paths import normalized_relative
 CONTRACT_VERSION = "aks-support-benchmark/v1"
 HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+COPILOT_MODEL_IDS = (
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-opus-4.8",
+    "claude-opus-4.7",
+    "claude-sonnet-4.6",
+    "claude-opus-4.6",
+    "claude-haiku-4.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+    "gpt-5-mini",
+    "mai-code-1-flash-picker",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
+    "grok-4.5",
+    "grok-4.6",
+    "mai-code-1.1-flash",
+)
+DIRECT_MODEL_CONTEXT = "direct-model-context"
+COPILOT_EXECUTION_TRACK = "copilot-agent"
+COPILOT_EXECUTION_ENVIRONMENT = "github-copilot-subagent"
+RAW_EXECUTION_TRACK = "raw-model"
+ATTEMPT_OUTCOME_IDENTITIES = (
+    "completed",
+    "permanent-capability",
+    "transient-infrastructure",
+)
 
 
 class ContractError(ValueError):
@@ -56,6 +90,25 @@ def _nonempty(value: Any) -> None:
 def _mode(value: Any) -> None:
     if value not in ("direct-model-context", "agent-folder"):
         raise ContractError(f"invalid execution mode: {value!r}")
+
+
+def _copilot_model(value: Any) -> None:
+    if value not in COPILOT_MODEL_IDS:
+        raise ContractError(f"unsupported explicit Copilot model ID: {value!r}")
+
+
+def _execution_track(value: Any) -> None:
+    if value not in (COPILOT_EXECUTION_TRACK, RAW_EXECUTION_TRACK):
+        raise ContractError(f"invalid execution track: {value!r}")
+
+
+def _execution_environment(value: Any) -> None:
+    _identifier(value)
+
+
+def _attempt_outcome(value: Any) -> None:
+    if value not in ATTEMPT_OUTCOME_IDENTITIES:
+        raise ContractError(f"invalid attempt outcome identity: {value!r}")
 
 
 def _outcome(value: Any) -> None:
@@ -170,6 +223,35 @@ SCHEMAS: dict[str, dict[str, Field]] = {
         "capability_profile": Field(dict),
         "budgets": Field(dict),
         "retry_policy": Field(dict),
+        "execution_track": Field(
+            str, required=False, validator=_execution_track
+        ),
+        "execution_environment": Field(
+            str, required=False, validator=_execution_environment
+        ),
+        "fresh_context_id": Field(
+            str, required=False, validator=_identifier
+        ),
+        "attempt_id": Field(str, required=False, validator=_identifier),
+    },
+    "calibration-cell": {
+        **BASE,
+        "cell_id": Field(str, validator=_identifier),
+        "mode": Field(str, validator=_mode),
+        "execution_track": Field(str, validator=_execution_track),
+        "execution_environment": Field(str, validator=_execution_environment),
+        "model_id": Field(str, validator=_copilot_model),
+        "case_id": Field(str, validator=_identifier),
+        "skill_available": Field(bool),
+        "fresh_context_id": Field(str, validator=_identifier),
+        "attempt_id": Field(str, validator=_identifier),
+    },
+    "attempt-outcome": {
+        **BASE,
+        "attempt_id": Field(str, validator=_identifier),
+        "cell_id": Field(str, validator=_identifier),
+        "outcome_identity": Field(str, validator=_attempt_outcome),
+        "detail": Field(str, validator=_nonempty),
     },
     "score-vector": {
         **BASE,
@@ -292,6 +374,35 @@ def _check_nested_entries(kind: str, value: dict[str, Any]) -> None:
             _hash(digest)
         if type(value["repetition"]) is not int or value["repetition"] < 0:
             raise ContractError("repetition must be a non-negative integer")
+        direct_identity_fields = {
+            "execution_track",
+            "execution_environment",
+            "fresh_context_id",
+            "attempt_id",
+        }
+        present = direct_identity_fields & set(value)
+        if present and present != direct_identity_fields:
+            missing = sorted(direct_identity_fields - present)
+            raise ContractError(
+                f"direct execution identity is incomplete; missing={missing}"
+            )
+        if present and value["mode"] != DIRECT_MODEL_CONTEXT:
+            raise ContractError(
+                "direct execution identity requires direct-model-context mode"
+            )
+    elif kind == "calibration-cell":
+        if value["mode"] != DIRECT_MODEL_CONTEXT:
+            raise ContractError(
+                "calibration cell requires direct-model-context mode"
+            )
+        if value["execution_track"] != COPILOT_EXECUTION_TRACK:
+            raise ContractError("calibration cell requires copilot-agent track")
+        if value["execution_environment"] != COPILOT_EXECUTION_ENVIRONMENT:
+            raise ContractError(
+                "calibration cell requires github-copilot-subagent environment"
+            )
+        if value["fresh_context_id"] == value["attempt_id"]:
+            raise ContractError("fresh_context_id and attempt_id must differ")
     elif kind == "trajectory":
         _exact_keys(
             value["infrastructure"],
