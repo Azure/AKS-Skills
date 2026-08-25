@@ -45,11 +45,24 @@ Also: `az aks stop` / `az aks start` is **not fully supported** with active KAIT
 - `inference.preset.name` — a supported model (e.g. `phi-4-mini-instruct`, `llama-3.1-8b-instruct`, `qwen2.5-coder-32b-instruct`, `deepseek-r1-...`, `gpt-oss-20b/120b`), OR `inference.template` for a custom vLLM-served model (mutually exclusive with preset).
 - `resource.count` and `resource.preferredNodes` are **deprecated** in v1beta1; `resource.partition.mode: mig` schedules on a MIG slice.
 
-Test the endpoint once ready:
+Test the Workspace Service through the [Microsoft Learn port-forward path](https://learn.microsoft.com/azure/aks/ai-toolchain-operator-mcp#port-forward-the-kaito-inference-service). This uses the service's HTTP port and captures both model discovery and completion output without creating a temporary pod:
 
 ```bash
-kubectl exec <workspace-pod> -- python3 -c \
-  'import json, urllib.request; data=json.dumps({"model":"<model>","prompt":"hi","max_tokens":10}).encode(); request=urllib.request.Request("http://127.0.0.1:<port>/v1/completions", data=data, headers={"Content-Type":"application/json"}); print(urllib.request.urlopen(request).read().decode())'
+kubectl get svc <workspace-service>
+kubectl port-forward svc/<workspace-service> 8000:80 >kaito-port-forward.log 2>&1 &
+PORT_FORWARD_PID=$!
+trap 'kill "$PORT_FORWARD_PID" 2>/dev/null || true' EXIT
+while ! grep -q 'Forwarding from' kaito-port-forward.log; do
+  kill -0 "$PORT_FORWARD_PID" 2>/dev/null || { cat kaito-port-forward.log >&2; exit 1; }
+  sleep 1
+done
+
+curl --fail --show-error --silent http://127.0.0.1:8000/v1/models \
+  | tee kaito-models.json
+curl --fail --show-error --silent http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"<model>","messages":[{"role":"user","content":"hi"}],"max_tokens":10}' \
+  | tee kaito-completion.json
 ```
 
 Limitations to remember: Windows and Azure Linux node OS SKUs are unsupported as KAITO Workspace nodes; AMD GPU SKUs are not valid `instanceType`s; the add-on runs in public Azure regions only. The add-on pins a specific KAITO version (docs have shown 0.3.1 / 0.4.4 / 0.6.0 across pages) — confirm the live pin, since it gates model availability.

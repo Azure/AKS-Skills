@@ -35,7 +35,6 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const yaml = require('js-yaml');
 
 // --- Contract-declared exact values (docs/skill-contract.md §2) ---------
 // Do not invent new thresholds here; these mirror the contract's own numbers.
@@ -51,9 +50,9 @@ const REQUIRED_TOP_LEVEL_FIELDS = ['name', 'license', 'metadata', 'description']
 const VALID_SHEBANG_RE = /^#!\/\S+(?:\s+.*)?$/;
 const SCRIPT_EXTENSIONS = new Set(['.sh', '.py']);
 const MAX_REFERENCE_LINES_WITHOUT_TOC = 100;
-const COMMAND_NAME_RE = /\b(?:kubectl|docker|podman|nerdctl)\b/;
-const INTERACTIVE_TTY_FLAG_RE = /(?:^|\s)(?:-(?:it|ti)|--(?:interactive|tty)(?:=\S+)?)(?=\s|$)/;
+const EXECUTABLE_COMMANDS = new Set(['eval', 'kubectl', 'docker', 'podman', 'nerdctl']);
 const MCR_DIGEST_IMAGE_RE = /^mcr\.microsoft\.com\/[A-Za-z0-9._/-]+(?::[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$/;
+const SHELL_FENCE_LANGUAGES = new Set(['bash', 'console', 'sh', 'shell', 'zsh']);
 const HARDCODED_AZURE_MCP_NAME_RE = /\bmcp_azure_mcp_[A-Za-z0-9_]+\b/i;
 const AKS_MCP_PRODUCT_NAME_RE = /\bAKS[- ]MCP\b/i;
 const EXPLICIT_AKS_MCP_PRODUCT_RE = /\bAzure\/aks-mcp\b/i;
@@ -132,6 +131,9 @@ function parseYamlScalar(rawValue) {
  * contract's declared-order checks.
  */
 function parseFrontMatter(rawFrontMatter) {
+  // Load only when front matter is parsed so dependency-free policy helpers can
+  // be exercised in minimal review environments without eval dependencies.
+  const yaml = require('js-yaml');
   const value = yaml.load(rawFrontMatter);
   const isMapping = value !== null && typeof value === 'object' && !Array.isArray(value);
   const topLevelKeys = isMapping ? Object.keys(value) : [];
@@ -230,30 +232,249 @@ function countTextLines(content) {
   return content.endsWith('\n') ? lines.length - 1 : lines.length;
 }
 
-function hasLeadingContentsSection(content) {
-  for (const line of content.split('\n')) {
-    const heading = line.match(/^#{2,6}\s+(.+?)\s*#*\s*$/);
-    if (!heading) continue;
-    return /^(?:Contents|Table of contents)$/i.test(heading[1]);
-  }
-  return false;
+function markdownHeadingAnchor(text) {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]+>/g, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .trim()
+    .replace(/\s/g, '-');
 }
 
-/**
- * Extract command-bearing Markdown snippets without treating passive prose or
- * manifest image fields as executable shell commands.
- */
-function extractMarkdownCommandSnippets(content) {
-  const snippets = [];
+function validateLeadingContents(content) {
+  const headings = [];
+  const anchorCounts = new Map();
   const lines = content.split('\n');
   let fence = null;
+
+  for (const [index, line] of lines.entries()) {
+    if (fence) {
+      const closing = new RegExp(`^\\s{0,3}\\${fence.marker}{${fence.length},}\\s*$`);
+      if (closing.test(line)) fence = null;
+      continue;
+    }
+    const opening = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (opening) {
+      fence = { marker: opening[1][0], length: opening[1].length };
+      continue;
+    }
+    const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (!match) continue;
+    const baseAnchor = markdownHeadingAnchor(match[2]);
+    const count = anchorCounts.get(baseAnchor) || 0;
+    anchorCounts.set(baseAnchor, count + 1);
+    headings.push({
+      level: match[1].length,
+      text: match[2],
+      line: index + 1,
+      anchor: count === 0 ? baseAnchor : `${baseAnchor}-${count}`,
+    });
+  }
+
+  const contents = headings.find(heading => heading.level >= 2);
+  if (!contents || !/^(?:Contents|Table of contents)$/i.test(contents.text)) {
+    return 'must place a Contents or Table of contents section before its topic sections';
+  }
+
+  const contentsIndex = headings.indexOf(contents);
+  const nextPeer = headings.slice(contentsIndex + 1)
+    .find(heading => heading.level <= contents.level);
+  const endLine = nextPeer ? nextPeer.line : lines.length + 1;
+  const links = [];
+  for (let index = contents.line; index < endLine - 1; index++) {
+    const linkPattern = /\[[^\]]+\]\(#([^)]+)\)/g;
+    let match;
+    while ((match = linkPattern.exec(lines[index])) !== null) {
+      links.push(match[1].toLowerCase());
+    }
+  }
+
+  if (links.length === 0) {
+    return 'Contents section must include at least one Markdown link to a real heading';
+  }
+
+  const realAnchors = new Set(headings
+    .filter(heading => heading !== contents)
+    .map(heading => heading.anchor));
+  const invalid = links.find(anchor => !realAnchors.has(anchor));
+  return invalid
+    ? `Contents link "#${invalid}" does not resolve to a heading in this file`
+    : null;
+}
+
+function stripShellComment(line) {
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index];
+    if (escaped) {
+      escaped = false;
+    } else if (char === '\\' && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === '#' && (index === 0 || /\s/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function continuesShellLine(line) {
+  const trimmed = line.trimEnd();
+  let backslashes = 0;
+  for (let index = trimmed.length - 1; index >= 0 && trimmed[index] === '\\'; index--) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+
+function flattenShellSegments(segments) {
+  let text = '';
+  const lineMap = [];
+  for (const segment of segments) {
+    let value = stripShellComment(segment.text);
+    if (continuesShellLine(value)) value = value.trimEnd().slice(0, -1);
+    for (const char of value) {
+      text += char;
+      lineMap.push(segment.line);
+    }
+    text += ' ';
+    lineMap.push(segment.line);
+  }
+  return { text, lineMap };
+}
+
+function tokenizeShellSegments(segments) {
+  const { text, lineMap } = flattenShellSegments(segments);
+  const tokens = [];
+  let value = '';
+  let start = -1;
+  let quote = null;
+  let escaped = false;
+
+  function pushToken(end) {
+    if (value === '') return;
+    tokens.push({ value, line: lineMap[start], start, end });
+    value = '';
+    start = -1;
+  }
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (escaped) {
+      if (start === -1) start = index;
+      value += char;
+      escaped = false;
+    } else if (char === '\\' && quote !== "'") {
+      if (start === -1) start = index;
+      escaped = true;
+    } else if (quote) {
+      if (char === quote) quote = null;
+      else value += char;
+    } else if (char === '"' || char === "'") {
+      if (start === -1) start = index;
+      quote = char;
+    } else if (/\s/.test(char)) {
+      pushToken(index);
+    } else {
+      if (start === -1) start = index;
+      value += char;
+    }
+  }
+
+  if (escaped || quote) return { tokens: null, text, lineMap };
+  pushToken(text.length);
+  return { tokens, text, lineMap };
+}
+
+function commandNameFromToken(value) {
+  const match = value.match(/(?:^|.*\$\()(?<command>eval|kubectl|docker|podman|nerdctl)$/);
+  return match ? match.groups.command : null;
+}
+
+function hasCommandInvocation(text) {
+  return /(?:^|[;&|]\s*|\$\(\s*|`)\s*(?:(?:if|then|do|while|until|!)\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:(?:sudo|command)\s+)?(?:eval|kubectl|docker|podman|nerdctl)\b/.test(text);
+}
+
+function hasLeadingCommandInvocation(text) {
+  return /^\s*(?:(?:if|then|do|while|until|!)\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:(?:sudo|command)\s+)?(?:eval|kubectl|docker|podman|nerdctl)\b/.test(text);
+}
+
+function parseShellUnits(content, startLine = 1) {
+  const lines = content.split('\n');
+  const units = [];
+
+  for (let index = 0; index < lines.length;) {
+    const first = lines[index].replace(/^\s*\$\s+/, '');
+    if (/^\s*(?:#|$)/.test(first)) {
+      index++;
+      continue;
+    }
+
+    const segments = [];
+    let current = first;
+    do {
+      segments.push({ text: current, line: startLine + index });
+      index++;
+      if (!continuesShellLine(current) || index >= lines.length) break;
+      current = lines[index];
+    } while (true);
+
+    const flattened = flattenShellSegments(segments).text;
+    const heredocs = [];
+    const heredocPattern = /<<(-)?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\2/g;
+    let heredocMatch;
+    while ((heredocMatch = heredocPattern.exec(flattened)) !== null) {
+      const delimiter = heredocMatch[3];
+      const allowTabs = Boolean(heredocMatch[1]);
+      const payload = [];
+      let terminated = false;
+      while (index < lines.length) {
+        const candidate = allowTabs ? lines[index].replace(/^\t+/, '') : lines[index];
+        if (candidate === delimiter) {
+          terminated = true;
+          index++;
+          break;
+        }
+        payload.push({ text: lines[index], line: startLine + index });
+        index++;
+      }
+      heredocs.push({ delimiter, payload, terminated });
+    }
+
+    units.push({ segments, heredocs });
+  }
+
+  return units;
+}
+
+function extractMarkdownShellSources(content) {
+  const sources = [];
+  const errors = [];
+  const lines = content.split('\n');
+  let fence = null;
+
+  function activeFence(current) {
+    const body = current.lines.join('\n');
+    const language = current.info.toLowerCase().split(/\s+/, 1)[0];
+    if (SHELL_FENCE_LANGUAGES.has(language)) return true;
+    if (language !== '') return false;
+    return parseShellUnits(body, current.startLine)
+      .some(unit => hasCommandInvocation(flattenShellSegments(unit.segments).text));
+  }
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     if (fence) {
       const closing = new RegExp(`^\\s{0,3}\\${fence.marker}{${fence.length},}\\s*$`);
       if (closing.test(line)) {
-        snippets.push({ text: fence.lines.join('\n'), line: fence.startLine });
+        if (activeFence(fence)) {
+          sources.push({ content: fence.lines.join('\n'), startLine: fence.startLine });
+        }
         fence = null;
       } else {
         fence.lines.push(line);
@@ -261,128 +482,294 @@ function extractMarkdownCommandSnippets(content) {
       continue;
     }
 
-    const opening = line.match(/^\s{0,3}(`{3,}|~{3,})[^`~]*$/);
+    const opening = line.match(/^\s{0,3}(`{3,}|~{3,})\s*([^`~]*)$/);
     if (opening) {
       fence = {
         marker: opening[1][0],
         length: opening[1].length,
+        info: opening[2].trim(),
+        openingLine: index + 1,
         startLine: index + 2,
         lines: [],
       };
       continue;
     }
 
-    const inlineCode = /`([^`\n]+)`/g;
-    let inlineMatch;
-    while ((inlineMatch = inlineCode.exec(line)) !== null) {
-      if (COMMAND_NAME_RE.test(inlineMatch[1])) {
-        snippets.push({ text: inlineMatch[1], line: index + 1 });
+    const candidate = line.replace(/^\s*(?:>\s*)?(?:[-*+]\s+)?(?:\$\s*)?/, '');
+    if (!hasLeadingCommandInvocation(candidate)) continue;
+    const sourceLines = [candidate];
+    const sourceStart = index + 1;
+    while (continuesShellLine(sourceLines[sourceLines.length - 1]) && index + 1 < lines.length) {
+      sourceLines.push(lines[++index]);
+    }
+    const commandText = sourceLines.join(' ');
+    const heredoc = commandText.match(/<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (heredoc) {
+      const delimiter = heredoc[2];
+      while (index + 1 < lines.length) {
+        const payloadLine = lines[++index];
+        sourceLines.push(payloadLine);
+        if (payloadLine.replace(/^\t+/, '') === delimiter) break;
       }
     }
+    sources.push({ content: sourceLines.join('\n'), startLine: sourceStart });
+  }
 
-    const bareCommand = line.replace(/^\s*(?:>\s*)?(?:[-*+]\s+)?(?:\$\s*)?/, '');
-    if (/^(?:sudo\s+)?(?:kubectl|docker|podman|nerdctl)\b/.test(bareCommand)) {
-      snippets.push({ text: bareCommand, line: index + 1 });
+  if (fence && activeFence(fence)) {
+    errors.push({
+      line: fence.openingLine,
+      message: 'starts an unterminated executable shell code block; command safety cannot be verified',
+    });
+  }
+  return { sources, errors };
+}
+
+function collectShellAssignments(units) {
+  const assignments = new Map();
+  for (const unit of units) {
+    const text = flattenShellSegments(unit.segments).text.trim();
+    const match = text.match(/^([A-Z_][A-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^\s]+))$/);
+    if (match) assignments.set(match[1], match[2] ?? match[3] ?? match[4]);
+  }
+  return assignments;
+}
+
+function resolveShellValue(value, assignments, seen = new Set()) {
+  let resolved = value.replace(/^["']|["']$/g, '');
+  const variable = resolved.match(/^\$(?:\{([A-Z_][A-Z0-9_]*)\}|([A-Z_][A-Z0-9_]*))$/);
+  if (!variable) return resolved;
+  const name = variable[1] || variable[2];
+  if (seen.has(name) || !assignments.has(name)) return null;
+  seen.add(name);
+  return resolveShellValue(assignments.get(name), assignments, seen);
+}
+
+function commandSegments(tokens) {
+  const segments = [];
+  for (let index = 0; index < tokens.length; index++) {
+    const command = commandNameFromToken(tokens[index].value);
+    if (!command) continue;
+    let end = tokens.length;
+    for (let cursor = index + 1; cursor < tokens.length; cursor++) {
+      if (/^(?:[|;]|&&|\|\|)$/.test(tokens[cursor].value)
+        || commandNameFromToken(tokens[cursor].value)) {
+        end = cursor;
+        break;
+      }
+    }
+    segments.push({ command, tokens: tokens.slice(index, end) });
+  }
+  return segments;
+}
+
+function findTtyViolation(segment) {
+  const values = segment.tokens.map(token => token.value);
+  const ttyCapable = segment.command === 'kubectl'
+    ? values.some(value => /^(?:attach|debug|exec|run)$/.test(value))
+    : /^(?:docker|podman|nerdctl)$/.test(segment.command)
+      && values.some(value => /^(?:exec|run)$/.test(value));
+  if (!ttyCapable) return null;
+
+  let interactive = null;
+  let tty = null;
+  for (const token of segment.tokens.slice(1)) {
+    if (/^--(?:interactive|tty)(?:=.*)?$/.test(token.value)) return token;
+    const short = token.value.match(/^-([A-Za-z]+)(?:=.*)?$/);
+    if (!short) continue;
+    if (short[1].includes('i') && short[1].includes('t')) return token;
+    if (short[1] === 'i') interactive = token;
+    if (short[1] === 't') tty = token;
+    if (interactive && tty) return token;
+  }
+  return null;
+}
+
+function extractDockerRunImage(segment) {
+  const values = segment.tokens.map(token => token.value);
+  const runIndex = values.indexOf('run');
+  if (runIndex === -1) return { image: null, malformed: false };
+
+  const booleanLong = new Set([
+    '--detach', '--disable-content-trust', '--init', '--interactive',
+    '--oom-kill-disable', '--privileged', '--publish-all', '--read-only',
+    '--rm', '--sig-proxy', '--tty',
+  ]);
+  const valueLong = new Set([
+    '--add-host', '--annotation', '--attach', '--cap-add', '--cap-drop',
+    '--cgroup-parent', '--cidfile', '--cpus', '--device', '--dns',
+    '--dns-option', '--dns-search', '--entrypoint', '--env', '--env-file',
+    '--expose', '--gpus', '--group-add', '--health-cmd', '--health-interval',
+    '--health-retries', '--health-start-period', '--health-timeout',
+    '--hostname', '--ipc', '--label', '--label-file', '--log-driver',
+    '--log-opt', '--mac-address', '--memory', '--memory-reservation',
+    '--memory-swap', '--mount', '--name', '--network', '--network-alias',
+    '--pid', '--platform', '--publish', '--restart', '--runtime',
+    '--security-opt', '--shm-size', '--stop-signal', '--stop-timeout',
+    '--storage-opt', '--sysctl', '--tmpfs', '--ulimit', '--user',
+    '--userns', '--uts', '--volume', '--volume-driver', '--workdir',
+  ]);
+  const valueShort = new Set(['-a', '-c', '-e', '-h', '-l', '-m', '-p', '-u', '-v', '-w']);
+
+  for (let index = runIndex + 1; index < segment.tokens.length; index++) {
+    const token = segment.tokens[index];
+    const value = token.value;
+    if (value === '--') {
+      return segment.tokens[index + 1]
+        ? { image: segment.tokens[index + 1], malformed: false }
+        : { image: null, malformed: true, line: token.line };
+    }
+    if (booleanLong.has(value) || /^-[ditPq]+$/.test(value)) continue;
+    if (valueLong.has(value) || valueShort.has(value)) {
+      if (!segment.tokens[index + 1]) return { image: null, malformed: true, line: token.line };
+      index++;
+      continue;
+    }
+    if (value.startsWith('--') && value.includes('=')) continue;
+    if ([...valueShort].some(option => value.startsWith(option) && value.length > option.length)) continue;
+    if (value.startsWith('-')) return { image: null, malformed: true, line: token.line };
+    return { image: token, malformed: false };
+  }
+
+  return { image: null, malformed: true, line: segment.tokens[runIndex].line };
+}
+
+function extractKubectlImages(segment) {
+  const images = [];
+  let malformedLine = null;
+  for (let index = 1; index < segment.tokens.length; index++) {
+    const token = segment.tokens[index];
+    if (token.value === '--image') {
+      const image = segment.tokens[index + 1];
+      if (!image || image.value.startsWith('-')) malformedLine = token.line;
+      else images.push(image);
+    } else if (token.value.startsWith('--image=')) {
+      const value = token.value.slice('--image='.length);
+      if (value === '') malformedLine = token.line;
+      else images.push({ value, line: token.line });
     }
   }
 
-  return {
-    snippets,
-    unterminatedFenceLine: fence ? fence.startLine - 1 : null,
-  };
+  const values = segment.tokens.map(token => token.value);
+  const setIndex = values.indexOf('set');
+  if (setIndex !== -1 && values[setIndex + 1] === 'image') {
+    for (const token of segment.tokens.slice(setIndex + 2)) {
+      if (token.value.startsWith('-')) continue;
+      const assignment = token.value.match(/^[^=]+=([^=].*)$/);
+      if (assignment) images.push({ value: assignment[1], line: token.line });
+    }
+  }
+  return { images, malformedLine };
 }
 
-function extractImageArguments(command) {
-  const images = [];
-  const imageFlag = /--image(?:(=)|\s+)/g;
-  let match;
+function inspectShellSource(content, { startLine = 1 } = {}) {
+  const units = parseShellUnits(content, startLine);
+  const assignments = collectShellAssignments(units);
+  const findings = [];
 
-  while ((match = imageFlag.exec(command)) !== null) {
-    let cursor = imageFlag.lastIndex;
-    while (cursor < command.length && /\s/.test(command[cursor])) cursor++;
-    if (cursor >= command.length) return { images, malformed: true };
+  function addImageFinding(image, line) {
+    const resolved = resolveShellValue(image, assignments);
+    if (!resolved) {
+      findings.push({
+        line,
+        kind: 'malformed-image',
+        message: `cannot resolve executable container image "${image}" to a fixed value`,
+      });
+    } else if (!MCR_DIGEST_IMAGE_RE.test(resolved)) {
+      findings.push({
+        line,
+        kind: 'image',
+        message: `executes container image "${resolved}"; executable images must be MCR-hosted and pinned by sha256 digest`,
+      });
+    }
+  }
 
-    const quote = command[cursor] === '"' || command[cursor] === "'" ? command[cursor] : null;
-    if (quote) {
-      const end = command.indexOf(quote, cursor + 1);
-      if (end === -1) return { images, malformed: true };
-      images.push(command.slice(cursor + 1, end));
-      imageFlag.lastIndex = end + 1;
+  for (const unit of units) {
+    const analysisSegments = unit.segments.map(segment => ({ ...segment }));
+    const substitution = analysisSegments[0].text.lastIndexOf('$(');
+    if (substitution !== -1) {
+      analysisSegments[0].text = analysisSegments[0].text.slice(substitution + 2);
+      const lastSegment = analysisSegments[analysisSegments.length - 1];
+      const closing = lastSegment.text.lastIndexOf(')');
+      if (closing !== -1) lastSegment.text = lastSegment.text.slice(0, closing);
+    }
+    const parsed = tokenizeShellSegments(analysisSegments);
+    if (!parsed.tokens) {
+      if (hasCommandInvocation(parsed.text)) {
+        findings.push({
+          line: unit.segments[0].line,
+          kind: 'malformed-command',
+          message: 'has malformed shell quoting; command safety cannot be verified',
+        });
+      }
       continue;
     }
 
-    const token = command.slice(cursor).match(/^[^\s\\]+/);
-    if (!token) return { images, malformed: true };
-    images.push(token[0]);
-    imageFlag.lastIndex = cursor + token[0].length;
-  }
-
-  return { images, malformed: false };
-}
-
-function tokenizeShellWords(command) {
-  const words = [];
-  let word = '';
-  let quote = null;
-  let escaped = false;
-
-  for (const char of command) {
-    if (escaped) {
-      word += char;
-      escaped = false;
-    } else if (char === '\\' && quote !== "'") {
-      escaped = true;
-    } else if (quote) {
-      if (char === quote) quote = null;
-      else word += char;
-    } else if (char === '"' || char === "'") {
-      quote = char;
-    } else if (/\s/.test(char)) {
-      if (word !== '') {
-        words.push(word);
-        word = '';
+    const segments = commandSegments(parsed.tokens);
+    for (const segment of segments) {
+      if (!EXECUTABLE_COMMANDS.has(segment.command)) continue;
+      if (segment.command === 'eval') {
+        findings.push({
+          line: segment.tokens[0].line,
+          kind: 'eval',
+          message: 'uses eval in an agent-run command',
+        });
+        continue;
       }
-    } else {
-      word += char;
+
+      const tty = findTtyViolation(segment);
+      if (tty) {
+        findings.push({
+          line: tty.line,
+          kind: 'tty',
+          message: 'uses interactive and TTY flags in an agent-run command',
+        });
+      }
+
+      if (segment.command === 'kubectl') {
+        const { images, malformedLine } = extractKubectlImages(segment);
+        if (malformedLine !== null) {
+          findings.push({
+            line: malformedLine,
+            kind: 'malformed-image',
+            message: 'has a malformed executable image argument; command safety cannot be verified',
+          });
+        }
+        for (const image of images) addImageFinding(image.value, image.line);
+      } else {
+        const runtimeImage = extractDockerRunImage(segment);
+        if (runtimeImage.malformed) {
+          findings.push({
+            line: runtimeImage.line,
+            kind: 'malformed-image',
+            message: 'has ambiguous container runtime options; executable image provenance cannot be verified',
+          });
+        } else if (runtimeImage.image) {
+          addImageFinding(runtimeImage.image.value, runtimeImage.image.line);
+        }
+      }
+    }
+
+    const appliesYaml = segments.some((segment) => {
+      if (segment.command !== 'kubectl') return false;
+      return segment.tokens.some(token => /^(?:apply|create|replace)$/.test(token.value));
+    });
+    if (!appliesYaml) continue;
+    for (const heredoc of unit.heredocs) {
+      if (!heredoc.terminated) {
+        findings.push({
+          line: unit.segments[0].line,
+          kind: 'malformed-command',
+          message: `has an unterminated "${heredoc.delimiter}" heredoc; command safety cannot be verified`,
+        });
+        continue;
+      }
+      for (const payloadLine of heredoc.payload) {
+        const image = payloadLine.text.match(/^\s*(?:-\s*)?image:\s*(?:"([^"]+)"|'([^']+)'|(\S+))/);
+        if (image) addImageFinding(image[1] || image[2] || image[3], payloadLine.line);
+      }
     }
   }
-
-  if (escaped || quote) return null;
-  if (word !== '') words.push(word);
-  return words;
-}
-
-function extractRuntimeImage(command) {
-  const runtime = command.match(/\b(?:docker|podman|nerdctl)\s+run\b(.*)$/);
-  if (!runtime) return { image: null, malformed: false };
-
-  const words = tokenizeShellWords(runtime[1]);
-  if (!words) return { image: null, malformed: true };
-  const booleanOptions = new Set([
-    '--detach',
-    '--disable-content-trust',
-    '--init',
-    '--oom-kill-disable',
-    '--privileged',
-    '--read-only',
-    '--rm',
-    '--sig-proxy',
-  ]);
-
-  for (let index = 0; index < words.length; index++) {
-    const word = words[index];
-    if (word === '--') {
-      return words[index + 1]
-        ? { image: words[index + 1], malformed: false }
-        : { image: null, malformed: true };
-    }
-    if (booleanOptions.has(word) || /^-[d]+$/.test(word)) continue;
-    if (word.startsWith('--') && word.includes('=')) continue;
-    if (word.startsWith('-')) return { image: null, malformed: true };
-    return { image: word, malformed: false };
-  }
-
-  return { image: null, malformed: true };
+  return findings;
 }
 
 function checkAzureMcpGuidanceContract(skillsDir, addError) {
@@ -628,6 +1015,13 @@ function lintSkills({
       } else if (mode !== '100755') {
         addError(filePath, 'Script is not executable (git mode must be 100755 — run `chmod +x` and re-stage) (contract §4)');
       }
+
+      if (path.extname(filePath).toLowerCase() === '.sh'
+        || /\b(?:ba|z|da|k)?sh\b/.test(firstLine)) {
+        for (const finding of inspectShellSource(readText(filePath))) {
+          addError(filePath, `line ${finding.line} ${finding.message} (contract §4)`);
+        }
+      }
     }
   }
 
@@ -635,69 +1029,26 @@ function lintSkills({
     for (const filePath of findMarkdownFiles(skillDir).sort()) {
       const content = readText(filePath);
       if (path.basename(filePath) !== 'SKILL.md'
-        && countTextLines(content) > MAX_REFERENCE_LINES_WITHOUT_TOC
-        && !hasLeadingContentsSection(content)) {
-        addError(
-          filePath,
-          `Markdown reference is longer than ${MAX_REFERENCE_LINES_WITHOUT_TOC} lines and must place a Contents or Table of contents section before its topic sections (contract §3)`,
-        );
+        && countTextLines(content) > MAX_REFERENCE_LINES_WITHOUT_TOC) {
+        const contentsError = validateLeadingContents(content);
+        if (contentsError) {
+          addError(
+            filePath,
+            `Markdown reference is longer than ${MAX_REFERENCE_LINES_WITHOUT_TOC} lines and ${contentsError} (contract §3)`,
+          );
+        }
       }
 
-      const { snippets, unterminatedFenceLine } = extractMarkdownCommandSnippets(content);
-      if (unterminatedFenceLine !== null) {
+      const { sources, errors: extractionErrors } = extractMarkdownShellSources(content);
+      for (const extractionError of extractionErrors) {
         addError(
           filePath,
-          `line ${unterminatedFenceLine} starts an unterminated fenced code block; command safety cannot be verified (contract §4)`,
+          `line ${extractionError.line} ${extractionError.message} (contract §4)`,
         );
       }
-
-      for (const snippet of snippets) {
-        const commandLines = snippet.text
-          .split('\n')
-          .filter(line => !/^\s*#/.test(line))
-          .join('\n')
-          .replace(/\\\s*\n\s*/g, ' ')
-          .split('\n');
-
-        for (const [offset, rawCommand] of commandLines.entries()) {
-          if (!COMMAND_NAME_RE.test(rawCommand)) continue;
-          const command = rawCommand.trim();
-          const optionSegment = command.split(/\s+--\s+/, 1)[0];
-
-          if (INTERACTIVE_TTY_FLAG_RE.test(optionSegment)) {
-            addError(
-              filePath,
-              `line ${snippet.line + offset} uses an interactive TTY flag in an agent-run Markdown command (contract §4)`,
-            );
-          }
-
-          let images = [];
-          let malformed = false;
-          const executesKubectlImage = /\bkubectl\b.*\b(?:run|debug)\b/.test(optionSegment);
-          if (executesKubectlImage && /--image(?:=|\s|$)/.test(optionSegment)) {
-            ({ images, malformed } = extractImageArguments(optionSegment));
-          }
-
-          const runtimeImage = extractRuntimeImage(optionSegment);
-          if (runtimeImage.malformed) malformed = true;
-          if (runtimeImage.image) images.push(runtimeImage.image);
-
-          if (malformed) {
-            addError(
-              filePath,
-              `line ${snippet.line + offset} has a malformed executable image argument; command safety cannot be verified (contract §4)`,
-            );
-            continue;
-          }
-
-          for (const image of images) {
-            if (!MCR_DIGEST_IMAGE_RE.test(image)) {
-              addError(
-                filePath,
-                `line ${snippet.line + offset} executes container image "${image}"; executable images must be MCR-hosted and pinned by sha256 digest (contract §4)`,
-              );
-            }
-          }
+      for (const source of sources) {
+        for (const finding of inspectShellSource(source.content, { startLine: source.startLine })) {
+          addError(filePath, `line ${finding.line} ${finding.message} (contract §4)`);
         }
       }
     }
@@ -942,6 +1293,9 @@ module.exports = {
   findSkillFolders,
   extractFrontMatterBlock,
   checkDeclaredOrder,
+  extractMarkdownShellSources,
+  inspectShellSource,
+  validateLeadingContents,
   EXPECTED_LICENSE,
   EXPECTED_AUTHOR,
   MAX_DESCRIPTION_CHARS,

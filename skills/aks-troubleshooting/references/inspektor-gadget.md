@@ -14,7 +14,11 @@ Use Inspektor Gadget for real-time, low-level node/pod diagnostics when `kubectl
 
 ## IG Version
 
-`<ig-version>` = `v0.51.0` — substitute this exact tag (with `v` prefix) wherever `<ig-version>` appears. Bump this line only.
+`<ig-version>` = `v0.51.0`. The executable image digest
+`sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4`
+is the MCR manifest digest for that tag. Treat the version and digest as one
+verified pair: when upgrading IG, resolve the new tag from MCR and update both
+the `<ig-version>` value and every executable image digest below.
 
 ## Base Command Pattern
 

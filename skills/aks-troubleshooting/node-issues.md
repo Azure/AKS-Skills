@@ -106,13 +106,13 @@ See [AKS resource reservations](https://learn.microsoft.com/azure/aks/concepts-c
 > ⚠️ **Warning:** The following command creates a privileged debug pod. Only run it after the user explicitly approves the diagnostic action and understands the change-control impact.
 
 ```bash
-# Capture the largest container-log paths without opening an interactive shell
+# Capture the largest pod-log directories without opening an interactive shell
 kubectl debug node/<node> --profile=sysadmin --attach --quiet \
   --image=mcr.microsoft.com/cbl-mariner/base/core@sha256:c833841d2dcfd3081d2ee807050d19368854f70d9b6faef027463e2c6f45ee41 -- \
-  chroot /host sh -c 'du -x -h /var/log/containers/*' | sort -h | tail -20
+  chroot /host sh -c 'du -x -h /var/log/pods/*' | sort -h | tail -20
 ```
 
-Common culprit: high-volume container logs accumulating in `/var/log/containers`.
+Common culprit: high-volume container logs accumulating under `/var/log/pods`.
 
 **Deep diagnostics with Inspektor Gadget** (PID pressure or unknown process load):
 

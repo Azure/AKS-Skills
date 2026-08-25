@@ -35,7 +35,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 ## 3. Content rules
 
 - **Durability.** A sentence that prescribes *how to think, write, or generally behave* — with no AKS/Azure/Kubernetes token, no tool/resource identifier, and no safety verb — is decaying coaching; drop it. Instructions that encode an **org policy**, a **tool contract**, or a **safety boundary** the model cannot infer are durable; keep them. (The coaching-phrase lint flags candidates as a warning; a human decides.)
-- **Long-reference navigation.** Every non-`SKILL.md` Markdown file longer than 100 lines must put a visible `Contents` or `Table of contents` section before its topic sections. This follows Anthropic's current [Skill authoring best practice for longer reference files](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices#structure-longer-reference-files-with-table-of-contents).
+- **Long-reference navigation.** Every non-`SKILL.md` Markdown file longer than 100 lines must put a visible `Contents` or `Table of contents` section before its topic sections, with navigable links that resolve to real headings in the file. This follows Anthropic's current [Skill authoring best practice for longer reference files](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices#structure-longer-reference-files-with-table-of-contents).
 - **Read-only by default.** Any skill that can mutate a cluster MUST state the read-only guardrail: *do not restart, delete, cordon, drain, scale, upgrade, or reconfigure unless the user explicitly asks.*
 - **No host coupling in the body.** No "OpenClaw UI will render…", no `/home/<user>/...` paths, no host-specific assumptions.
 - **MCP product names and boundaries.** **Azure MCP Server** means `@azure/mcp`, which this repository configures through `.mcp.json`. The **AKS MCP server** means the separate `Azure/aks-mcp` product, which this repository does not configure or support. Never shorten Azure MCP Server to "AKS MCP" or "AKS-MCP." Azure MCP Server's AKS area is limited to cluster and node-pool metadata; AppLens, Azure Monitor, and Resource Health are separate areas. Select operations from host-advertised capabilities and schemas, and retain direct CLI/Kubernetes fallbacks.
@@ -45,7 +45,7 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 - Scripts have the executable bit set, are **shellcheck-clean** at warning level, and are POSIX where practical.
 - **No `eval`.** No unquoted interpolation of user input into a Markdown command, script, or privileged manifest.
 - Every input that reaches a privileged pod is validated/allowlisted; filters are passed as argv/env, never as shell strings.
-- Container images executed by Markdown commands or scripts are **MCR-hosted and digest-pinned**. Docker Hub/public images and tag-only MCR images are not allowed in executable paths.
+- Container images executed by Markdown commands, applied Markdown/script heredocs, or scripts are **MCR-hosted and digest-pinned**. Docker Hub/public images and tag-only MCR images are not allowed in executable paths.
 - No interactive TTY flags (`-it`, `-ti`, `--interactive`, or `--tty`) in agent-run Markdown commands or scripts.
 - Commands that create debug or test pods retain an explicit user-approval gate.
 
@@ -87,7 +87,7 @@ CI fails if a skill has no tests or if the configured skill context is invalid.
 
 ## 7. What CI enforces automatically
 
-- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, long-reference navigation, bundle-wide Markdown command safety, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
+- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, long-reference navigation, bundle-wide Markdown and executable-script command safety, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing; `evals/bundle-policy.test.js` covers the command/TOC parsers without external dependencies, and `evals/lint-skills.test.js` includes that suite while keeping CRLF (Windows) checkouts linting identically.
 - `evals/skill-context.test.mjs` — ordered selective loading, path and symlink safety, configured path resolution, expansion guards, and unique case IDs.
 - `evals/network-script-security.test.mjs` — rendered capture-manifest least privilege and traffic-generator argument boundaries.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).

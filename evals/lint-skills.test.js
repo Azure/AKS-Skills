@@ -27,6 +27,7 @@ const {
   MAX_DESCRIPTION_CHARS,
   MAX_REFERENCE_LINES_WITHOUT_TOC,
 } = require('./lint-skills.js');
+require('./bundle-policy.test.js');
 const LINTER = path.join(__dirname, 'lint-skills.js');
 
 // --- Fixture helpers -------------------------------------------------------
@@ -745,6 +746,29 @@ test('missing Git executable reports that index mode cannot be verified', () => 
   });
 });
 
+test('executable shell scripts use the shared eval, TTY, and image policy', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptsDir = path.join(root, 'skills', name, 'scripts');
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const scriptPath = path.join(scriptsDir, 'unsafe.sh');
+    fs.writeFileSync(
+      scriptPath,
+      '#!/bin/sh\n'
+        + 'eval "$COMMAND"\n'
+        + 'kubectl exec -i -t fixture-pod -- true\n'
+        + 'docker run --rm busybox:1.36 true\n',
+    );
+    stageWithMode(root, scriptPath, '100755');
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /unsafe\.sh.*line 2 uses eval/);
+    assertHasError(errors, /unsafe\.sh.*line 3 uses interactive and TTY flags/);
+    assertHasError(errors, /unsafe\.sh.*line 4 executes container image "busybox:1\.36"/);
+  });
+});
+
 // --- Complete-bundle Markdown contract --------------------------------------
 
 test('non-SKILL Markdown at exactly 100 lines does not require a TOC', () => {
@@ -803,7 +827,7 @@ test('interactive TTY flags in nested skill Markdown commands are errors', () =>
       '```bash\nkubectl exec -it fixture-pod -- printenv\n```\n',
     );
     const { errors } = runLint(root);
-    assertHasError(errors, /interactive TTY flag/);
+    assertHasError(errors, /interactive and TTY flags/);
   });
 });
 
@@ -882,7 +906,7 @@ test('unterminated Markdown command fences fail closed', () => {
       '```bash\nkubectl get pods\n',
     );
     const { errors } = runLint(root);
-    assertHasError(errors, /unterminated fenced code block/);
+    assertHasError(errors, /unterminated executable shell code block/);
   });
 });
 
