@@ -42,6 +42,9 @@ class FailureClass(str, Enum):
 
 IDENTITY_FIELDS = {
     "accepted_sha",
+    "cell_id",
+    "attempt_ordinal",
+    "attempt_nonce",
     "mode",
     "execution_track",
     "environment",
@@ -90,6 +93,16 @@ def validate_attempt_identity(identity: dict[str, Any]) -> dict[str, Any]:
         identity["accepted_sha"]
     ):
         raise AttemptSealError("accepted_sha must be a full lowercase Git SHA")
+    if not isinstance(identity["cell_id"], str) or not ID_RE.fullmatch(
+        identity["cell_id"]
+    ):
+        raise AttemptSealError("cell_id must be a valid identifier")
+    if type(identity["attempt_ordinal"]) is not int or identity["attempt_ordinal"] < 1:
+        raise AttemptSealError("attempt_ordinal must be a positive integer")
+    if not isinstance(identity["attempt_nonce"], str) or not ID_RE.fullmatch(
+        identity["attempt_nonce"]
+    ):
+        raise AttemptSealError("attempt_nonce must be a valid identifier")
     for name in ("mode", "execution_track", "environment", "model"):
         if not isinstance(identity[name], str) or not identity[name].strip():
             raise AttemptSealError(f"{name} must be a non-empty string")

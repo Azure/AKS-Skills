@@ -169,6 +169,9 @@ def evaluate_attempt_eligibility(
             "model",
             "fresh_context",
             "pair_id",
+            "cell_id",
+            "attempt_ordinal",
+            "attempt_nonce",
         }
         gates["identity"] = all(
             actual_identity[name] == expected_identity[name] for name in identity_fields

@@ -19,20 +19,10 @@ from .contracts import (
     validate_contract,
 )
 from .identity import sha256_bytes, sha256_value
-from .paths import confined_path
+from .paths import confined_path, require_external
 from .strictjson import canonical_bytes, load, loads
 
 SOURCE_COMMIT = "4e6a54942cdde657d95bef28adf8d8e9ebcaa5f5"
-ACCEPTED_MANIFEST_PATH = Path(
-    "/",
-    "Users",
-    "nikhilkaul",
-    ".copilot",
-    "session-state",
-    "caa44ead-" "24fd-4b16-b04f-39c4b26cc79d",
-    "files",
-    "aks-support-complete-skill-bundle-4e6a549.json",
-)
 ACCEPTED_MANIFEST_SHA256 = (
     "14f77392e839976331f16d2dfc2fd05e4adcb33f8d465ca5f94d1870e5652c82"
 )
@@ -229,12 +219,19 @@ def regenerate_complete_skill_bundle(repo_root: Path) -> CompleteSkillBundle:
     return CompleteSkillBundle(SOURCE_COMMIT, digest, tuple(files))
 
 
-def load_complete_skill_bundle(repo_root: Path) -> CompleteSkillBundle:
+def load_complete_skill_bundle(
+    repo_root: Path, accepted_manifest_path: Path
+) -> CompleteSkillBundle:
+    if not isinstance(accepted_manifest_path, Path):
+        raise CalibrationError("accepted complete skill manifest path is required")
+    manifest_path = require_external(
+        accepted_manifest_path, repo_root, "accepted complete skill manifest"
+    )
     try:
-        manifest_bytes = ACCEPTED_MANIFEST_PATH.read_bytes()
+        manifest_bytes = manifest_path.read_bytes()
     except OSError as exc:
         raise CalibrationError(
-            f"accepted complete skill manifest is unavailable: {ACCEPTED_MANIFEST_PATH}"
+            "accepted complete skill manifest is unavailable"
         ) from exc
     actual_manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
     if actual_manifest_hash != ACCEPTED_MANIFEST_SHA256:

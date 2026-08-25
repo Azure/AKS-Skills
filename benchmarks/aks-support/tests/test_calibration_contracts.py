@@ -10,8 +10,8 @@ REPO_ROOT = ROOT.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from aks_support_benchmark.calibration import (  # noqa: E402
-    ACCEPTED_MANIFEST_PATH,
     ACCEPTED_ENTRIES_SHA256,
+    CalibrationError,
     PUBLIC_CANARY_CASE_IDS,
     SOURCE_COMMIT,
     build_calibration_matrix,
@@ -166,10 +166,8 @@ class CompleteBundleAndPacketTest(unittest.TestCase):
         )
 
     def test_only_accepted_manifest_can_authorize_skill_arm(self) -> None:
-        if not ACCEPTED_MANIFEST_PATH.is_file():
-            self.skipTest("accepted calibration manifest is external to the repository")
-        bundle = load_complete_skill_bundle(REPO_ROOT)
-        self.assertEqual(bundle.entries_digest, ACCEPTED_ENTRIES_SHA256)
+        with self.assertRaisesRegex(CalibrationError, "path is required"):
+            load_complete_skill_bundle(REPO_ROOT, None)  # type: ignore[arg-type]
 
     def test_packet_pair_shares_case_and_scaffold_and_only_skill_has_bundle(
         self,

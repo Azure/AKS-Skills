@@ -29,6 +29,7 @@ from .contracts import (
     COPILOT_EXECUTION_ENVIRONMENT,
     COPILOT_EXECUTION_TRACK,
     DIRECT_MODEL_CONTEXT,
+    ID_RE,
 )
 from .fixture import load_case
 from .identity import sha256_bytes, sha256_value
@@ -63,10 +64,16 @@ class CalibrationPipelineError(ValueError):
     """Raised when the integrated calibration workflow cannot prove its inputs."""
 
 
-def build_calibration_plan(repo_root: Path, fixtures_root: Path) -> dict[str, Any]:
+def build_calibration_plan(
+    repo_root: Path,
+    fixtures_root: Path,
+    accepted_manifest_path: Path,
+    attempt_nonces: tuple[str, ...] | list[str],
+) -> dict[str, Any]:
     """Freeze the accepted bundle, public cases, and exact 92-cell identity matrix."""
 
-    bundle = load_complete_skill_bundle(repo_root)
+    nonces = _validate_attempt_nonces(attempt_nonces)
+    bundle = load_complete_skill_bundle(repo_root, accepted_manifest_path)
     bundle_bytes = sum(len(item.content) for item in bundle.files)
     if bundle_bytes != EXPECTED_BUNDLE_BYTES:
         raise CalibrationPipelineError(
@@ -94,6 +101,7 @@ def build_calibration_plan(repo_root: Path, fixtures_root: Path) -> dict[str, An
             "public calibration cases do not match the accepted case identities"
         )
 
+    cells = list(build_calibration_matrix())
     return {
         "format_version": PLAN_FORMAT_VERSION,
         "source_commit": SOURCE_COMMIT,
@@ -116,16 +124,24 @@ def build_calibration_plan(repo_root: Path, fixtures_root: Path) -> dict[str, An
             ],
         },
         "cases": cases,
-        "cells": list(build_calibration_matrix()),
+        "cells": cells,
+        "attempt_nonces": list(nonces),
+        "attempts": _build_attempt_registry(cells, nonces),
     }
 
 
 def freeze_calibration_plan(
-    repo_root: Path, fixtures_root: Path, output_path: Path
+    repo_root: Path,
+    fixtures_root: Path,
+    accepted_manifest_path: Path,
+    attempt_nonces: tuple[str, ...] | list[str],
+    output_path: Path,
 ) -> dict[str, Any]:
     """Write a deterministic plan, refusing to replace different frozen bytes."""
 
-    plan = build_calibration_plan(repo_root, fixtures_root)
+    plan = build_calibration_plan(
+        repo_root, fixtures_root, accepted_manifest_path, attempt_nonces
+    )
     content = canonical_bytes(plan) + b"\n"
     if output_path.exists():
         if output_path.read_bytes() != content:
@@ -156,6 +172,8 @@ def validate_calibration_plan(plan: Any) -> dict[str, Any]:
         "bundle",
         "cases",
         "cells",
+        "attempt_nonces",
+        "attempts",
     }
     if not isinstance(plan, dict) or set(plan) != expected:
         raise CalibrationPipelineError("calibration plan fields are missing or unknown")
@@ -209,11 +227,14 @@ def validate_calibration_plan(plan: Any) -> dict[str, Any]:
 
     if plan["cells"] != list(build_calibration_matrix()):
         raise CalibrationPipelineError("calibration matrix identity drift")
+    nonces = _validate_attempt_nonces(plan["attempt_nonces"])
+    if plan["attempts"] != _build_attempt_registry(plan["cells"], nonces):
+        raise CalibrationPipelineError("calibration attempt registry identity drift")
     return plan
 
 
 def materialize_calibration_request(
-    plan: dict[str, Any], cell_id: str
+    plan: dict[str, Any], cell_id: str, attempt_nonce: str
 ) -> tuple[OneShotRequest, dict[str, Any]]:
     """Construct one exact request and immutable attempt identity from a frozen plan."""
 
@@ -221,6 +242,19 @@ def materialize_calibration_request(
     cell = next((item for item in plan["cells"] if item["cell_id"] == cell_id), None)
     if cell is None:
         raise CalibrationPipelineError(f"unknown calibration cell: {cell_id}")
+    attempt = next(
+        (
+            item
+            for item in plan["attempts"]
+            if item["cell_id"] == cell_id
+            and item["attempt_nonce"] == attempt_nonce
+        ),
+        None,
+    )
+    if attempt is None:
+        raise CalibrationPipelineError(
+            f"attempt nonce was not preregistered for cell: {attempt_nonce}"
+        )
     case = next(
         item for item in plan["cases"] if item["case_id"] == cell["case_id"]
     )
@@ -235,7 +269,7 @@ def materialize_calibration_request(
     )
     prompt = packet.canonical_bytes().decode("ascii")
     request = OneShotRequest(
-        request_id=cell["attempt_id"],
+        request_id=attempt["attempt_id"],
         requested_model=cell["model_id"],
         capability_hash=plan["capability_hash"],
         prompt=prompt,
@@ -246,6 +280,9 @@ def materialize_calibration_request(
     condition = "skill" if skill_available else "no-skill"
     identity = {
         "accepted_sha": plan["source_commit"],
+        "cell_id": cell["cell_id"],
+        "attempt_ordinal": attempt["attempt_ordinal"],
+        "attempt_nonce": attempt["attempt_nonce"],
         "mode": cell["mode"],
         "execution_track": cell["execution_track"],
         "environment": cell["execution_environment"],
@@ -259,6 +296,7 @@ def materialize_calibration_request(
     }
     metadata = {
         "cell": cell,
+        "attempt": attempt,
         "pair_id": pair_id,
         "condition": condition,
         "identity": identity,
@@ -270,8 +308,12 @@ def materialize_calibration_request(
     return request, metadata
 
 
-def calibration_request_record(plan: dict[str, Any], cell_id: str) -> dict[str, Any]:
-    request, metadata = materialize_calibration_request(plan, cell_id)
+def calibration_request_record(
+    plan: dict[str, Any], cell_id: str, attempt_nonce: str
+) -> dict[str, Any]:
+    request, metadata = materialize_calibration_request(
+        plan, cell_id, attempt_nonce
+    )
     return {
         "format_version": "aks-support-calibration-request/v1",
         **metadata,
@@ -281,11 +323,16 @@ def calibration_request_record(plan: dict[str, Any], cell_id: str) -> dict[str, 
 
 
 def evaluate_preflight(
-    plan: dict[str, Any], cell_id: str, response: Any | None = None
+    plan: dict[str, Any],
+    cell_id: str,
+    attempt_nonce: str,
+    response: Any | None = None,
 ) -> dict[str, Any]:
     """Return proof only from an ingested host response; otherwise remain blocked."""
 
-    request, metadata = materialize_calibration_request(plan, cell_id)
+    request, metadata = materialize_calibration_request(
+        plan, cell_id, attempt_nonce
+    )
     if metadata["condition"] != "skill":
         raise CalibrationPipelineError("preflight requires a full-bundle skill cell")
     outcome = ingest_one_shot_response(request, response) if response is not None else None
@@ -295,6 +342,9 @@ def evaluate_preflight(
         "status": "proven" if proven else "blocked-unproven",
         "disposable": True,
         "cell_id": metadata["cell"]["cell_id"],
+        "attempt_id": metadata["attempt"]["attempt_id"],
+        "attempt_ordinal": metadata["attempt"]["attempt_ordinal"],
+        "attempt_nonce": metadata["attempt"]["attempt_nonce"],
         "requested_model": request.requested_model,
         "observed_model": outcome.observed_model if outcome is not None else None,
         "bundle_bytes": metadata["bundle_bytes"],
@@ -317,18 +367,22 @@ def evaluate_preflight(
 def ingest_and_seal_attempt(
     plan: dict[str, Any],
     cell_id: str,
+    attempt_nonce: str,
     response: Any,
     staging_root: Path,
     seals_root: Path,
 ) -> Path:
     """Ingest one host response, persist only sanitized evidence, and seal it once."""
 
-    request, metadata = materialize_calibration_request(plan, cell_id)
+    request, metadata = materialize_calibration_request(
+        plan, cell_id, attempt_nonce
+    )
     outcome = ingest_one_shot_response(request, response)
     require_disjoint(
         ("attempt staging root", staging_root),
         ("attempt seals root", seals_root),
     )
+    _require_retry_sequence(plan, metadata["attempt"], seals_root)
     source = staging_root / request.request_id
     try:
         source.mkdir(parents=True)
@@ -375,7 +429,7 @@ def ingest_and_seal_attempt(
         source,
         seals_root,
         request.request_id,
-        [cell["attempt_id"] for cell in plan["cells"]],
+        [attempt["attempt_id"] for attempt in plan["attempts"]],
         metadata["identity"],
         failure,
         required_artifacts=("outcome.json", "output.json", "trace.json"),
@@ -398,20 +452,25 @@ def regenerate_pipeline_report(
         load_case(path.parent)[0]["case_id"]: path.parent
         for path in fixtures_root.glob("*/case.json")
     }
-    available: list[tuple[dict[str, Any], Path, dict[str, Any]]] = []
+    available: list[tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]] = []
     context_counts: dict[str, int] = {}
-    for cell in plan["cells"]:
-        attempt_root = seals_root / cell["attempt_id"]
+    cells_by_id = {cell["cell_id"]: cell for cell in plan["cells"]}
+    for attempt in plan["attempts"]:
+        attempt_root = seals_root / attempt["attempt_id"]
         if not attempt_root.is_dir():
             continue
-        _, metadata = materialize_calibration_request(plan, cell["cell_id"])
+        cell = cells_by_id[attempt["cell_id"]]
+        _, metadata = materialize_calibration_request(
+            plan, cell["cell_id"], attempt["attempt_nonce"]
+        )
         proof = _load_outcome_proof(attempt_root)
         context_id = proof.get("context_id")
         if isinstance(context_id, str):
             context_counts[context_id] = context_counts.get(context_id, 0) + 1
-        available.append((cell, attempt_root, metadata))
+        available.append((cell, attempt, attempt_root, metadata))
 
-    for cell, attempt_root, metadata in available:
+    evaluated_by_cell: dict[str, list[dict[str, Any]]] = {}
+    for cell, attempt, attempt_root, metadata in available:
         eligibility = evaluate_attempt_eligibility(
             attempt_root,
             expected_identity=metadata["identity"],
@@ -421,7 +480,7 @@ def regenerate_pipeline_report(
         )
         proof = _load_outcome_proof(attempt_root)
         host_identity = (
-            proof.get("request_id") == cell["attempt_id"]
+            proof.get("request_id") == attempt["attempt_id"]
             and proof.get("requested_model") == cell["model_id"]
             and proof.get("observed_model") == cell["model_id"]
             and proof.get("status") == OutcomeStatus.ELIGIBLE.value
@@ -449,11 +508,14 @@ def regenerate_pipeline_report(
             _, _, verifier = load_case(case_roots[cell["case_id"]])
             output = loads(read_sealed_artifact(attempt_root, "output.json").decode())
             score = score_eligible_attempt(
-                cell["attempt_id"], verifier, output, eligibility
+                attempt["attempt_id"], verifier, output, eligibility
             )
         manifest = load_sealed_attempt(attempt_root)
         observation = {
-            "attempt_id": cell["attempt_id"],
+            "cell_id": cell["cell_id"],
+            "attempt_id": attempt["attempt_id"],
+            "attempt_ordinal": attempt["attempt_ordinal"],
+            "attempt_nonce": attempt["attempt_nonce"],
             "manifest_hash": sha256_bytes(
                 (attempt_root / "manifest.json").read_bytes()
             ),
@@ -470,14 +532,41 @@ def regenerate_pipeline_report(
             "eligibility": eligibility["status"],
             "score": score,
             "comparison_outcome": None,
+            "selected_for_comparison": False,
+            "terminal": False,
         }
         observations.append(observation)
-        by_pair.setdefault(metadata["pair_id"], {})[metadata["condition"]] = {
-            "root": attempt_root,
-            "eligibility": eligibility,
-            "score": score,
-            "observation": observation,
-        }
+        evaluated_by_cell.setdefault(cell["cell_id"], []).append(
+            {
+                "attempt": attempt,
+                "root": attempt_root,
+                "eligibility": eligibility,
+                "score": score,
+                "observation": observation,
+                "metadata": metadata,
+            }
+        )
+
+    for records in evaluated_by_cell.values():
+        for record in sorted(
+            records, key=lambda item: item["attempt"]["attempt_ordinal"]
+        ):
+            status = record["eligibility"]["status"]
+            if status == "transient-failure":
+                continue
+            record["observation"]["terminal"] = True
+            if status == "eligible":
+                record["observation"]["selected_for_comparison"] = True
+                metadata = record["metadata"]
+                by_pair.setdefault(metadata["pair_id"], {})[
+                    metadata["condition"]
+                ] = {
+                    "root": record["root"],
+                    "eligibility": record["eligibility"],
+                    "score": record["score"],
+                    "observation": record["observation"],
+                }
+            break
 
     for pair in by_pair.values():
         if set(pair) != {"skill", "no-skill"}:
@@ -533,6 +622,76 @@ def _bundle_from_plan(value: Any) -> CompleteSkillBundle:
     ):
         raise CalibrationPipelineError("calibration bundle aggregate identity drift")
     return CompleteSkillBundle(SOURCE_COMMIT, value["entries_digest"], tuple(files))
+
+
+def _validate_attempt_nonces(
+    values: tuple[str, ...] | list[str],
+) -> tuple[str, ...]:
+    if not isinstance(values, (tuple, list)) or not values:
+        raise CalibrationPipelineError(
+            "at least one explicit attempt nonce must be preregistered"
+        )
+    nonces = tuple(values)
+    if len(nonces) != len(set(nonces)):
+        raise CalibrationPipelineError("attempt nonces contain duplicates")
+    if any(not isinstance(value, str) or not ID_RE.fullmatch(value) for value in nonces):
+        raise CalibrationPipelineError(
+            "attempt nonces must be benchmark identifiers"
+        )
+    return nonces
+
+
+def _build_attempt_registry(
+    cells: list[dict[str, Any]], nonces: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    attempts: list[dict[str, Any]] = []
+    for cell in cells:
+        for ordinal, nonce in enumerate(nonces, start=1):
+            digest = sha256_value(
+                {
+                    "cell_id": cell["cell_id"],
+                    "attempt_ordinal": ordinal,
+                    "attempt_nonce": nonce,
+                }
+            ).split(":", 1)[1]
+            attempts.append(
+                {
+                    "cell_id": cell["cell_id"],
+                    "attempt_id": f"attempt-{digest[:24]}",
+                    "attempt_ordinal": ordinal,
+                    "attempt_nonce": nonce,
+                }
+            )
+    return attempts
+
+
+def _require_retry_sequence(
+    plan: dict[str, Any], attempt: dict[str, Any], seals_root: Path
+) -> None:
+    if attempt["attempt_ordinal"] == 1:
+        return
+    previous_ordinal = attempt["attempt_ordinal"] - 1
+    previous = next(
+        (
+            item
+            for item in plan["attempts"]
+            if item["cell_id"] == attempt["cell_id"]
+            and item["attempt_ordinal"] == previous_ordinal
+        ),
+        None,
+    )
+    if previous is None:
+        raise CalibrationPipelineError("previous preregistered attempt is missing")
+    previous_root = seals_root / previous["attempt_id"]
+    if not previous_root.is_dir():
+        raise CalibrationPipelineError(
+            "previous preregistered attempt must be sealed before retry"
+        )
+    failure = FailureClass(load_sealed_attempt(previous_root)["failure"]["kind"])
+    if not failure.retryable:
+        raise CalibrationPipelineError(
+            "new attempt requires a sealed retryable predecessor"
+        )
 
 
 def _decode_base64(value: Any, label: str) -> bytes:

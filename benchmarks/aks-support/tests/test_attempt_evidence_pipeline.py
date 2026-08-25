@@ -45,6 +45,9 @@ def identity(
 ) -> dict:
     return {
         "accepted_sha": ACCEPTED_SHA,
+        "cell_id": "cell-one",
+        "attempt_ordinal": 1,
+        "attempt_nonce": "attempt-one",
         "mode": "direct-model-context",
         "execution_track": track,
         "environment": environment,

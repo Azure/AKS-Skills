@@ -27,21 +27,32 @@ skill files (251,082 bytes), and preregister the exact 92-cell Copilot matrix:
 python3 benchmarks/aks-support/cli.py calibration-prepare \
   --repo-root "$PWD" \
   --fixtures benchmarks/aks-support/fixtures/public-canaries \
+  --accepted-manifest "$ACCEPTED_MANIFEST" \
+  --attempt-nonce attempt-one \
+  --attempt-nonce attempt-two \
   --output "$RESULT_ROOT/calibration-plan.json"
 python3 benchmarks/aks-support/cli.py calibration-request \
   "$RESULT_ROOT/calibration-plan.json" CELL_ID \
+  --attempt-nonce attempt-one \
   --output "$RESULT_ROOT/request.json"
 python3 benchmarks/aks-support/cli.py calibration-preflight \
   "$RESULT_ROOT/calibration-plan.json" CELL_ID \
+  --attempt-nonce attempt-one \
   --response "$RESULT_ROOT/normalized-response.json"
 ```
 
+The accepted manifest path has no default and is never embedded in publishable
+source. Attempt nonces are explicit operator-supplied preregistration identities;
+the plan assigns each nonce a stable ordinal and content-addressed attempt ID.
 `calibration-ingest` accepts only the normalized one-shot response envelope and
-seals sanitized output, trace, and outcome evidence. `calibration-report`
-reapplies deterministic attempt and pair gates and regenerates a
-track-separated `descriptive-pipeline-calibration` report. It makes no ranking,
-uplift, superiority, confidence, skill-effect, or product-quality claim.
-`agent-folder` remains blocked.
+seals sanitized output, trace, and outcome evidence without replacing earlier
+attempts. A later attempt is accepted only after its immediate predecessor is
+sealed with a retryable classification. `calibration-report` retains every
+sealed attempt, selects the first terminal eligible attempt per cell, reapplies
+deterministic pair gates, and regenerates a track-separated
+`descriptive-pipeline-calibration` report. It makes no ranking, uplift,
+superiority, confidence, skill-effect, or product-quality claim. `agent-folder`
+remains blocked.
 
 The optional raw-model transport is
 `evals/providers/aks-support-raw-bridge.js`. It uses the existing

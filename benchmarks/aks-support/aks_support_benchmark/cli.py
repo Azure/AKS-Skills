@@ -60,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare.add_argument("--repo-root", type=Path, required=True)
     prepare.add_argument("--fixtures", type=Path, required=True)
+    prepare.add_argument("--accepted-manifest", type=Path, required=True)
+    prepare.add_argument("--attempt-nonce", action="append", required=True)
     prepare.add_argument("--output", type=Path, required=True)
 
     request = subparsers.add_parser(
@@ -67,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     request.add_argument("plan", type=Path)
     request.add_argument("cell_id")
+    request.add_argument("--attempt-nonce", required=True)
     request.add_argument("--output", type=Path, required=True)
 
     preflight = subparsers.add_parser(
@@ -74,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preflight.add_argument("plan", type=Path)
     preflight.add_argument("cell_id")
+    preflight.add_argument("--attempt-nonce", required=True)
     preflight.add_argument("--response", type=Path)
 
     ingest = subparsers.add_parser(
@@ -82,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("plan", type=Path)
     ingest.add_argument("cell_id")
     ingest.add_argument("response", type=Path)
+    ingest.add_argument("--attempt-nonce", required=True)
     ingest.add_argument("--staging-root", type=Path, required=True)
     ingest.add_argument("--seals-root", type=Path, required=True)
 
@@ -153,7 +158,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "calibration-prepare":
             require_external(args.output, args.repo_root, "calibration plan")
             plan = freeze_calibration_plan(
-                args.repo_root, args.fixtures, args.output
+                args.repo_root,
+                args.fixtures,
+                args.accepted_manifest,
+                args.attempt_nonce,
+                args.output,
             )
             result = {
                 "valid": True,
@@ -164,12 +173,19 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "calibration-request":
             require_external(args.output, repository_root, "calibration request")
             plan = load_calibration_plan(args.plan)
-            dump(args.output, calibration_request_record(plan, args.cell_id))
+            dump(
+                args.output,
+                calibration_request_record(
+                    plan, args.cell_id, args.attempt_nonce
+                ),
+            )
             result = {"valid": True, "cell_id": args.cell_id}
         elif args.command == "calibration-preflight":
             plan = load_calibration_plan(args.plan)
             response = load(args.response) if args.response else None
-            result = evaluate_preflight(plan, args.cell_id, response)
+            result = evaluate_preflight(
+                plan, args.cell_id, args.attempt_nonce, response
+            )
         elif args.command == "calibration-ingest":
             require_external(args.staging_root, repository_root, "attempt staging root")
             require_external(args.seals_root, repository_root, "attempt seals root")
@@ -177,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             attempt = ingest_and_seal_attempt(
                 plan,
                 args.cell_id,
+                args.attempt_nonce,
                 load(args.response),
                 args.staging_root,
                 args.seals_root,

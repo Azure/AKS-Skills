@@ -172,6 +172,7 @@ def build_calibration_report(
                         item["pair_id"],
                         item["condition"],
                         item["claim_id"],
+                        item.get("attempt_ordinal", 0),
                         item["attempt_id"],
                     ),
                 ),
@@ -182,7 +183,8 @@ def build_calibration_report(
         "report_id": report_id,
         "status": "descriptive-pipeline-calibration",
         "claim_boundary": (
-            "One observation per cell. This report makes no ranking, uplift, "
+            "Every sealed attempt is retained; at most one terminal eligible "
+            "attempt per cell is selected for comparison. This report makes no ranking, uplift, "
             "superiority, confidence, skill-effect, or product-quality claim."
         ),
         "partitions": partitions,
