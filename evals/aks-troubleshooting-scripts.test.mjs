@@ -211,6 +211,8 @@ function reviewerRedactionVectors() {
     'connection_' + 'string=Server=tcp:fixture;User Id=fixture;Password=' + SENTINEL,
     'DefaultEndpointsProtocol=https;AccountName=fixture;Account' + 'Key=' + SENTINEL + ';EndpointSuffix=core.windows.net',
     'Endpoint=sb://fixture.servicebus.windows.net/;SharedAccessKeyName=fixture;SharedAccess' + 'Key=' + SENTINEL,
+    'https://account.blob.core.windows.net/container/blob?sv=2025-01-05&se=2026-08-26T00%3A00%3A00Z&s' + 'ig=' + SENTINEL + '&sp=r',
+    'https://account.blob.core.windows.net/container/blob?sv=2025-01-05&S' + 'IG=' + SENTINEL + '&spr=https',
   ];
 }
 
@@ -237,6 +239,14 @@ test('redaction covers the reviewer credential and connection-string vectors', (
   const projected = result.stdout.trim().split('\n');
   assert.equal(projected.length, vectors.length);
   for (const line of projected) assert.match(line, /\[REDACTED]/);
+  assert.match(
+    projected.find(line => line.includes('?sv=2025-01-05&se=')),
+    /\?sv=2025-01-05&se=2026-08-26T00%3A00%3A00Z&sig=\[REDACTED\]&sp=r$/,
+  );
+  assert.match(
+    projected.find(line => line.includes('?sv=2025-01-05&SIG=')),
+    /\?sv=2025-01-05&SIG=\[REDACTED\]&spr=https$/,
+  );
 });
 
 function usingFixture(callback) {
@@ -611,6 +621,8 @@ test('Bash and PowerShell entry points declare the same safety contract', () => 
     assert.match(bashRedaction, new RegExp(term));
     assert.match(powershellRedaction, new RegExp(term));
   }
+  assert.match(bashRedaction, /\[\?&\]sig=/);
+  assert.match(powershellRedaction, /\[\?&\]sig=/);
 });
 
 const pwshAvailable = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], {

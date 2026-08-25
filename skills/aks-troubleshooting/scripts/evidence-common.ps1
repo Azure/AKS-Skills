@@ -121,6 +121,11 @@ function Protect-EvidenceText {
             '$1[REDACTED]'
         )
         $line = [regex]::Replace($line, '://[^/\s@]+:[^/\s@]+@', '://[REDACTED]@')
+        $line = [regex]::Replace(
+            $line,
+            '(?i)([?&]sig=)[^&\s#]+',
+            '$1[REDACTED]'
+        )
         $line
     }
 }

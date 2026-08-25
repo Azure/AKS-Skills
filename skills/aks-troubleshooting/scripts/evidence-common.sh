@@ -117,6 +117,21 @@ redact_evidence() {
         }
 
         gsub(/:\/\/[^\/[:space:]@]+:[^\/[:space:]@]+@/, "://[REDACTED]@", line)
+
+        redacted_prefix = ""
+        remaining = line
+        lower_remaining = tolower(remaining)
+        while (match(lower_remaining, /[?&]sig=[^&[:space:]#]+/)) {
+          sig_start = RSTART
+          sig_length = RLENGTH
+          matched_sig = substr(remaining, sig_start, sig_length)
+          equals_at = match(matched_sig, /=/)
+          redacted_prefix = redacted_prefix substr(remaining, 1, sig_start - 1) \
+            substr(matched_sig, 1, equals_at) "[REDACTED]"
+          remaining = substr(remaining, sig_start + sig_length)
+          lower_remaining = tolower(remaining)
+        }
+        line = redacted_prefix remaining
         print line
       }
     '
