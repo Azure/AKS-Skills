@@ -193,7 +193,10 @@ INPUT="$(cat <<'JSON'
       "kind": "Service",
       "metadata": {"name": "payments", "namespace": "prod"},
       "spec": {
-        "selector": {"app": "SELECTOR_SENTINEL"},
+        "selector": {
+          "app": "SELECTOR_SENTINEL",
+          "tier": "api"
+        },
         "ports": [{"port": 443}]
       }
     },
@@ -202,7 +205,10 @@ INPUT="$(cat <<'JSON'
       "kind": "Service",
       "metadata": {"name": "payments-alias", "namespace": "prod"},
       "spec": {
-        "selector": {"app": "SELECTOR_SENTINEL"},
+        "selector": {
+          "tier": "api",
+          "app": "SELECTOR_SENTINEL"
+        },
         "ports": [{"port": 80}]
       }
     },
@@ -211,6 +217,18 @@ INPUT="$(cat <<'JSON'
       "kind": "Service",
       "metadata": {"name": "external", "namespace": "prod"},
       "spec": {"type": "ExternalName", "externalName": "example.com"}
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {"name": "payments-dev", "namespace": "dev"},
+      "spec": {
+        "selector": {
+          "app": "SELECTOR_SENTINEL",
+          "tier": "api"
+        },
+        "ports": [{"port": 443}]
+      }
     },
     {
       "apiVersion": "policy/v1",
@@ -373,8 +391,8 @@ assert_json \
    })'
 
 assert_json \
-  "Service duplicate counts remain available without selector values" \
-  '[.items[] | select(.kind == "Service") | .selectorDuplicateCount] == [2, 2, 0]'
+  "Service duplicate counts preserve selector ordering and namespace boundaries" \
+  '[.items[] | select(.kind == "Service") | .selectorDuplicateCount] == [2, 2, 0, 1]'
 
 assert_json \
   "PodDisruptionBudget projection retains availability without selectors" \

@@ -205,7 +205,27 @@ def service_selector_key:
   | sort_by(.key)
   | tojson;
 
-def service_projection($all):
+def service_selector_group_key:
+  [
+    (.metadata.namespace // "default"),
+    service_selector_key
+  ]
+  | tojson;
+
+def service_selector_counts:
+  [
+    .[]
+    | select(.kind == "Service")
+    | select(((.spec.selector // {}) | length) > 0)
+  ]
+  | group_by(service_selector_group_key)
+  | map({
+      key: (.[0] | service_selector_group_key),
+      value: length
+    })
+  | from_entries;
+
+def service_projection($selector_counts):
   . as $service
   | {
       apiVersion: .apiVersion,
@@ -215,19 +235,7 @@ def service_projection($all):
         if (($service.spec.selector // {}) | length) == 0 then
           0
         else
-          [
-            $all[]
-            | select(.kind == "Service")
-            | select(
-                (.metadata.namespace // "default")
-                == ($service.metadata.namespace // "default")
-              )
-            | select(
-                service_selector_key
-                == ($service | service_selector_key)
-              )
-          ]
-          | length
+          $selector_counts[$service | service_selector_group_key] // 0
         end
       )
     }
@@ -255,6 +263,7 @@ def storageclass_projection:
   | compact;
 
 (.items // []) as $all
+| ($all | service_selector_counts) as $service_selector_counts
 | {
     apiVersion: .apiVersion,
     kind: .kind,
@@ -265,7 +274,7 @@ def storageclass_projection:
         elif .kind == "Pod" then
           pod_projection
         elif .kind == "Service" then
-          service_projection($all)
+          service_projection($service_selector_counts)
         elif .kind == "PodDisruptionBudget" then
           pdb_projection
         elif .kind == "StorageClass" then
