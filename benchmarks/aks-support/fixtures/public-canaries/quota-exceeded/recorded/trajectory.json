@@ -1,0 +1,19 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "trajectory",
+  "trajectory_id": "quota-recorded-self-test",
+  "mode": "direct-model-context",
+  "events": [
+    {
+      "type": "artifact-produced",
+      "path": "diagnosis.txt",
+      "sha256": "sha256:aa863a561a126c10470422316fca839dca4fc8c741e78ae25b6d5273a1afc90d"
+    }
+  ],
+  "final_response": "Recorded harness fixture; no model was invoked.",
+  "infrastructure": {
+    "failure": false,
+    "network_called": false,
+    "capability_hash": "sha256:e7e103b3a9e8f387594aac2cdf7587743e19b20f7af87a90f19faba2742a7518"
+  }
+}

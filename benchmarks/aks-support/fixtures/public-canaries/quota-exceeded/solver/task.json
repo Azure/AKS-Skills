@@ -1,0 +1,18 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "task",
+  "task_id": "quota-exceeded-task",
+  "case_id": "public-canary-quota-exceeded",
+  "prompt": "Diagnose the node-pool provisioning failure from the supplied public-canary incident artifact. State the root cause and a safe next step without changing resources.",
+  "workspace_files": [
+    {
+      "path": "incident.json",
+      "sha256": "sha256:a0eb22111ca4a583d2e1cd184aa80fded4aa7649fb0beac6f8e014ea0157f278"
+    }
+  ],
+  "allowed_tools": [],
+  "prohibited_actions": [
+    "mutate-cloud-resource",
+    "request-credentials"
+  ]
+}

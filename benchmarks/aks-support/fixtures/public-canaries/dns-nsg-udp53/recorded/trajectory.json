@@ -1,0 +1,18 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "trajectory",
+  "trajectory_id": "dns-recorded-self-test",
+  "mode": "agent-folder",
+  "events": [
+    {
+      "type": "artifact-produced",
+      "path": "diagnosis.txt"
+    }
+  ],
+  "final_response": "Recorded harness fixture; no model was invoked.",
+  "infrastructure": {
+    "failure": false,
+    "network_called": false,
+    "capability_hash": "sha256:e7e103b3a9e8f387594aac2cdf7587743e19b20f7af87a90f19faba2742a7518"
+  }
+}

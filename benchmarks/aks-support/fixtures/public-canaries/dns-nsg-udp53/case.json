@@ -1,0 +1,21 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "case",
+  "case_id": "public-canary-dns-nsg-udp53",
+  "title": "Custom NSG blocks UDP 53 between AKS node pools",
+  "set": "public-canary",
+  "source_refs": [
+    {
+      "url": "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/traffic-between-node-pools-is-blocked",
+      "verified_on": "2026-08-24"
+    }
+  ],
+  "task_path": "solver/task.json",
+  "verifier_path": "verifier/verifier.json",
+  "answer_path": "verifier/answer.txt",
+  "tags": [
+    "harness-self-test",
+    "dns",
+    "network"
+  ]
+}

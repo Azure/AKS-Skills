@@ -1,0 +1,3 @@
+The failure is caused by insufficient regional vCPU quota. A safe next step is
+to inspect quota and request an increase or choose capacity that fits; do not
+mutate resources during diagnosis.

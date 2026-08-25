@@ -1,0 +1,4 @@
+The decisive observation is that the custom NSG denies UDP destination port 53
+between node pools while unrelated TCP 443 traffic is allowed. Escalate with
+that evidence for review of the custom NSG rule; do not mutate it during the
+evaluation.

@@ -1,0 +1,8 @@
+{
+  "source_node_pool": "pool-a",
+  "destination_node_pool": "pool-b",
+  "protocol": "UDP",
+  "destination_port": 53,
+  "nsg_result": "Deny",
+  "tcp_443_result": "Allow"
+}

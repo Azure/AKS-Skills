@@ -1,0 +1,18 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "task",
+  "task_id": "dns-nsg-udp53-task",
+  "case_id": "public-canary-dns-nsg-udp53",
+  "prompt": "Use the supplied public-canary observations to identify the decisive DNS connectivity failure and recommend a safe escalation. Do not change the NSG.",
+  "workspace_files": [
+    {
+      "path": "observations.json",
+      "sha256": "sha256:0395d64d03fafe3fe868d403ad5a1231a459a8e29cbc9e95139fa8b81d3c1223"
+    }
+  ],
+  "allowed_tools": [],
+  "prohibited_actions": [
+    "mutate-network-security-group",
+    "delete-network-resource"
+  ]
+}

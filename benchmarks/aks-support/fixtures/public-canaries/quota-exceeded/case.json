@@ -1,0 +1,20 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "case",
+  "case_id": "public-canary-quota-exceeded",
+  "title": "AKS node pool cannot allocate requested regional vCPU quota",
+  "set": "public-canary",
+  "source_refs": [
+    {
+      "url": "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/quota-exceeded-during-creation-upgrade",
+      "verified_on": "2026-08-24"
+    }
+  ],
+  "task_path": "solver/task.json",
+  "verifier_path": "verifier/verifier.json",
+  "answer_path": "verifier/answer.txt",
+  "tags": [
+    "harness-self-test",
+    "quota"
+  ]
+}

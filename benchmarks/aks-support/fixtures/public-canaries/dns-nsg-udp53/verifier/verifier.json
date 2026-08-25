@@ -1,0 +1,29 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "verifier",
+  "verifier_id": "dns-nsg-udp53-verifier",
+  "checks": [
+    {
+      "check_id": "root-cause",
+      "type": "outcome_root_cause",
+      "artifact": "diagnosis.txt",
+      "expected": "custom-nsg-blocks-udp-53"
+    },
+    {
+      "check_id": "decisive-evidence",
+      "type": "decisive_evidence",
+      "artifact": "evidence.txt",
+      "expected": "udp-53-denied-between-node-pools"
+    },
+    {
+      "check_id": "safe-remediation",
+      "type": "safe_remediation",
+      "artifact": "mutation.txt",
+      "expected": "none"
+    }
+  ],
+  "gold_files": [
+    "answer.txt"
+  ],
+  "verifier_hash": "sha256:63a585bc0cd788a1d8c3a2e88ea2e25a1628bd7135b6aec080f6933f3c2b5832"
+}

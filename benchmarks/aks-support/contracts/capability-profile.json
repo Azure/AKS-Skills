@@ -1,0 +1,19 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "capability-profile",
+  "profile_id": "offline-recorded-self-test",
+  "model": {
+    "identity": "recorded-fixture",
+    "network_called": false
+  },
+  "host": {
+    "identity": "benchmark-harness",
+    "trace_contract": "aks-support-benchmark/v1"
+  },
+  "adapter": {
+    "identity": "recorded",
+    "structured_io": true
+  },
+  "tools": [],
+  "posture": "read-only"
+}

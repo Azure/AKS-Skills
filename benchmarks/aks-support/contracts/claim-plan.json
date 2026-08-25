@@ -1,0 +1,34 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "claim-plan",
+  "plan_id": "development-core-plan",
+  "claims": [
+    {
+      "claim_id": "skill-effect",
+      "estimand": "paired difference in deterministic score vectors",
+      "population": "to-be-approved benchmark suite",
+      "status": "not-preregistered-for-ranking"
+    }
+  ],
+  "pairing_constants": [
+    "case",
+    "model",
+    "host",
+    "adapter",
+    "posture",
+    "tools",
+    "budgets",
+    "seed",
+    "retry-policy",
+    "repetition"
+  ],
+  "analysis": {
+    "direction": "artifact-derived",
+    "uncertainty_method": "must-be-preregistered-before-data",
+    "inadequate_uncertainty_label": "descriptive-preliminary"
+  },
+  "ranking_policy": {
+    "uncertainty_sufficient": false,
+    "refuse_ranking_when_false": true
+  }
+}
