@@ -1,0 +1,31 @@
+name: AKS Support Benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/aks-support/**'
+      - '.github/workflows/aks-support-benchmark.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'benchmarks/aks-support/**'
+      - '.github/workflows/aks-support-benchmark.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s benchmarks/aks-support/tests -p 'test_*.py'
+
+      - name: Validate canary fixture through the CLI
+        run: python3 benchmarks/aks-support/cli.py validate benchmarks/aks-support/fixtures/canary.json
+
+      - name: Run offline no-model smoke self-test
+        run: python3 benchmarks/aks-support/cli.py self-test --offline --no-model
