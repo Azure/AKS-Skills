@@ -24,21 +24,28 @@ from aks_support_benchmark.reporting import (  # noqa: E402
 from aks_support_benchmark.strictjson import load  # noqa: E402
 
 
-def result(result_id: str) -> dict:
+def result(
+    result_id: str,
+    *,
+    mode: str = "direct-model-context",
+    outcome: str | None = "neutral",
+) -> dict:
     digest = "sha256:" + "0" * 64
-    return {
+    value = {
         "contract_version": CONTRACT_VERSION,
         "kind": "result",
         "result_id": result_id,
         "run_id": f"run-{result_id}",
         "claim_id": "skill-effect",
-        "mode": "direct-model-context",
+        "mode": mode,
         "manifest_hash": digest,
         "trajectory_hash": digest,
         "score_hash": digest,
         "countability": "countable",
-        "comparison_outcome": "neutral",
     }
+    if outcome is not None:
+        value["comparison_outcome"] = outcome
+    return value
 
 
 class PublicationTest(unittest.TestCase):
@@ -89,6 +96,58 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(report["status"], "descriptive-preliminary")
             self.assertEqual(report["rankings"], [])
             self.assertEqual(report, regenerate_report(path, plan, "regenerated"))
+
+    def test_missing_comparison_outcome_does_not_fabricate_neutral(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            append_result(path, result("missing-outcome", outcome=None))
+            plan = load(ROOT / "contracts" / "claim-plan.json")
+            plan["ranking_policy"]["uncertainty_sufficient"] = True
+
+            report = regenerate_report(path, plan, "missing-outcome-report")
+
+            self.assertEqual(report["status"], "descriptive-preliminary")
+            self.assertEqual(report["rankings"], [])
+            direct = next(
+                item
+                for item in report["claim_assessment"]
+                if item["mode"] == "direct-model-context"
+            )
+            self.assertEqual(direct["status"], "descriptive")
+            self.assertEqual(direct["countable_results"], 0)
+
+    def test_mixed_modes_are_partitioned_in_assessments_and_rankings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            append_result(path, result("direct", outcome="positive"))
+            append_result(
+                path,
+                result("folder", mode="agent-folder", outcome="negative"),
+            )
+            plan = load(ROOT / "contracts" / "claim-plan.json")
+            plan["ranking_policy"]["uncertainty_sufficient"] = True
+
+            report = regenerate_report(path, plan, "mode-partitioned-report")
+
+            self.assertEqual(report["status"], "rankable")
+            self.assertEqual(
+                report["rankings"],
+                [
+                    {"mode": "agent-folder", "outcome": "negative", "count": 1},
+                    {
+                        "mode": "direct-model-context",
+                        "outcome": "positive",
+                        "count": 1,
+                    },
+                ],
+            )
+            assessments = {
+                item["mode"]: item for item in report["claim_assessment"]
+            }
+            self.assertEqual(assessments["agent-folder"]["countable_results"], 1)
+            self.assertEqual(
+                assessments["direct-model-context"]["countable_results"], 1
+            )
 
 
 class CliIntegrationTest(unittest.TestCase):
