@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterable
 
-from .contracts import CONTRACT_VERSION, HASH_RE, ID_RE
+from .contracts import (
+    CONTRACT_VERSION,
+    COPILOT_EXECUTION_ENVIRONMENT,
+    COPILOT_EXECUTION_TRACK,
+    HASH_RE,
+    ID_RE,
+    RAW_EXECUTION_TRACK,
+)
 
 ONE_SHOT_PROTOCOL_VERSION = "aks-support-one-shot/v1"
 DIRECT_MODE = "direct-model-context"
-EXECUTION_TRACK = "copilot-agent"
-EXECUTION_ENVIRONMENT = "github-copilot-subagent"
-
 _SAFE_PLATFORM_CODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _SAFE_CONTEXT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 _UNSAFE_MESSAGE = re.compile(
@@ -69,10 +74,17 @@ class OneShotRequest:
     requested_model: str
     capability_hash: str
     prompt: str
+    execution_track: str = COPILOT_EXECUTION_TRACK
+    execution_environment: str = COPILOT_EXECUTION_ENVIRONMENT
 
     def __post_init__(self) -> None:
         validate_request_fields(
-            self.request_id, self.requested_model, self.capability_hash, self.prompt
+            self.request_id,
+            self.requested_model,
+            self.capability_hash,
+            self.prompt,
+            self.execution_track,
+            self.execution_environment,
         )
 
     def host_payload(self) -> dict[str, Any]:
@@ -91,6 +103,11 @@ class OneShotRequest:
             "context": {
                 "fresh": True,
                 "persist": False,
+            },
+            "execution": {
+                "mode": DIRECT_MODE,
+                "track": self.execution_track,
+                "environment": self.execution_environment,
             },
             "tools": [],
             "trace": {
@@ -257,7 +274,7 @@ def _safe_platform_failure(value: Any) -> FailureEvidence | None:
     return FailureEvidence(status=status, code=code, message=message)
 
 
-def _metadata_context_id(value: Any) -> str | None:
+def _metadata_context_id(value: Any, request: OneShotRequest) -> str | None:
     if not isinstance(value, dict):
         return None
     expected = {
@@ -268,18 +285,24 @@ def _metadata_context_id(value: Any) -> str | None:
         "fresh_context",
         "input_message_count",
         "prior_message_count",
+        "input_bytes",
+        "input_sha256",
     }
     if set(value) != expected:
         return None
     if (
         value["mode"] != DIRECT_MODE
-        or value["execution_track"] != EXECUTION_TRACK
-        or value["execution_environment"] != EXECUTION_ENVIRONMENT
+        or value["execution_track"] != request.execution_track
+        or value["execution_environment"] != request.execution_environment
         or value["fresh_context"] is not True
         or type(value["input_message_count"]) is not int
         or value["input_message_count"] != 1
         or type(value["prior_message_count"]) is not int
         or value["prior_message_count"] != 0
+        or type(value["input_bytes"]) is not int
+        or value["input_bytes"] != len(request.prompt.encode("utf-8"))
+        or value["input_sha256"]
+        != f"sha256:{hashlib.sha256(request.prompt.encode('utf-8')).hexdigest()}"
     ):
         return None
     context_id = value["context_id"]
@@ -321,7 +344,7 @@ def ingest_one_shot_response(
             "The one-shot host response did not match the request identity.",
         )
 
-    context_id = _metadata_context_id(response["solver_metadata"])
+    context_id = _metadata_context_id(response["solver_metadata"], request)
     if context_id is None:
         return _permanent(
             request,
@@ -471,7 +494,12 @@ def validate_distinct_contexts(outcomes: Iterable[OneShotOutcome]) -> None:
 
 
 def validate_request_fields(
-    request_id: str, requested_model: str, capability_hash: str, prompt: str
+    request_id: str,
+    requested_model: str,
+    capability_hash: str,
+    prompt: str,
+    execution_track: str = COPILOT_EXECUTION_TRACK,
+    execution_environment: str = COPILOT_EXECUTION_ENVIRONMENT,
 ) -> None:
     if not isinstance(request_id, str) or not ID_RE.fullmatch(request_id):
         raise OneShotProtocolError("request_id must be a benchmark identifier")
@@ -485,3 +513,10 @@ def validate_request_fields(
         raise OneShotProtocolError("capability_hash must be a SHA-256 identity")
     if not isinstance(prompt, str) or not prompt:
         raise OneShotProtocolError("prompt must not be empty")
+    if execution_track not in {COPILOT_EXECUTION_TRACK, RAW_EXECUTION_TRACK}:
+        raise OneShotProtocolError("execution_track is not supported")
+    if (
+        not isinstance(execution_environment, str)
+        or not ID_RE.fullmatch(execution_environment)
+    ):
+        raise OneShotProtocolError("execution_environment must be an identifier")

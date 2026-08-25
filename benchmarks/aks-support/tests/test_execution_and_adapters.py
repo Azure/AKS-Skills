@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import hashlib
 from copy import deepcopy
 from pathlib import Path
 
@@ -220,6 +221,11 @@ class OneShotExecutionTest(unittest.TestCase):
                 "fresh_context": True,
                 "input_message_count": 1,
                 "prior_message_count": 0,
+                "input_bytes": len(self.request.prompt.encode("utf-8")),
+                "input_sha256": (
+                    "sha256:"
+                    + hashlib.sha256(self.request.prompt.encode("utf-8")).hexdigest()
+                ),
             },
             "failure": None,
         }

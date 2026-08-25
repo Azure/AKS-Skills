@@ -284,6 +284,7 @@ function parseResponse(protocol, data) {
     const completion = data.usage?.output_tokens;
     return {
       output,
+      observedModel: typeof data.model === 'string' ? data.model : undefined,
       tokenUsage: {
         total: prompt != null && completion != null ? prompt + completion : undefined,
         prompt,
@@ -294,6 +295,7 @@ function parseResponse(protocol, data) {
 
   return {
     output: data.choices?.[0]?.message?.content || '',
+    observedModel: typeof data.model === 'string' ? data.model : undefined,
     tokenUsage: {
       total: data.usage?.total_tokens,
       prompt: data.usage?.prompt_tokens,
@@ -335,6 +337,159 @@ async function chat(system, user, opts = {}) {
   }
 }
 
+function rawFailure(
+  request,
+  contextId,
+  code,
+  status,
+  message,
+  observedModel = null,
+) {
+  const prompt =
+    typeof request?.input?.messages?.[0]?.content === 'string'
+      ? request.input.messages[0].content
+      : '';
+  const events = [
+    { sequence: 0, category: 'lifecycle', name: 'request.started' },
+    { sequence: 1, category: 'lifecycle', name: 'request.failed' },
+  ];
+  return {
+    protocol_version: 'aks-support-one-shot/v1',
+    request_id: request?.request_id || 'invalid-request',
+    requested_model: request?.model || 'invalid-model',
+    observed_model: observedModel,
+    output: null,
+    events,
+    trace: { complete: true, event_count: events.length },
+    solver_metadata: {
+      mode: 'direct-model-context',
+      execution_track: 'raw-model',
+      execution_environment: 'llm-client',
+      context_id: contextId,
+      fresh_context: true,
+      input_message_count: 1,
+      prior_message_count: 0,
+      input_bytes: Buffer.byteLength(prompt, 'utf8'),
+      input_sha256: `sha256:${createHash('sha256').update(prompt, 'utf8').digest('hex')}`,
+    },
+    failure: { status, code, message },
+  };
+}
+
+/**
+ * Execute the benchmark's raw-model one-shot envelope without exposing backend
+ * configuration, credentials, request bodies, or provider error bodies.
+ */
+async function rawOneShot(request) {
+  const contextId = `raw-${randomUUID()}`;
+  const valid =
+    request &&
+    request.protocol_version === 'aks-support-one-shot/v1' &&
+    typeof request.request_id === 'string' &&
+    typeof request.model === 'string' &&
+    request.model.length > 0 &&
+    request.model !== 'auto' &&
+    request.input &&
+    Array.isArray(request.input.messages) &&
+    request.input.messages.length === 1 &&
+    request.input.messages[0]?.role === 'user' &&
+    typeof request.input.messages[0]?.content === 'string' &&
+    request.context?.fresh === true &&
+    request.context?.persist === false &&
+    request.execution?.mode === 'direct-model-context' &&
+    request.execution?.track === 'raw-model' &&
+    request.execution?.environment === 'llm-client' &&
+    Array.isArray(request.tools) &&
+    request.tools.length === 0 &&
+    request.trace?.required === true &&
+    request.trace?.include_all_events === true;
+  if (!valid) {
+    return rawFailure(
+      request,
+      contextId,
+      'malformed-request',
+      'permanent-capability-rejection',
+      'The raw-model request did not match the one-shot zero-tool contract.',
+    );
+  }
+
+  if (activeBackend() === 'unconfigured') {
+    return rawFailure(
+      request,
+      contextId,
+      'raw-model-unconfigured',
+      'permanent-capability-rejection',
+      'The raw-model track is blocked because no backend is configured.',
+    );
+  }
+
+  const result = await chat('', request.input.messages[0].content, {
+    model: request.model,
+  });
+  if (result.error) {
+    return rawFailure(
+      request,
+      contextId,
+      'raw-model-transport-failure',
+      'transient-infrastructure-failure',
+      'The configured raw-model backend did not return a usable response.',
+    );
+  }
+  if (
+    typeof result.observedModel !== 'string' ||
+    result.observedModel !== request.model
+  ) {
+    return rawFailure(
+      request,
+      contextId,
+      'model-identity-mismatch',
+      'permanent-capability-rejection',
+      'The raw-model backend did not prove the exact requested model identity.',
+      result.observedModel,
+    );
+  }
+  if (typeof result.output !== 'string' || result.output.trim() === '') {
+    return rawFailure(
+      request,
+      contextId,
+      'malformed-output',
+      'permanent-capability-rejection',
+      'The raw-model backend returned no text output.',
+    );
+  }
+
+  const events = [
+    { sequence: 0, category: 'lifecycle', name: 'request.started' },
+    { sequence: 1, category: 'model', name: 'model.requested' },
+    { sequence: 2, category: 'model', name: 'model.observed' },
+    { sequence: 3, category: 'output', name: 'output.emitted' },
+    { sequence: 4, category: 'lifecycle', name: 'request.completed' },
+  ];
+  return {
+    protocol_version: 'aks-support-one-shot/v1',
+    request_id: request.request_id,
+    requested_model: request.model,
+    observed_model: result.observedModel,
+    output: { content_type: 'text/plain', content: result.output },
+    events,
+    trace: { complete: true, event_count: events.length },
+    solver_metadata: {
+      mode: 'direct-model-context',
+      execution_track: 'raw-model',
+      execution_environment: 'llm-client',
+      context_id: contextId,
+      fresh_context: true,
+      input_message_count: 1,
+      prior_message_count: 0,
+      input_bytes: Buffer.byteLength(request.input.messages[0].content, 'utf8'),
+      input_sha256: `sha256:${createHash('sha256')
+        .update(request.input.messages[0].content, 'utf8')
+        .digest('hex')}`,
+    },
+    failure: null,
+  };
+}
+
 /** Backend name for logging and result labelling. */
 function activeBackend() {
   const detected = detectBackend();
@@ -346,4 +501,5 @@ function activeBackend() {
   return detected.backend;
 }
 
-module.exports = { chat, activeBackend };
+module.exports = { chat, activeBackend, rawOneShot };
+const { createHash, randomUUID } = require('crypto');

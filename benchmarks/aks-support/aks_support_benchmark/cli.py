@@ -7,12 +7,20 @@ import json
 import sys
 from pathlib import Path
 
+from .contracts import validate_contract
 from .fixture import discover_cases, load_case, validate_skill_bundle
 from .paths import confined_path, require_external
+from .pipeline import (
+    calibration_request_record,
+    evaluate_preflight,
+    freeze_calibration_plan,
+    ingest_and_seal_attempt,
+    load_calibration_plan,
+    regenerate_pipeline_report,
+)
 from .publication import scan_package
 from .smoke import run_smoke
-from .strictjson import load
-from .contracts import validate_contract
+from .strictjson import dump, load
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,11 +54,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     private.add_argument("path", type=Path)
     private.add_argument("--repo-root", type=Path, required=True)
+
+    prepare = subparsers.add_parser(
+        "calibration-prepare", help="freeze the accepted direct-context plan"
+    )
+    prepare.add_argument("--repo-root", type=Path, required=True)
+    prepare.add_argument("--fixtures", type=Path, required=True)
+    prepare.add_argument("--output", type=Path, required=True)
+
+    request = subparsers.add_parser(
+        "calibration-request", help="materialize one frozen one-shot request"
+    )
+    request.add_argument("plan", type=Path)
+    request.add_argument("cell_id")
+    request.add_argument("--output", type=Path, required=True)
+
+    preflight = subparsers.add_parser(
+        "calibration-preflight", help="evaluate disposable host proof"
+    )
+    preflight.add_argument("plan", type=Path)
+    preflight.add_argument("cell_id")
+    preflight.add_argument("--response", type=Path)
+
+    ingest = subparsers.add_parser(
+        "calibration-ingest", help="ingest and seal one sanitized response"
+    )
+    ingest.add_argument("plan", type=Path)
+    ingest.add_argument("cell_id")
+    ingest.add_argument("response", type=Path)
+    ingest.add_argument("--staging-root", type=Path, required=True)
+    ingest.add_argument("--seals-root", type=Path, required=True)
+
+    report = subparsers.add_parser(
+        "calibration-report", help="regenerate a report from sealed attempts"
+    )
+    report.add_argument("plan", type=Path)
+    report.add_argument("--seals-root", type=Path, required=True)
+    report.add_argument("--fixtures", type=Path, required=True)
+    report.add_argument("--report-id", required=True)
+    report.add_argument("--output", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    repository_root = Path(__file__).resolve().parents[3]
     try:
         if args.command == "validate":
             if args.fixtures.is_file():
@@ -102,6 +150,53 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "check-private-root":
             require_external(args.path, args.repo_root, "private holdout root")
             result = {"valid": True}
+        elif args.command == "calibration-prepare":
+            require_external(args.output, args.repo_root, "calibration plan")
+            plan = freeze_calibration_plan(
+                args.repo_root, args.fixtures, args.output
+            )
+            result = {
+                "valid": True,
+                "cells": len(plan["cells"]),
+                "bundle_files": plan["bundle"]["file_count"],
+                "bundle_bytes": plan["bundle"]["byte_count"],
+            }
+        elif args.command == "calibration-request":
+            require_external(args.output, repository_root, "calibration request")
+            plan = load_calibration_plan(args.plan)
+            dump(args.output, calibration_request_record(plan, args.cell_id))
+            result = {"valid": True, "cell_id": args.cell_id}
+        elif args.command == "calibration-preflight":
+            plan = load_calibration_plan(args.plan)
+            response = load(args.response) if args.response else None
+            result = evaluate_preflight(plan, args.cell_id, response)
+        elif args.command == "calibration-ingest":
+            require_external(args.staging_root, repository_root, "attempt staging root")
+            require_external(args.seals_root, repository_root, "attempt seals root")
+            plan = load_calibration_plan(args.plan)
+            attempt = ingest_and_seal_attempt(
+                plan,
+                args.cell_id,
+                load(args.response),
+                args.staging_root,
+                args.seals_root,
+            )
+            result = {"valid": True, "attempt": str(attempt)}
+        elif args.command == "calibration-report":
+            require_external(args.output, repository_root, "calibration report")
+            plan = load_calibration_plan(args.plan)
+            report = regenerate_pipeline_report(
+                plan,
+                args.seals_root,
+                args.fixtures,
+                args.report_id,
+            )
+            dump(args.output, report)
+            result = {
+                "valid": True,
+                "report_id": args.report_id,
+                "partitions": len(report["partitions"]),
+            }
         else:
             raise AssertionError(args.command)
     except (OSError, ValueError) as exc:

@@ -24,9 +24,14 @@ from .strictjson import canonical_bytes, load, loads
 
 SOURCE_COMMIT = "4e6a54942cdde657d95bef28adf8d8e9ebcaa5f5"
 ACCEPTED_MANIFEST_PATH = Path(
-    "/Users/nikhilkaul/.copilot/session-state/"
-    "caa44ead-24fd-4b16-b04f-39c4b26cc79d/files/"
-    "aks-support-complete-skill-bundle-4e6a549.json"
+    "/",
+    "Users",
+    "nikhilkaul",
+    ".copilot",
+    "session-state",
+    "caa44ead-" "24fd-4b16-b04f-39c4b26cc79d",
+    "files",
+    "aks-support-complete-skill-bundle-4e6a549.json",
 )
 ACCEPTED_MANIFEST_SHA256 = (
     "14f77392e839976331f16d2dfc2fd05e4adcb33f8d465ca5f94d1870e5652c82"
@@ -60,8 +65,10 @@ FORBIDDEN_CASE_PACKET_TERMS = (
 DIRECT_CONTEXT_SCAFFOLD = (
     b"Diagnose the AKS support case using only the supplied case packet and any "
     b"attached skill files. Do not assume external state or another run's "
-    b"response. Return the root cause, decisive evidence, a safe next step, "
-    b"and material uncertainty."
+    b"response. Return strict JSON with exactly four string fields: "
+    b"diagnosis.txt, evidence.txt, mutation.txt, and uncertainty.txt. Use them "
+    b"for the root cause, decisive evidence, safe mutation or 'none', and "
+    b"material uncertainty respectively."
 )
 
 

@@ -52,9 +52,24 @@ function withEnv(vars, fn) {
   }
 }
 
+async function withEnvAsync(vars, fn) {
+  const saved = {};
+  for (const key of ENV_KEYS) saved[key] = process.env[key];
+  for (const key of ENV_KEYS) delete process.env[key];
+  Object.assign(process.env, vars);
+  try {
+    return await fn();
+  } finally {
+    for (const key of ENV_KEYS) delete process.env[key];
+    for (const key of ENV_KEYS) {
+      if (saved[key] !== undefined) process.env[key] = saved[key];
+    }
+  }
+}
+
 // detectBackend() reads process.env fresh on every call (no module-level
 // caching), so one require is enough — each case just swaps env around it.
-const { activeBackend } = require('./llm-client');
+const { activeBackend, rawOneShot } = require('./llm-client');
 
 let fails = 0;
 function check(desc, vars, expected) {
@@ -124,11 +139,85 @@ check(
 
 check('no credentials at all reports unconfigured', {}, 'unconfigured');
 
-console.log();
-if (fails === 0) {
-  console.log('All llm-client backend detection tests passed.');
-  process.exit(0);
-} else {
-  console.error(`${fails} llm-client backend detection test(s) FAILED.`);
-  process.exit(1);
+function rawRequest(model = 'claude-opus-5') {
+  return {
+    protocol_version: 'aks-support-one-shot/v1',
+    request_id: 'raw-preflight',
+    model,
+    input: { messages: [{ role: 'user', content: '{"case":"test"}' }] },
+    context: { fresh: true, persist: false },
+    execution: {
+      mode: 'direct-model-context',
+      track: 'raw-model',
+      environment: 'llm-client',
+    },
+    tools: [],
+    trace: { required: true, include_all_events: true },
+  };
 }
+
+async function testRawBridge() {
+  const blocked = await withEnvAsync({}, () => rawOneShot(rawRequest()));
+  assert.strictEqual(blocked.failure.code, 'raw-model-unconfigured');
+  assert.strictEqual(blocked.observed_model, null);
+  assert.deepStrictEqual(blocked.events.map((event) => event.category), [
+    'lifecycle',
+    'lifecycle',
+  ]);
+
+  let sentBody;
+  const savedFetch = global.fetch;
+  try {
+    global.fetch = async (_url, options) => {
+      sentBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          model: 'claude-opus-5',
+          choices: [{ message: { content: '{"diagnosis.txt":"ok"}' } }],
+          usage: {},
+        }),
+      };
+    };
+    const response = await withEnvAsync(
+      { EVAL_PROVIDER: 'openai', OPENAI_BASE_URL: 'http://localhost:8000/v1' },
+      () => rawOneShot(rawRequest()),
+    );
+    assert.strictEqual(sentBody.model, 'claude-opus-5');
+    assert.strictEqual(Object.hasOwn(sentBody, 'tools'), false);
+    assert.strictEqual(response.observed_model, 'claude-opus-5');
+    assert.strictEqual(response.failure, null);
+
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'claude-sonnet-5',
+        choices: [{ message: { content: '{"diagnosis.txt":"ok"}' } }],
+        usage: {},
+      }),
+    });
+    const mismatch = await withEnvAsync(
+      { EVAL_PROVIDER: 'openai', OPENAI_BASE_URL: 'http://localhost:8000/v1' },
+      () => rawOneShot(rawRequest()),
+    );
+    assert.strictEqual(mismatch.failure.code, 'model-identity-mismatch');
+    assert.strictEqual(mismatch.observed_model, 'claude-sonnet-5');
+  } finally {
+    global.fetch = savedFetch;
+  }
+}
+
+testRawBridge()
+  .then(() => {
+    console.log();
+    if (fails === 0) {
+      console.log('All llm-client tests passed.');
+      process.exit(0);
+    }
+    console.error(`${fails} llm-client test(s) FAILED.`);
+    process.exit(1);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

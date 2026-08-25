@@ -128,6 +128,16 @@ def regenerate_calibration_report(
             }
         )
 
+    return build_calibration_report(observations, report_id)
+
+
+def build_calibration_report(
+    observations: list[dict[str, Any]], report_id: str
+) -> dict[str, Any]:
+    """Build the common track-separated, claim-limited calibration report."""
+
+    if not isinstance(report_id, str) or not report_id:
+        raise ResultStoreError("report_id must be non-empty")
     partitions: list[dict[str, Any]] = []
     partition_keys = sorted(
         {
