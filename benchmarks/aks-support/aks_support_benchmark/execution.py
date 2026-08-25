@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import json
 from pathlib import Path
 from typing import Any
 
+from .contracts import validate_contract
 from .identity import complete_file_manifest, sha256_bytes
+from .one_shot import OneShotRequest, validate_request_fields
 from .paths import confined_path, require_disjoint, require_external
 
 
@@ -65,6 +69,74 @@ def prepare_skill(
             "folder": str(skill_root.resolve(strict=True)),
         }
     raise ExecutionError(f"unsupported execution mode: {mode}")
+
+
+def prepare_one_shot_request(
+    request_id: str,
+    requested_model: str,
+    capability_hash: str,
+    canonical_scaffold: str,
+    task: dict[str, Any],
+    workspace_root: Path,
+    injected_skill: list[dict[str, Any]] | None = None,
+) -> OneShotRequest:
+    """Build a prompt-only request from the explicitly declared solver-visible bytes."""
+
+    task = validate_contract(task, "task")
+    if task["allowed_tools"]:
+        raise ExecutionError("one-shot calibration requires zero allowed tools")
+    if not isinstance(canonical_scaffold, str) or not canonical_scaffold:
+        raise ExecutionError("canonical scaffold must not be empty")
+
+    materials: list[dict[str, str]] = []
+    material_paths: set[str] = set()
+    for entry in task["workspace_files"]:
+        content = confined_path(workspace_root, entry["path"]).read_bytes()
+        if sha256_bytes(content) != entry["sha256"]:
+            raise ExecutionError(f"workspace file hash mismatch: {entry['path']}")
+        materials.append(
+            {
+                "path": entry["path"],
+                "bytes_base64": base64.b64encode(content).decode("ascii"),
+            }
+        )
+        material_paths.add(entry["path"])
+
+    for entry in injected_skill or []:
+        if set(entry) != {"path", "sha256", "bytes_base64"}:
+            raise ExecutionError("injected skill material fields are invalid")
+        path = entry["path"]
+        encoded = entry["bytes_base64"]
+        if not isinstance(path, str) or not isinstance(encoded, str):
+            raise ExecutionError("injected skill material is malformed")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ExecutionError("injected skill bytes are not valid base64") from exc
+        if sha256_bytes(content) != entry["sha256"]:
+            raise ExecutionError(f"injected skill hash mismatch: {path}")
+        if path in material_paths:
+            raise ExecutionError(f"duplicate prompt material path: {path}")
+        materials.append({"path": path, "bytes_base64": encoded})
+        material_paths.add(path)
+
+    prompt_input = json.dumps(
+        {
+            "task": task["prompt"],
+            "materials": materials,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    prompt = f"{canonical_scaffold}\n\n<aks-support-input>{prompt_input}</aks-support-input>"
+    validate_request_fields(request_id, requested_model, capability_hash, prompt)
+    return OneShotRequest(
+        request_id=request_id,
+        requested_model=requested_model,
+        capability_hash=capability_hash,
+        prompt=prompt,
+    )
 
 
 def observed_skill_access(

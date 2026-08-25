@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .contracts import validate_contract
+from .one_shot import (
+    OneShotOutcome,
+    OneShotRequest,
+    adapter_transport_failure,
+    ingest_one_shot_response,
+)
 from .paths import safe_environment
 from .strictjson import StrictJSONError, load, loads
 
@@ -46,9 +52,7 @@ class CommandAdapter:
             env=safe_environment(self.env, self.allowed_env, {}),
         )
         if completed.returncode != 0:
-            raise AdapterError(
-                f"adapter exited {completed.returncode}: {completed.stderr.strip()}"
-            )
+            raise AdapterError(f"adapter exited with status {completed.returncode}")
         try:
             response = loads(completed.stdout)
         except StrictJSONError as exc:
@@ -81,6 +85,16 @@ class ManualAdapter:
         ):
             raise AdapterError("manual record provenance must be non-empty")
         return validate_contract(self.record["trajectory"], "trajectory")
+
+
+def invoke_one_shot(adapter: Adapter, request: OneShotRequest) -> OneShotOutcome:
+    """Invoke a normalized one-shot adapter and fail closed during ingestion."""
+
+    try:
+        response = adapter.invoke(request.host_payload())
+    except AdapterError:
+        return adapter_transport_failure(request)
+    return ingest_one_shot_response(request, response)
 
 
 def validate_future_host_config(config: dict[str, Any]) -> dict[str, Any]:
