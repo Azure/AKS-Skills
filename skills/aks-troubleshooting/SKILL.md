@@ -10,7 +10,7 @@ metadata:
       anyBins:
         - kubectl
         - az
-description: "Debug and root-cause live Azure Kubernetes Service (AKS) cluster incidents: pod crashes, node failures, DNS/networking, ingress/load-balancer errors, network policy, upgrade failures, and spot/zone disruptions. Runs a read-only, evidence-first investigation using the AKS MCP tools, az, and kubectl, and produces a structured incident report. WHEN: CrashLoopBackOff, OOMKilled, ImagePullBackOff, node NotReady, pod Pending, DNS resolution failure, 502/503 from ingress, connectivity timeout, upgrade stuck, cordon/drain failure, spot eviction, SNAT exhaustion, expired certificate, 'investigate my AKS cluster'. DO NOT USE FOR: packet-level capture (use aks-network-capture); GPU or model-serving issues (use aks-gpu-inference); creating or provisioning a cluster (use aks-cluster-setup); cost/rightsizing (use aks-cost-optimization)."
+description: "Debug and root-cause live Azure Kubernetes Service (AKS) cluster incidents: pod crashes, node failures, DNS/networking, ingress/load-balancer errors, network policy, upgrade failures, and spot/zone disruptions. Runs a read-only, evidence-first investigation using discovered Azure/AKS read capabilities, az, and kubectl, and produces a structured incident report. WHEN: CrashLoopBackOff, OOMKilled, ImagePullBackOff, node NotReady, pod Pending, DNS resolution failure, 502/503 from ingress, connectivity timeout, upgrade stuck, cordon/drain failure, spot eviction, SNAT exhaustion, expired certificate, 'investigate my AKS cluster'. DO NOT USE FOR: packet capture (use aks-network-capture); GPU/model serving (use aks-gpu-inference); provisioning (use aks-cluster-setup); cost (use aks-cost-optimization); non-AKS or cross-service Azure incidents (use azure-diagnostics)."
 ---
 
 # AKS Troubleshooting
@@ -23,9 +23,11 @@ Root-cause live AKS incidents with a read-only, evidence-first investigation. Th
 
 **Evidence before conclusion.** Do not state a root cause without quoting the evidence that supports it. "Pod is Pending" and "node is NotReady" are symptoms, not causes — trace them to the specific selector, taint, exhausted resource, or Azure-side condition.
 
-**Tool preference.** When AKS-aware MCP tools are available, prefer `mcp_azure_mcp_aks`, then the smallest discovered AKS-MCP tool that fits the read, then supporting tools (`mcp_azure_mcp_applens`, `mcp_azure_mcp_monitor`, `mcp_azure_mcp_resourcehealth`). Fall back to raw `az aks` and `kubectl` only when the MCP surface cannot perform the check. Default the MCP access mode to `readonly`. See [references/aks-mcp.md](references/aks-mcp.md).
+**Tool preference.** Ask the host to enumerate connected capabilities and schemas. Select the smallest discovered read capability whose schema matches the AKS check; do not assume a rendered wrapper name. Fall back explicitly to `az` for Azure-side reads and `kubectl` for Kubernetes-side reads when no discovered capability fits. Default every capable provider to read-only access. See [references/aks-mcp.md](references/aks-mcp.md).
 
 **Evidence order.** Gather Azure-side state first (cluster state, resource health, recent operations, node-pool state, detector/monitoring output), then Kubernetes-side state (reachability, nodes, `kube-system`, events, the affected namespace, pod detail, logs). This ordering catches platform-level causes — a failed upgrade operation, a stopped cluster, a quota block — before you spend time inside the cluster.
+
+**Package boundary.** This focused skill is the intended owner for deep AKS incidents. `azure-diagnostics` is the intended broad entry point for non-AKS and cross-service Azure incidents. No portable cross-plugin dependency or priority exists, and combined-install routing is not claimed until a host passes paired routing tests. If the host cannot prove that route, ship one package rather than expose a coin flip. See [references/provenance-and-boundary.md](references/provenance-and-boundary.md).
 
 ## Route by symptom
 
@@ -45,10 +47,12 @@ Root-cause live AKS incidents with a read-only, evidence-first investigation. Th
 
 ## Scripts
 
-Both are POSIX `sh`, read-only, and safe to run at the start of any investigation. Invoke with `sh <script>` or `./<script>`.
+The Bash and PowerShell collectors require an explicit subscription, resource group, cluster, kube context, and empty artifact directory. They prove that the kube context endpoint matches the named AKS resource before any cluster data read. Raw artifacts stay in the selected directory; stdout is an allowlisted, redacted projection.
 
-- `scripts/cluster-snapshot.sh` — quick cluster-health overview (nodes, system pods, recent events, node-pool state).
-- `scripts/pod-deep-dive.sh <namespace> <pod>` — full diagnostic dump for one pod: describe, events, current and previous logs across all containers, resource usage.
+- `scripts/aks-baseline.sh` / `scripts/aks-baseline.ps1` — ordered Azure-then-Kubernetes cluster baseline.
+- `scripts/pod-evidence.sh` / `scripts/pod-evidence.ps1` — invariant pod status, state, events, current/previous logs, resources, and usage.
+- `scripts/run-ig.sh` / `scripts/run-ig.ps1` — validated, digest-pinned Inspektor Gadget execution; real runs require explicit privileged approval and a caller-supplied deadline.
+- `scripts/cluster-snapshot.sh` and `scripts/pod-deep-dive.sh` — compatibility entry points to the safe Bash collectors.
 
 ## AKS-specific gotchas
 
@@ -69,14 +73,14 @@ The highest-signal failure patterns that are specific to AKS — a frontier mode
 
 ## Log discipline
 
-- Always fetch `kubectl logs --previous` alongside current logs — after a restart the current stream may be empty.
-- Do not truncate logs with `--tail` or `| tail`; the causal error is often early.
-- For multi-container pods, use `--all-containers` (or name each `--container`) so sidecar and init-container logs are not missed.
+- Use `pod-evidence` so current and previous streams are collected together, raw output remains outside model context, and the visible projection uses the shared redaction contract.
+- Preserve the upstream default of 50 lines per stream unless the incident owner selects another positive value; do not paste raw customer logs into model context.
+- For multi-container pods, preserve container prefixes so sidecar and init-container evidence remains attributable.
 - Get current UTC time with `date -u` before using `--since-time`.
 
 ## Deep diagnostics
 
-When standard checks do not reveal a root cause, use **Inspektor Gadget** for real-time, low-level node and pod observability (DNS traces, TCP traces, process and file-access snapshots). See [references/inspektor-gadget.md](references/inspektor-gadget.md) for the gadget catalog and symptom-to-gadget mapping. Inspektor Gadget runs a privileged debug pod — get explicit user approval before invoking it. Additional MCP-driven investigation modes are in [references/structured-input-modes.md](references/structured-input-modes.md) and [references/command-flows.md](references/command-flows.md).
+When standard checks do not reveal a root cause, use **Inspektor Gadget** for real-time, low-level node and pod observability (DNS traces, TCP traces, process and file-access snapshots). Invoke only through `run-ig`, which pins the verified multi-architecture image digest, validates the gadget and filters, requires explicit approval and a finite deadline, and requests cleanup of the exact debug pod. Additional provider-driven investigation modes are in [references/structured-input-modes.md](references/structured-input-modes.md) and [references/command-flows.md](references/command-flows.md).
 
 ## Report
 

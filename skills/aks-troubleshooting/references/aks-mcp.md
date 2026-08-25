@@ -1,17 +1,22 @@
-# AKS MCP Reference
+# Discovered Azure Capability Reference
 
-Use this reference when AKS-aware MCP tools are available in the client.
+Use this reference when the host exposes connected Azure or AKS diagnostic
+capabilities.
 
 ## Preference Order
 
-1. `mcp_azure_mcp_aks`
-2. The AKS-MCP tools that surface after discovery in the client
-3. Supporting Azure tools such as `mcp_azure_mcp_applens`, `mcp_azure_mcp_monitor`, and `mcp_azure_mcp_resourcehealth`
-4. Raw `az aks` and `kubectl` only when required functionality is missing from MCP
+1. Ask the host to enumerate available capabilities and their input schemas.
+2. Select the smallest read capability whose schema matches the exact AKS task.
+3. Use supporting detector, monitor, or resource-health reads only when their
+   discovered schemas accept the target resource and incident window.
+4. Fall back explicitly to `az` for Azure-side AKS reads and `kubectl` for
+   Kubernetes-side reads when no discovered capability fits.
 
 ## Happy Path
 
-After selecting `mcp_azure_mcp_aks`, let the client enumerate the exact AKS-MCP tools it exposes and choose the smallest tool that fits the task.
+Do not write or guess a rendered wrapper name. Tool names are host-owned and can
+change across Copilot, Claude, managed agents, and other Agent Skills clients.
+Discovery and schema matching are the portable contract.
 
 Favor the obvious read paths first:
 
@@ -20,11 +25,15 @@ Favor the obvious read paths first:
 - monitoring, metrics, or control-plane-log checks
 - kubectl-style read operations
 
-## Authentication And Access
+## Authentication and Access
 
-AKS-MCP is Azure CLI-backed. Expect service principal, workload identity, managed identity, or existing `az login` auth, usually keyed by `AZURE_CLIENT_ID`. If `AZURE_SUBSCRIPTION_ID` is set, expect the server to select that subscription after login.
+Identity, authorization, transport, retention, and UX are host-owned. A skill
+does not grant access. Require the host to surface the selected identity and
+target subscription, and default to the least-privileged read mode.
 
-Default to `readonly`. Only suggest `readwrite` or `admin` when the current diagnostic step truly requires it.
+Do not silently change subscriptions or kube contexts. The focused evidence
+scripts require both explicitly and prove that the named kube endpoint belongs
+to the named AKS resource.
 
 ## Detector Notes
 
@@ -32,7 +41,7 @@ For detector-style workflows, use the cluster resource ID, keep the time window 
 
 ## Fallback Rule
 
-If the client does not expose the AKS-MCP surface needed for a check, then fall back to:
+If discovery does not expose a matching read capability, fall back to:
 
 - `az aks` for Azure-side AKS operations
 - raw `kubectl` for Kubernetes-side inspection

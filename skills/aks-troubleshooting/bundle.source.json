@@ -1,0 +1,144 @@
+{
+  "contract_version": "aks-troubleshooting-source/v1",
+  "kind": "skill-bundle-source",
+  "bundle_id": "aks-troubleshooting",
+  "root": "skills/aks-troubleshooting",
+  "entry_point": "SKILL.md",
+  "mapping_version": "identity/v1",
+  "source_repository": "https://github.com/Azure/AKS-Skills",
+  "tree_semantics": {
+    "completeness": "payload-is-the-exact-file-set",
+    "path_format": "normalized-posix-relative",
+    "symlinks": "forbidden",
+    "allowed_file_modes": [
+      "100644",
+      "100755"
+    ],
+    "canonical_hash": "sha256-of-canonical-sorted-file-manifest"
+  },
+  "payload": [
+    "SKILL.md",
+    "bundle.source.json",
+    "general-diagnostics.md",
+    "load-balancer-and-ingress.md",
+    "network-policy.md",
+    "networking.md",
+    "node-issues.md",
+    "pod-failures.md",
+    "references/aks-mcp.md",
+    "references/command-flows.md",
+    "references/inspektor-gadget.md",
+    "references/provenance-and-boundary.md",
+    "references/report-template.md",
+    "references/structured-input-modes.md",
+    "references/symptom-map.md",
+    "scripts/aks-baseline.ps1",
+    "scripts/aks-baseline.sh",
+    "scripts/cluster-snapshot.sh",
+    "scripts/evidence-common.ps1",
+    "scripts/evidence-common.sh",
+    "scripts/pod-deep-dive.sh",
+    "scripts/pod-evidence.ps1",
+    "scripts/pod-evidence.sh",
+    "scripts/run-ig.ps1",
+    "scripts/run-ig.sh",
+    "spot-and-zone-issues.md",
+    "upgrade-operations.md"
+  ],
+  "reconciliation": {
+    "ghcp_source": {
+      "repository": "https://github.com/microsoft/GitHub-Copilot-for-Azure",
+      "commit": "22f96fd93fa85814b7a8ffdfe5356a5bab96a096",
+      "origin_commit": "ab9b0d03ce60eb767a82f4053a9c57d6205a4322"
+    },
+    "aks_skills_source": {
+      "repository": "https://github.com/Azure/AKS-Skills",
+      "base_commit": "a1cab4852d3e6cdb20e06b171400117379cbd90c",
+      "import_commit": "856eb9b5eb508387e996810ac7ad405abb0fece7"
+    },
+    "shared_preserved": [
+      {
+        "path": "load-balancer-and-ingress.md",
+        "ghcp_blob_at_verdict": "cdcb9aa761e4810c926a6404bad4af347ea38552",
+        "aks_base_blob": "cdcb9aa761e4810c926a6404bad4af347ea38552",
+        "base_status": "byte-identical"
+      },
+      {
+        "path": "network-policy.md",
+        "ghcp_blob_at_verdict": "32f2147fa2ce89d99d3cf4148b1ce120928e7445",
+        "aks_base_blob": "f79cb1f2bfb0dbae8d4142fa4180bad0987ad7aa",
+        "base_status": "strengthened-before-this-layer"
+      },
+      {
+        "path": "references/structured-input-modes.md",
+        "ghcp_blob_at_verdict": "208cc0cd02b46647bcfe3feca3793629462582d8",
+        "aks_base_blob": "208cc0cd02b46647bcfe3feca3793629462582d8",
+        "base_status": "byte-identical"
+      },
+      {
+        "path": "spot-and-zone-issues.md",
+        "ghcp_blob_at_verdict": "7b774185cd4179d8fa41bce152853fbd5b7c4f54",
+        "aks_base_blob": "7b774185cd4179d8fa41bce152853fbd5b7c4f54",
+        "base_status": "byte-identical"
+      },
+      {
+        "path": "upgrade-operations.md",
+        "ghcp_blob_at_verdict": "f2ab3f1997c9ed6049cfc8462bd8e50b8df2a79d",
+        "aks_base_blob": "cd2ea1d10cdc9760ad297cba457310247aec6dc2",
+        "base_status": "strengthened-before-this-layer"
+      }
+    ],
+    "shared_reconciled": [
+      {
+        "path": "general-diagnostics.md",
+        "ghcp_blob": "844cd12b3e48945f66b5d0bebb29c954219ce7a3"
+      },
+      {
+        "path": "networking.md",
+        "ghcp_blob": "b5fd1ed391ff5afa38b2fde6934a90320ea6492c"
+      },
+      {
+        "path": "node-issues.md",
+        "ghcp_blob": "9e69be29ea99f8829afcfb5ba209af1be8be79e6"
+      },
+      {
+        "path": "pod-failures.md",
+        "ghcp_blob": "114516eae37fcc1b7022b347ee8a05995af981c2"
+      },
+      {
+        "path": "references/aks-mcp.md",
+        "ghcp_blob": "92fb12369b0ef122b6c009c37687616cc9ca645c"
+      },
+      {
+        "path": "references/command-flows.md",
+        "ghcp_blob": "9a932d72a14a18a2cb5ee3d0b98183460fd059d2"
+      },
+      {
+        "path": "references/inspektor-gadget.md",
+        "ghcp_blob": "214caa30f4df331affcf039e926ebdd0dde710be"
+      }
+    ],
+    "focused_only": [
+      "references/report-template.md",
+      "references/symptom-map.md",
+      "scripts/cluster-snapshot.sh",
+      "scripts/pod-deep-dive.sh"
+    ]
+  },
+  "routing": {
+    "status": "intended-unverified",
+    "focused_skill": "aks-troubleshooting",
+    "broad_skill": "azure-diagnostics",
+    "broad_only": "broad-entry-with-current-ghcp-aks-coverage",
+    "focused_only": "focused-entry-for-aks-incidents",
+    "focused_absent": "broad-package-remains-self-sufficient",
+    "both_installed": "focused-for-aks-and-broad-for-cross-service-only-after-paired-host-test"
+  },
+  "materialization": {
+    "mode": "build-time-only",
+    "transforms": "identity",
+    "generated_payload_editable": false,
+    "runtime_fetch": false,
+    "generated_output_committed": false
+  }
+}

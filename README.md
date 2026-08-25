@@ -4,11 +4,28 @@
 [![Agent Skills](https://img.shields.io/badge/format-Agent%20Skills-5b9bff.svg)](https://agentskills.io)
 [![Azure Kubernetes Service](https://img.shields.io/badge/Azure-Kubernetes%20Service-0078d4.svg)](https://learn.microsoft.com/azure/aks/)
 
-Agent skills for operating **Azure Kubernetes Service (AKS)** clusters. AKS Skills is the deep Day-2 AKS operator — troubleshoot live incidents, optimize cost, assess AKS Automatic readiness, run GPU/inference workloads, and capture packet-level evidence. It complements the broader [Azure Skills](https://github.com/microsoft/azure-skills) plugin (the provisioning engine); install both.
+Agent skills for operating **Azure Kubernetes Service (AKS)** clusters. AKS
+Skills is the focused Day-2 AKS operator: troubleshoot live incidents, optimize
+cost, assess AKS Automatic readiness, run GPU/inference workloads, and capture
+packet-level evidence. The broader
+[Azure Skills](https://github.com/microsoft/azure-skills) plugin distributes
+Azure-wide provisioning and diagnostics, including its own AKS troubleshooting
+surface.
 
-This is a **dedicated repo**, not a folder inside the all-up Azure Skills plugin, so it can go deep on AKS Day-2 operations without bloating the general Azure plugin, and ship on the AKS team's own cadence. See **[docs/skills-vs-azure-skills.md](docs/skills-vs-azure-skills.md)** for the boundary and why.
+The AKS troubleshooting content has shared lineage: GitHub Copilot for Azure
+(GHCP) originated the common tree, AKS-Skills imported it in June 2026, and both
+copies evolved. This repository now carries the reconciled, host-neutral source
+bundle. GHCP does **not** currently consume it, and no Portal consumption claim
+is made. See
+**[docs/skills-vs-azure-skills.md](docs/skills-vs-azure-skills.md)** for current
+and intended boundaries.
 
-A "skill" is a folder with a `SKILL.md` (YAML front matter + guidance) plus optional `references/` and `scripts/`. A host agent reads the skill descriptions, picks the relevant one, loads its `SKILL.md`, and progressively reads references or runs scripts. The format is the open [Agent Skills standard](https://agentskills.io), so these skills run across Claude Code, GitHub Copilot, Azure SRE Agent, openclaw, and other compatible hosts.
+A "skill" is a folder with a `SKILL.md` (YAML front matter + guidance) plus
+optional `references/` and `scripts/`. A host reads descriptions, selects a
+skill, then progressively loads references or runs scripts. The open
+[Agent Skills standard](https://agentskills.io) makes the source portable, but
+each host still owns routing, model, identity, authorization, tools, transport,
+retention, tracing, and UX.
 
 ## Skills
 
@@ -45,12 +62,34 @@ Skills default to **read-only** investigation and ask before changing anything.
 | **Azure SRE Agent** | Install from URL: `https://github.com/Azure/AKS-Skills` (reads `plugin.json` + `skills/`) |
 | **Any Agent Skills host** | `npx skills add https://github.com/Azure/AKS-Skills --all` (installs the skills; `.mcp.json` wiring is not applied on this path — skills fall back to `az`/`kubectl`) |
 
-For deployment/provisioning, also install [Azure Skills](https://github.com/microsoft/azure-skills).
+For deployment/provisioning, use
+[Azure Skills](https://github.com/microsoft/azure-skills). Do not assume that
+installing both packages gives deterministic routing: no portable cross-plugin
+priority exists. Until a host has paired routing tests, ship the focused package
+for AKS-only work or the broad package for Azure-wide work rather than exposing
+a coin flip.
+
+## Source and downstream contract
+
+`skills/aks-troubleshooting/bundle.source.json` enumerates the canonical,
+self-contained troubleshooting payload. The dependency-free exporter under
+`evals/` materializes an explicit source ref and emits a strict file manifest
+plus provenance lock.
+
+The owner-dependent target is for GHCP to build from an exact AKS-Skills commit
+and canonical tree hash with no manual edits or runtime fetch. If that mechanism
+is rejected, the fallback is consolidation into GHCP, not a permanent
+hand-maintained fork. Current broad-only, focused-only, focused-absent, and
+both-installed behavior is documented in the boundary guide; combined-install
+support remains unproven until each host passes paired tests.
 
 ## Prerequisites
 
-- **`kubectl`** and the **Azure CLI (`az`)** on `PATH`, authenticated to your cluster/subscription (`az login`, `az aks get-credentials`).
-- The **Azure MCP server** (`@azure/mcp`) is wired via [`.mcp.json`](.mcp.json); skills prefer the AKS MCP tools and fall back to `az`/`kubectl`.
+- **`kubectl`** and the **Azure CLI (`az`)** on `PATH`, authenticated to the
+  explicit cluster/subscription target.
+- When a host exposes Azure diagnostic capabilities, the skills discover their
+  schemas and select the smallest matching read. They never assume a rendered
+  wrapper name and fall back explicitly to `az`/`kubectl`.
 - Skills default to **read-only** operations and ask before making changes.
 
 ## Contributing

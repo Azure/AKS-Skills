@@ -1,18 +1,36 @@
 # Pod Failures & Application Issues
 
-## Common Pod Diagnostic Commands
+## Contents
+
+- [Evidence Bundle Script](#evidence-bundle-script)
+- [CrashLoopBackOff](#crashloopbackoff)
+- [ImagePullBackOff](#imagepullbackoff)
+- [Pending Pods](#pending-pods)
+- [Readiness and Liveness Probe Failures](#readiness--liveness-probe-failures)
+- [Resource Constraints](#resource-constraints-cpumemory)
+
+## Evidence Bundle Script
+
+For every pod symptom below, run `pod-evidence` instead of streaming raw logs
+directly into model context. It proves the Azure and kube targets match, then
+collects the invariant **STATUS**, **STATE**, **EVENTS**, current/previous
+**LOGS**, and **RESOURCES** bundle. Raw artifacts remain in the explicit
+artifact directory; stdout is allowlisted and redacted.
 
 ```bash
-# List unhealthy pods across all namespaces
-kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
-# All pods wide view
-kubectl get pods -A -o wide
-# Detailed pod status - events section is critical
-kubectl describe pod <pod-name> -n <namespace>
-# Pod logs (current and previous crash)
-kubectl logs <pod-name> -n <namespace>
-kubectl logs <pod-name> -n <namespace> --previous
+scripts/pod-evidence.sh \
+  --subscription <subscription-id> \
+  --resource-group <resource-group> \
+  --cluster <cluster-name> \
+  --context <kube-context> \
+  --artifacts-dir <new-empty-directory> \
+  --pod <pod-name> --namespace <namespace>
 ```
+
+PowerShell uses the same inputs through `scripts/pod-evidence.ps1`. Use
+`--all-failing` / `-AllFailing` for the target-bound unhealthy-pod sweep. The
+upstream default remains 50 lines per log stream unless the incident owner
+chooses another positive value.
 
 ---
 

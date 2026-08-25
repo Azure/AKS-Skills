@@ -2,6 +2,17 @@
 
 Look up the symptom, run the commands in order. Each section is self-contained.
 
+## Contents
+
+- [Pod Pending](#pod-pending)
+- [Pod CrashLoopBackOff](#pod-crashloopbackoff)
+- [Node NotReady](#node-notready)
+- [Image Pull Failure](#image-pull-failure-errimagepull--imagepullbackoff)
+- [DNS Resolution Failure](#dns-resolution-failure)
+- [Node Pool Scaling Failure](#node-pool-scaling-failure)
+- [Upgrade Stuck or Slow](#upgrade-stuck--slow)
+- [Egress or SNAT Exhaustion](#egress--snat-exhaustion-intermittent-outbound-failures)
+
 ---
 
 ## Pod Pending

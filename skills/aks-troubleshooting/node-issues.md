@@ -1,5 +1,11 @@
 # Node & Cluster Troubleshooting
 
+## Contents
+
+- [Node Pool Not Scaling](#node-pool-not-scaling)
+- [Resource Pressure and Capacity Planning](#resource-pressure--capacity-planning)
+- [Detailed Node and Cluster Guides](#detailed-node-and-cluster-guides)
+
 ## Node NotReady — executable evidence first
 
 Every identifier in this block is derivable or enumerable — exhaust derivation before asking the user for one. If no node was named, enumerate candidates with `kubectl get nodes --no-headers | awk '$2 !~ /^Ready(,|$)/'` and run the block for each; an empty result means no node in the current cluster is NotReady, so reconfirm the cluster identity before concluding. The VMSS name and instance id are computed from the node's `providerID` inside the block — never request them.
@@ -162,7 +168,11 @@ If this evidence cannot identify the consumer, request approval before privilege
 
 **Deep diagnostics with Inspektor Gadget** (PID pressure or unknown process load):
 
-Use `snapshot_process` (timeout 5) to list all processes on the node. For node-wide scope, omit pod filters. See [references/inspektor-gadget.md](references/inspektor-gadget.md).
+Invoke target-bound `run-ig` with `snapshot_process` (the GHCP-derived default
+remains 5 seconds). For node-wide scope, provide the proven node and omit
+workload filters. A real run requires explicit privileged approval and a
+caller-supplied deadline. See
+[references/inspektor-gadget.md](references/inspektor-gadget.md).
 
 ---
 

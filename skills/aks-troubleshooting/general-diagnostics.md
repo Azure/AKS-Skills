@@ -12,14 +12,27 @@ When a user asks a broad question like "what happened in my AKS cluster?" or "ch
 6. System pods health
 7. Activity log
 
+Run the target-bound baseline instead of issuing an ambient-context command
+chain. It stops before Kubernetes collection unless the named context endpoint
+matches the named AKS resource, stores raw output outside model context, and
+prints one redacted projection.
+
 ```bash
-az aks show -g <rg> -n <cluster> --query "provisioningState"
-kubectl get events -A --sort-by='.lastTimestamp' | head -40
-kubectl get nodes -o wide
-kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
-kubectl get pods -A -o wide
-kubectl get pods -n kube-system -o wide
-az monitor activity-log list -g <rg> --max-events 20 -o table
+scripts/aks-baseline.sh \
+  --subscription <subscription-id> \
+  --resource-group <resource-group> \
+  --cluster <cluster-name> \
+  --context <kube-context> \
+  --artifacts-dir <new-empty-directory>
+```
+
+```powershell
+scripts/aks-baseline.ps1 `
+  -Subscription <subscription-id> `
+  -ResourceGroup <resource-group> `
+  -Cluster <cluster-name> `
+  -Context <kube-context> `
+  -ArtifactsDir <new-empty-directory>
 ```
 
 ---
@@ -34,19 +47,24 @@ az aks get-credentials -g <rg> -n <cluster>
 az aks nodepool list -g <rg> --cluster-name <cluster> -o table
 ```
 
-### AppLens (MCP) for AKS
+### Discovered Azure diagnostic capability
 
-For AI-powered diagnostics:
+Ask the host to enumerate connected diagnostic capabilities and their schemas.
+If it exposes an AKS-compatible AppLens or detector read, select the smallest
+schema that accepts the exact cluster resource ID and a bounded incident window.
+Do not assume a host-rendered tool name. If no matching capability is available,
+continue with the explicit `az` and `kubectl` fallback.
 
 ```text
-mcp_azure_mcp_applens
-  intent: "diagnose AKS cluster issues"
-  command: "diagnose"
-  parameters:
-    resourceId: "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<cluster>"
+capability: discovered AppLens/detector read
+intent: diagnose AKS cluster issues
+required schema input:
+  resourceId: /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ContainerService/managedClusters/<cluster>
+  incidentWindow: <explicit UTC interval>
 ```
 
-> 💡 **Tip:** AppLens automatically detects common issues and provides remediation recommendations using the cluster resource ID.
+Treat detector output as evidence, not an automatic root-cause verdict. Preserve
+the detector name, time window, finding severity, and supporting observation.
 
 ---
 

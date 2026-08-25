@@ -2,6 +2,12 @@
 
 For CNI-specific issues, check CNI pod health and review [AKS networking concepts](https://learn.microsoft.com/azure/aks/concepts-network).
 
+## Contents
+
+- [DNS Resolution Failures](#dns-resolution-failures)
+- [AKS to an External Azure Service](#aks-to-an-external-azure-service)
+- [Detailed Networking Guides](#detailed-networking-guides)
+
 ## Service Unreachable / Connection Refused
 
 **Diagnostics - always start here:**
@@ -29,7 +35,10 @@ Pods that are running but not Ready are removed from Endpoints. Check `kubectl g
 
 **Deep diagnostics with Inspektor Gadget** (when the above checks are inconclusive):
 
-Use the [IG base command pattern](references/inspektor-gadget.md) with `--k8s-namespace <ns> --k8s-podname <pod-name>` and these gadgets:
+Use the target-bound [`run-ig`](scripts/run-ig.sh) collector described in
+[references/inspektor-gadget.md](references/inspektor-gadget.md). It validates
+the workload scope, proves the AKS target, pins the IG image digest, and requires
+explicit privileged approval plus a finite deadline for a real run. Choose:
 
 - `snapshot_socket` (timeout 5) — check what ports the pod is listening on
 - `trace_tcp` (timeout 30) — trace connect/accept/close events
@@ -193,7 +202,11 @@ Changing CoreDNS replicas/configuration, custom forwarders, NetworkPolicy, NSGs,
 
 **Deep diagnostics with Inspektor Gadget** (when the above checks are inconclusive):
 
-Use the [IG base command pattern](references/inspektor-gadget.md) with `--k8s-namespace <ns> --k8s-podname <pod-name>` and `trace_dns` (timeout 30). Key signals: `rcode=3` (NXDOMAIN), `rcode=2` (SERVFAIL), high `latency` values, queries going to unexpected destinations.
+Use target-bound `run-ig` with `trace_dns` (the GHCP-derived default remains 30
+seconds). Key signals: `rcode=3` (NXDOMAIN), `rcode=2` (SERVFAIL), high
+`latency` values, and queries going to unexpected destinations. Raw events stay
+in the selected artifact directory; the script emits only safe execution
+metadata to model context.
 
 See [references/inspektor-gadget.md](references/inspektor-gadget.md).
 

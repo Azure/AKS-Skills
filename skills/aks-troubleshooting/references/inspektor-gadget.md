@@ -2,44 +2,63 @@
 
 Use Inspektor Gadget for real-time, low-level node/pod diagnostics when `kubectl` is insufficient.
 
-## IG Version
+## Contents
 
-`<ig-version>` = `v0.51.0` — substitute this exact tag (with `v` prefix) wherever `<ig-version>` appears. Bump this line only.
+- [Verified Image](#verified-image)
+- [Run Script](#run-script)
+- [Validated Filters](#validated-filters)
+- [Gadget Catalog](#gadget-catalog)
+- [Symptom-to-Gadget Map](#symptom-to-gadget-map)
+- [Gadget Type Reference](#gadget-type-reference)
+- [Guardrails](#guardrails)
 
-## Base Command Pattern
+## Verified Image
+
+`run-ig` pins official non-prerelease release `v0.51.0` to the verified
+multi-architecture OCI index:
+
+`mcr.microsoft.com/oss/v2/inspektor-gadget/ig:v0.51.0@sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4`
+
+The index contains Linux `amd64` and `arm64` manifests. The scripts do not
+accept a tag or version override.
+
+## Run Script
 
 ```bash
-kubectl debug --profile=sysadmin node/<node-name> --attach --quiet \
-  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig:<ig-version> \
-  -- ig run <gadget>:<ig-version> -o json --timeout <seconds> [filters...]
+scripts/run-ig.sh \
+  --subscription <subscription-id> \
+  --resource-group <resource-group> \
+  --cluster <cluster-name> \
+  --context <kube-context> \
+  --artifacts-dir <new-empty-directory> \
+  --namespace <namespace> \
+  --gadget trace_dns --pod <pod-name> \
+  --dry-run
 ```
 
-Always set `--timeout` after `--` to cap runtime. Use `--timeout 5` for snapshot/top, `--timeout 30` for trace/profile.
+For a real run, replace `--dry-run` with `--approve-privileged` and an explicit
+`--deadline <duration>`. PowerShell exposes equivalent parameters through
+[`run-ig.ps1`](../scripts/run-ig.ps1). The script resolves a pod's node only
+after target proof, injects a unique run marker, discovers the exact generated
+debug pod, and requests its deletion in cleanup handlers.
 
-> **Note:** IG uses `kubectl debug --profile=sysadmin` (privileged debug pod). Only run with explicit user approval and appropriate RBAC.
+Raw gadget output remains in the artifact directory. Model-visible output is a
+safe projection of target, gadget, approved filters, completion, cleanup, raw
+artifact path, and hash.
 
-**Required:** Resolve the node name first:
+## Validated Filters
 
-```bash
-kubectl get pod <pod-name> -n <namespace> -o jsonpath='{.spec.nodeName}'
-```
+Arbitrary argument passthrough is not supported.
 
-## Common Filters
-
-| Filter | Description |
+| Script option | Accepted scope |
 |---|---|
-| `--k8s-namespace <ns>` | Scope to a Kubernetes namespace |
-| `--k8s-podname <pod>` | Scope to a specific pod |
-| `--k8s-containername <ctr>` | Scope to a specific container |
-| `--timeout <seconds>` | Cap streaming duration for trace/profile gadgets |
-| `--max-entries <n>` | Max entries per batch for top/profile gadgets |
-| `--map-fetch-interval <dur>` | Map fetch interval for top (except `top_process`) and profile gadgets (default `1000ms`) |
-| `--interval <dur>` | Reporting interval for `top_process` only (e.g. `5s`) |
-| `--syscall-filters <list>` | Comma-separated syscalls for `traceloop` (e.g. `open,connect,accept`). **Always specify** to limit data volume |
-
-> **Tip:** For top/profile, set `--map-fetch-interval` ≤ half of `--timeout` to collect at least one batch. E.g. `--timeout 2 --map-fetch-interval 1000ms --max-entries 20`.
->
-> **Note:** `top_process` uses `--interval` instead of `--map-fetch-interval`. E.g. `--timeout 10 --interval 5s --max-entries 20`.
+| `--container` / `-Container` | Validated workload container name |
+| `--timeout` / `-Timeout` | Positive seconds; defaults remain 5 for snapshot/top and 30 for trace/profile/tcpdump |
+| `--max-entries` / `-MaxEntries` | Positive integer for top/profile gadgets |
+| `--map-fetch-interval` / `-MapFetchInterval` | Validated duration for top/profile except `top_process` |
+| `--interval` / `-Interval` | Validated duration for `top_process` only |
+| `--syscall-filters` / `-SyscallFilters` | Required validated comma-list for `traceloop`; rejected elsewhere |
+| `--packet-filter` / `-PacketFilter` | Restricted packet-filter grammar for `tcpdump`; rejected elsewhere |
 
 ## Gadget Catalog
 
@@ -57,17 +76,8 @@ kubectl get pod <pod-name> -n <namespace> -o jsonpath='{.spec.nodeName}'
 
 #### tcpdump gadget
 
-Outputs raw pcap-ng data. Pipe to `tcpdump` for readable output:
-
-```bash
-kubectl debug --profile=sysadmin node/<node-name> --attach --quiet \
-  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig:<ig-version> \
-  -- ig run tcpdump:<ig-version> -o pcap-ng --k8s-namespace <ns> --k8s-podname <pod> \
-     --timeout 30 --pf "port 80" \
-  | tcpdump -nvr -
-```
-
-Use `--pf "<expr>"` for tcpdump filters (e.g., `port 80`, `host 10.0.0.1`). Output must be `-o pcap-ng` (not `-o json`).
+`run-ig` stores pcap-ng output as a raw artifact and never pipes packet payloads
+into model context. Use the validated packet-filter option to constrain capture.
 
 ### Process & Workload
 
@@ -129,7 +139,13 @@ Use `--pf "<expr>"` for tcpdump filters (e.g., `port 80`, `host 10.0.0.1`). Outp
 
 ## Guardrails
 
-- IG gadgets are **read-only** — they do not modify cluster or application state.
-- Resolve the correct node name before running any IG command.
-- Always set `--timeout` to cap runtime. Prefer snapshot/top for quick checks; trace/profile for behavior over time.
-- For reproduction: launch a trace gadget first, then reproduce the problem. The debug pod persists after the gadget exits, so run `kubectl logs <debug-pod>` to retrieve the captured output afterward.
+- Gadget observation is read-only, but creating a privileged debug pod is a
+  cluster mutation. Require explicit approval and sufficient RBAC.
+- Prove subscription/resource group/cluster/context identity before resolving a
+  node or creating the debug pod.
+- Use only the digest-pinned scripts; do not assemble `kubectl debug` manually.
+- Require a caller-supplied overall deadline for real execution. The script
+  requests deletion of the exact marked debug pod on success, failure, timeout,
+  or interruption and fails if cleanup cannot be confirmed.
+- Keep raw IG/pcap output outside model context. Use the path and hash in the
+  safe projection for authorized human or offline review.
