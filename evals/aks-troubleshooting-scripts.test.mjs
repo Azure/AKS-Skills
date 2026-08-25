@@ -63,7 +63,11 @@ if [[ "$joined" == *" config view "* ]]; then
   exit 0
 fi
 if [[ "$joined" == *" debug "* ]]; then
-  printf 'Creating debugging pod node-debugger-aks-node-1-fixture with container aks-skills-ig on node aks-node-1.\\n'
+  if [[ "\${MOCK_DEBUG_NO_NAME:-0}" == "1" ]]; then
+    printf 'Debug pod creation requested.\\n'
+  else
+    printf 'Creating debugging pod node-debugger-aks-node-1-fixture with container aks-skills-ig on node aks-node-1.\\n'
+  fi
   exit "\${MOCK_DEBUG_STATUS:-0}"
 fi
 if [[ "$joined" == *" wait "* ]]; then
@@ -74,8 +78,27 @@ if [[ "$joined" == *" delete pod "* ]]; then
   printf 'pod deleted\\n'
   exit "\${MOCK_DELETE_STATUS:-0}"
 fi
+if [[ "$joined" == *" get pods "*"RUN_IDS"* ]]; then
+  case "\${MOCK_MARKER_MODE:-one}" in
+    fail) exit 4 ;;
+    none) exit 0 ;;
+    ambiguous)
+      printf 'node-debugger-aks-node-1-fixture\\t%s\\n' "\${AKS_SKILLS_RUN_ID:-fixture-run}"
+      printf 'node-debugger-aks-node-1-second\\t%s\\n' "\${AKS_SKILLS_RUN_ID:-fixture-run}"
+      ;;
+    *) printf 'node-debugger-aks-node-1-fixture\\t%s\\n' "\${AKS_SKILLS_RUN_ID:-fixture-run}" ;;
+  esac
+  exit 0
+fi
 if [[ "$joined" == *" get pods "*" -o json "* ]]; then
-  printf '{"items":[{"metadata":{"name":"node-debugger-aks-node-1-fixture"},"spec":{"containers":[{"env":[{"name":"AKS_SKILLS_RUN_ID","value":"fixture-run"}]}]}}]}\\n'
+  case "\${MOCK_MARKER_MODE:-one}" in
+    fail) exit 4 ;;
+    none) printf '{"items":[]}\\n' ;;
+    ambiguous)
+      printf '{"items":[{"metadata":{"name":"node-debugger-aks-node-1-fixture"},"spec":{"containers":[{"env":[{"name":"AKS_SKILLS_RUN_ID","value":"%s"}]}]}},{"metadata":{"name":"node-debugger-aks-node-1-second"},"spec":{"containers":[{"env":[{"name":"AKS_SKILLS_RUN_ID","value":"%s"}]}]}}]}\\n' "\${AKS_SKILLS_RUN_ID:-fixture-run}" "\${AKS_SKILLS_RUN_ID:-fixture-run}"
+      ;;
+    *) printf '{"items":[{"metadata":{"name":"node-debugger-aks-node-1-fixture"},"spec":{"containers":[{"env":[{"name":"AKS_SKILLS_RUN_ID","value":"%s"}]}]}}]}\\n' "\${AKS_SKILLS_RUN_ID:-fixture-run}" ;;
+  esac
   exit 0
 fi
 if [[ "$joined" == *" get pod "*"spec.nodeName"* ]]; then
@@ -172,9 +195,49 @@ function runScript(script, args, fixture, environment = {}) {
   });
 }
 
+function reviewerRedactionVectors() {
+  return [
+    'Author' + 'ization: Digest ' + SENTINEL,
+    'STORAGE' + '_KEY=' + SENTINEL,
+    'creden' + 'tial=' + SENTINEL,
+    'p' + 'wd: ' + SENTINEL,
+    's' + 'as=' + SENTINEL,
+    'signa' + 'ture=' + SENTINEL,
+    'coo' + 'kie=' + SENTINEL,
+    'Set-' + 'Cookie: session=' + SENTINEL,
+    'Account' + 'Key=' + SENTINEL,
+    'SharedAccess' + 'Key=' + SENTINEL,
+    'SharedAccess' + 'Signature=' + SENTINEL,
+    'connection_' + 'string=Server=tcp:fixture;User Id=fixture;Password=' + SENTINEL,
+    'DefaultEndpointsProtocol=https;AccountName=fixture;Account' + 'Key=' + SENTINEL + ';EndpointSuffix=core.windows.net',
+    'Endpoint=sb://fixture.servicebus.windows.net/;SharedAccessKeyName=fixture;SharedAccess' + 'Key=' + SENTINEL,
+  ];
+}
+
+function runBashRedaction(lines) {
+  return spawnSync(
+    'bash',
+    ['-c', 'source "$1"; redact_evidence', 'bash', join(SCRIPTS, 'evidence-common.sh')],
+    {
+      encoding: 'utf8',
+      input: `${lines.join('\n')}\n`,
+    },
+  );
+}
+
 function calls(fixture) {
   return existsSync(fixture.calls) ? readFileSync(fixture.calls, 'utf8') : '';
 }
+
+test('redaction covers the reviewer credential and connection-string vectors', () => {
+  const vectors = reviewerRedactionVectors();
+  const result = runBashRedaction(vectors);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, new RegExp(SENTINEL));
+  const projected = result.stdout.trim().split('\n');
+  assert.equal(projected.length, vectors.length);
+  for (const line of projected) assert.match(line, /\[REDACTED]/);
+});
 
 function usingFixture(callback) {
   const fixture = makeFixture();
@@ -348,6 +411,29 @@ test('run-ig dry-run uses the fixed digest and performs no privileged mutation',
   });
 });
 
+test('run-ig node dry-run tolerates empty filters on Bash 3.2', () => {
+  for (const gadget of ['trace_dns', 'tcpdump']) {
+    usingFixture(fixture => {
+      const result = runScript(
+        'run-ig.sh',
+        [
+          ...commonArgs(fixture.artifacts(`node-${gadget}`)),
+          '--namespace', 'prod',
+          '--node', 'aks-node-1',
+          '--gadget', gadget,
+          '--dry-run',
+        ],
+        fixture,
+        { AKS_SKILLS_RUN_ID: 'fixture-run' },
+      );
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(result.stdout, /executionStatus=dry-run/);
+      assert.doesNotMatch(calls(fixture), / get pod /);
+      assert.doesNotMatch(calls(fixture), / debug /);
+    });
+  }
+});
+
 test('run-ig cleans the exact debug pod on success and deadline failure', () => {
   usingFixture(fixture => {
     const artifacts = fixture.artifacts('ig-success');
@@ -416,9 +502,63 @@ test('run-ig cleans the exact debug pod on success and deadline failure', () => 
     );
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /creation command failed/);
+    assert.match(calls(fixture), /RUN_IDS/);
     assert.match(
       calls(fixture),
       /--request-timeout=45s delete pod node-debugger-aks-node-1-fixture -n prod --wait=false/,
+    );
+  });
+
+  usingFixture(fixture => {
+    const result = runScript(
+      'run-ig.sh',
+      [
+        ...commonArgs(fixture.artifacts('ig-marker-fallback')),
+        '--namespace', 'prod',
+        '--pod', 'app-0',
+        '--gadget', 'trace_dns',
+        '--approve-privileged',
+        '--deadline', '45s',
+      ],
+      fixture,
+      { AKS_SKILLS_RUN_ID: 'fixture-run', MOCK_DEBUG_NO_NAME: '1' },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /debugPod=node-debugger-aks-node-1-fixture/);
+    assert.match(
+      calls(fixture),
+      /--request-timeout=45s delete pod node-debugger-aks-node-1-fixture -n prod --wait=false/,
+    );
+  });
+
+  usingFixture(fixture => {
+    const result = runScript(
+      'run-ig.sh',
+      [
+        ...commonArgs(fixture.artifacts('ig-ambiguous')),
+        '--namespace', 'prod',
+        '--pod', 'app-0',
+        '--gadget', 'trace_dns',
+        '--approve-privileged',
+        '--deadline', '45s',
+      ],
+      fixture,
+      {
+        AKS_SKILLS_RUN_ID: 'fixture-run',
+        MOCK_DEBUG_NO_NAME: '1',
+        MOCK_MARKER_MODE: 'ambiguous',
+      },
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /unknown or ambiguous/);
+    const invocationLog = calls(fixture);
+    assert.match(
+      invocationLog,
+      /delete pod node-debugger-aks-node-1-fixture -n prod --wait=false/,
+    );
+    assert.match(
+      invocationLog,
+      /delete pod node-debugger-aks-node-1-second -n prod --wait=false/,
     );
   });
 });
@@ -449,6 +589,28 @@ test('Bash and PowerShell entry points declare the same safety contract', () => 
   assert.doesNotMatch(powershellIg, /\[string]\$IgVersion/);
   assert.doesNotMatch(bashIg, /\beval\b/);
   assert.doesNotMatch(bashIg, /kubectl[^\n]*(?:\s-it\b|\s-i\b|\s-t\b|--tty|--stdin)/);
+  assert.match(bashIg, /discover_marker_pods/);
+  assert.match(powershellIg, /Find-MarkerPods/);
+  assert.match(powershellIg, /Remove-DebugPods/);
+  assert.doesNotMatch(bashIg, /for \(index =/);
+
+  const bashRedaction = readFileSync(join(SCRIPTS, 'evidence-common.sh'), 'utf8').toLowerCase();
+  const powershellRedaction = readFileSync(join(SCRIPTS, 'evidence-common.ps1'), 'utf8').toLowerCase();
+  for (const term of [
+    'authorization',
+    'credential',
+    'pwd',
+    'sas',
+    'signature',
+    'cookie',
+    'accountkey',
+    'sharedaccesskey',
+    'sharedaccesssignature',
+    'connection',
+  ]) {
+    assert.match(bashRedaction, new RegExp(term));
+    assert.match(powershellRedaction, new RegExp(term));
+  }
 });
 
 const pwshAvailable = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], {
@@ -463,6 +625,23 @@ test('PowerShell collectors execute the same mock safety contract', { skip: !pws
       MOCK_CALLS: fixture.calls,
       AKS_SKILLS_RUN_ID: 'fixture-run',
     };
+    const redaction = spawnSync('pwsh', [
+      '-NoProfile',
+      '-Command',
+      '. $args[0]; $text = [Console]::In.ReadToEnd(); Protect-EvidenceText @($text -split "`r?`n" | Where-Object { $_ })',
+      join(SCRIPTS, 'evidence-common.ps1'),
+    ], {
+      encoding: 'utf8',
+      input: `${reviewerRedactionVectors().join('\n')}\n`,
+      env: environment,
+    });
+    assert.equal(redaction.status, 0, `${redaction.stdout}\n${redaction.stderr}`);
+    assert.doesNotMatch(redaction.stdout, new RegExp(SENTINEL));
+    assert.equal(
+      redaction.stdout.trim().split(/\r?\n/).length,
+      reviewerRedactionVectors().length,
+    );
+
     const baseline = spawnSync('pwsh', [
       '-NoProfile',
       '-File',

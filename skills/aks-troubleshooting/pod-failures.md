@@ -15,7 +15,8 @@ For every pod symptom below, run `pod-evidence` instead of streaming raw logs
 directly into model context. It proves the Azure and kube targets match, then
 collects the invariant **STATUS**, **STATE**, **EVENTS**, current/previous
 **LOGS**, and **RESOURCES** bundle. Raw artifacts remain in the explicit
-artifact directory; stdout is allowlisted and redacted.
+artifact directory; stdout contains selected evidence fields with deterministic
+redaction.
 
 ```bash
 scripts/pod-evidence.sh \

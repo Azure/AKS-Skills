@@ -47,7 +47,7 @@ Root-cause live AKS incidents with a read-only, evidence-first investigation. Th
 
 ## Scripts
 
-The Bash and PowerShell collectors require an explicit subscription, resource group, cluster, kube context, and empty artifact directory. They prove that the kube context endpoint matches the named AKS resource before any cluster data read. Raw artifacts stay in the selected directory; stdout is an allowlisted, redacted projection.
+The Bash and PowerShell collectors require an explicit subscription, resource group, cluster, kube context, and empty artifact directory. They prove that the kube context endpoint matches the named AKS resource before any cluster data read. Raw artifacts stay in the selected directory; stdout is a schema-selected, redacted projection.
 
 - `scripts/aks-baseline.sh` / `scripts/aks-baseline.ps1` — ordered Azure-then-Kubernetes cluster baseline.
 - `scripts/pod-evidence.sh` / `scripts/pod-evidence.ps1` — invariant pod status, state, events, current/previous logs, resources, and usage.

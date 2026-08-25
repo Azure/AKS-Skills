@@ -113,12 +113,12 @@ function Protect-EvidenceText {
             }
             continue
         }
-        $line = [regex]::Replace($line, '(?i)Authorization:\s*(Bearer|Basic)\s+\S+', 'Authorization: [REDACTED]')
+        $line = [regex]::Replace($line, '(?i)(Authorization\s*:)\s*.*$', '$1 [REDACTED]')
         $line = [regex]::Replace($line, '(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+', 'Bearer [REDACTED]')
         $line = [regex]::Replace(
             $line,
-            '(?i)(password|passwd|token|secret|api[_-]?key|client[_-]?secret|connection[_-]?string)(\s*[:=]\s*)\S.*$',
-            '$1$2[REDACTED]'
+            '(?i)((?:[A-Za-z0-9]+[-_]key|password|passwd|pwd|token|secret|credentials?|api[-_]?key|client[-_]?secret|connection[-_]?string|sas|signature|cookie|set-cookie|accountkey|sharedaccesskey|sharedaccesssignature)"?\s*[:=]\s*)\S.*$',
+            '$1[REDACTED]'
         )
         $line = [regex]::Replace($line, '://[^/\s@]+:[^/\s@]+@', '://[REDACTED]@')
         $line

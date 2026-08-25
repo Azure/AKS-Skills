@@ -105,14 +105,14 @@ redact_evidence() {
 
         line = $0
         lower = tolower(line)
-        if (match(lower, /authorization:[[:space:]]*(bearer|basic)[[:space:]]+/)) {
-          line = substr(line, 1, RSTART - 1) "Authorization: [REDACTED]"
+        if (match(lower, /authorization[[:space:]]*:/)) {
+          line = substr(line, 1, RSTART + RLENGTH - 1) " [REDACTED]"
         } else if (match(lower, /bearer[[:space:]]+[a-z0-9._~+\/=-]+/)) {
           line = substr(line, 1, RSTART - 1) "Bearer [REDACTED]"
         }
 
         lower = tolower(line)
-        if (match(lower, /(password|passwd|token|secret|api[_-]?key|client[_-]?secret|connection[_-]?string)[[:space:]]*[:=][[:space:]]*/)) {
+        if (match(lower, /([a-z0-9]+[-_]key|password|passwd|pwd|token|secret|credentials?|api[-_]?key|client[-_]?secret|connection[-_]?string|sas|signature|cookie|set-cookie|accountkey|sharedaccesskey|sharedaccesssignature)"?[[:space:]]*[:=][[:space:]]*/)) {
           line = substr(line, 1, RSTART + RLENGTH - 1) "[REDACTED]"
         }
 

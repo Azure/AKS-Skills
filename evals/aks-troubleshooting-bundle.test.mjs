@@ -225,6 +225,27 @@ test('canonical hashing matches the unchanged PR 95 fixture', () => {
   );
 });
 
+test('symlinked exporter invocation still executes the CLI', () => {
+  withFixture((root, { repository, commit }) => {
+    const linkedTool = join(root, 'linked-exporter.mjs');
+    const output = join(root, 'symlink-output');
+    symlinkSync(TOOL, linkedTool);
+    const result = run(process.execPath, [
+      linkedTool,
+      'export',
+      '--repository',
+      repository,
+      '--source-ref',
+      commit,
+      '--output',
+      output,
+    ]);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const manifest = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.bundle_id, 'aks-troubleshooting');
+  });
+});
+
 test('verify rejects materialized content and file-set drift', () => {
   withFixture((root, { repository, commit }) => {
     const output = join(root, 'output');

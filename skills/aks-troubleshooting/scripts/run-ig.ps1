@@ -149,10 +149,75 @@ if ($DryRun) {
 
 $debugPod = ''
 $cleanupRequested = $false
+$cleanupCandidates = @()
+$script:MarkerDiscoveryFailed = $false
 $createPath = Join-Path $script:EvidenceArtifactsDir 'debug-create.raw.txt'
 $waitPath = Join-Path $script:EvidenceArtifactsDir 'debug-wait.raw.txt'
 $igRawPath = Join-Path $script:EvidenceArtifactsDir 'ig-output.raw.txt'
 $waitStatus = 1
+
+function Find-MarkerPods {
+    $podJsonPath = Join-Path $script:EvidenceArtifactsDir 'debug-marker.raw.json'
+    & kubectl --context $Context --request-timeout=$Deadline `
+        get pods -n $Namespace -o json > $podJsonPath `
+        2>"$script:EvidenceArtifactsDir/debug-marker.error.txt"
+    if ($LASTEXITCODE -ne 0) {
+        $script:MarkerDiscoveryFailed = $true
+        return @()
+    }
+    $script:MarkerDiscoveryFailed = $false
+    try {
+        $podList = Get-Content -LiteralPath $podJsonPath -Raw | ConvertFrom-Json
+    } catch {
+        $script:MarkerDiscoveryFailed = $true
+        [Console]::Error.WriteLine('Unable to parse debug-pod marker discovery output')
+        return @()
+    }
+    $matches = @()
+    foreach ($item in $podList.items) {
+        $marked = $false
+        foreach ($candidateContainer in $item.spec.containers) {
+            foreach ($environmentValue in $candidateContainer.env) {
+                if ($environmentValue.name -eq 'AKS_SKILLS_RUN_ID' -and
+                    $environmentValue.value -eq $runId) {
+                    $marked = $true
+                }
+            }
+        }
+        if ($marked) { $matches += [string]$item.metadata.name }
+    }
+    return @($matches | Sort-Object -Unique)
+}
+
+function Remove-DebugPods {
+    param([string[]]$Candidates)
+    $pods = @($Candidates | Where-Object { $_ } | Sort-Object -Unique)
+    if ($pods.Count -eq 0) { $pods = @(Find-MarkerPods) }
+    if ($pods.Count -eq 0) {
+        [Console]::Error.WriteLine('No debug pod could be identified for cleanup')
+        return $false
+    }
+
+    $allDeleted = $true
+    foreach ($candidatePod in $pods) {
+        if ($candidatePod -notmatch '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$') {
+            [Console]::Error.WriteLine('Refusing invalid debug pod name during cleanup')
+            $allDeleted = $false
+            continue
+        }
+        $deleteOutput = & kubectl --context $Context --request-timeout=$Deadline `
+            delete pod $candidatePod -n $Namespace --wait=false 2>&1
+        $deleteOutput | Add-Content -LiteralPath `
+            "$script:EvidenceArtifactsDir/cleanup.raw.txt" -Encoding utf8NoBOM
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine(
+                "Failed to request cleanup for debug pod $Namespace/$candidatePod"
+            )
+            $allDeleted = $false
+        }
+    }
+    return $allDeleted
+}
 
 try {
     $createOutput = & kubectl @debugArguments 2>&1
@@ -160,21 +225,27 @@ try {
     $createOutput | Set-Content -LiteralPath $createPath -Encoding utf8NoBOM
 
     $match = [regex]::Match(($createOutput -join "`n"), 'node-debugger-[a-z0-9.-]+')
-    if ($match.Success) {
-        $debugPod = $match.Value
-    } else {
-        $podJsonPath = Join-Path $script:EvidenceArtifactsDir 'debug-marker.raw.json'
-        & kubectl --context $Context get pods -n $Namespace -o json > $podJsonPath
-        if ($LASTEXITCODE -ne 0) { Throw-EvidenceError 'unable to identify the created debug pod' }
-        $podList = Get-Content -LiteralPath $podJsonPath -Raw | ConvertFrom-Json
-        $matches = @($podList.items | Where-Object {
-            $_.spec.containers.env |
-                Where-Object { $_.name -eq 'AKS_SKILLS_RUN_ID' -and $_.value -eq $runId }
-        })
-        if ($matches.Count -ne 1) { Throw-EvidenceError 'debug pod identity is ambiguous' }
-        $debugPod = $matches[0].metadata.name
+    $parsedPod = if ($match.Success) { $match.Value } else { '' }
+    if ($parsedPod) { $cleanupCandidates = @($parsedPod) }
+    $markerPods = @(Find-MarkerPods)
+    if ($script:MarkerDiscoveryFailed) {
+        if ($parsedPod) { $cleanupCandidates = @($parsedPod) }
+        Throw-EvidenceError 'unable to identify the created debug pod by run marker'
+    }
+    if ($markerPods.Count -ne 1) {
+        $cleanupCandidates = @($markerPods)
+        if ($parsedPod) { $cleanupCandidates += $parsedPod }
+        Throw-EvidenceError 'debug pod identity is unknown or ambiguous'
+    }
+
+    $debugPod = $markerPods[0]
+    if ($parsedPod -and $parsedPod -ne $debugPod) {
+        $cleanupCandidates = @($debugPod, $parsedPod)
+        $debugPod = ''
+        Throw-EvidenceError 'debug pod output and run marker disagree'
     }
     Assert-KubernetesName 'debug pod name' $debugPod
+    $cleanupCandidates = @($debugPod)
     if ($createStatus -ne 0) { Throw-EvidenceError 'IG debug-pod creation command failed' }
 
     $waitOutput = & kubectl --context $Context --request-timeout=$Deadline `
@@ -189,12 +260,7 @@ try {
         > $igRawPath 2>"$script:EvidenceArtifactsDir/ig-output.error.txt"
     if ($LASTEXITCODE -ne 0) { Throw-EvidenceError 'unable to retrieve IG output' }
 } finally {
-    if ($debugPod) {
-        & kubectl --context $Context --request-timeout=$Deadline `
-            delete pod $debugPod -n $Namespace --wait=false `
-            >"$script:EvidenceArtifactsDir/cleanup.raw.txt" 2>&1
-        $cleanupRequested = $LASTEXITCODE -eq 0
-    }
+    $cleanupRequested = Remove-DebugPods -Candidates $cleanupCandidates
 }
 
 if (-not $cleanupRequested) { Throw-EvidenceError 'debug pod cleanup was not confirmed' }

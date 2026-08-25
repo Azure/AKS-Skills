@@ -36,12 +36,16 @@ Reconciled shared files:
 - `references/command-flows.md`
 - `references/inspektor-gadget.md`
 
-AKS-Skills-only assets preserved here:
+AKS-Skills-only source paths retained here:
 
 - `references/report-template.md`
 - `references/symptom-map.md`
 - `scripts/cluster-snapshot.sh`
 - `scripts/pod-deep-dive.sh`
+
+The two script paths are compatibility shims that now delegate to the
+target-bound collectors. Their historical implementations are intentionally not
+byte-preserved because they used ambient kube context and exposed raw evidence.
 
 ## Current state
 

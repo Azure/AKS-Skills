@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { dirname, join, posix, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const SOURCE_ROOT = 'skills/aks-troubleshooting';
 const SOURCE_MANIFEST = 'bundle.source.json';
@@ -437,7 +437,16 @@ function parseArguments(argv) {
   return { operation, options };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+function isDirectInvocation() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectInvocation()) {
   try {
     const { operation, options } = parseArguments(process.argv.slice(2));
     const source = resolveSource(options.repository, options.sourceRef);

@@ -152,10 +152,18 @@ filters=()
 [[ -z "$SYSCALL_FILTERS" ]] || filters+=(--syscall-filters "$SYSCALL_FILTERS")
 
 if [[ "$GADGET" == "tcpdump" ]]; then
-    ig_command=(ig run "tcpdump:$IG_VERSION" -o pcap-ng "${filters[@]}" --timeout "$TIMEOUT_SECONDS")
+    ig_command=(
+        ig run "tcpdump:$IG_VERSION" -o pcap-ng
+        ${filters[@]+"${filters[@]}"}
+        --timeout "$TIMEOUT_SECONDS"
+    )
     [[ -z "$PACKET_FILTER" ]] || ig_command+=(--pf "$PACKET_FILTER")
 else
-    ig_command=(ig run "$GADGET:$IG_VERSION" -o json "${filters[@]}" --timeout "$TIMEOUT_SECONDS")
+    ig_command=(
+        ig run "$GADGET:$IG_VERSION" -o json
+        ${filters[@]+"${filters[@]}"}
+        --timeout "$TIMEOUT_SECONDS"
+    )
 fi
 
 RUN_ID="${AKS_SKILLS_RUN_ID:-aks-skills-ig-$(date -u +%Y%m%d%H%M%S)-$$}"
@@ -188,16 +196,62 @@ if [[ "$DRY_RUN" == "true" ]]; then
     exit 0
 fi
 
+MARKER_PODS=""
+
+discover_marker_pods() {
+    marker_path="$EVIDENCE_ARTIFACTS_DIR/debug-marker.raw.txt"
+    if ! kubectl_proven get pods -n "$NAMESPACE" \
+        -o 'custom-columns=NAME:.metadata.name,RUN_IDS:.spec.containers[*].env[*].value' \
+        --no-headers \
+        >"$marker_path" 2>"$EVIDENCE_ARTIFACTS_DIR/debug-marker.error.txt"; then
+        chmod 600 "$marker_path"
+        MARKER_PODS=""
+        evidence_error "unable to discover debug pods by run marker"
+        return 1
+    fi
+    chmod 600 "$marker_path"
+    MARKER_PODS="$(awk -v run="$RUN_ID" '{for (i = 2; i <= NF; i++) if ($i == run) print $1}' "$marker_path")"
+}
+
 cleanup_debug_pod() {
-    if [[ -n "$DEBUG_POD" && "$CLEANED" != "true" ]]; then
-        if kubectl_proven --request-timeout="$DEADLINE" \
-            delete pod "$DEBUG_POD" -n "$NAMESPACE" --wait=false \
-            >"$EVIDENCE_ARTIFACTS_DIR/cleanup.raw.txt" 2>&1; then
-            CLEANED="true"
+    [[ "$CLEANED" != "true" ]] || return 0
+
+    local candidates="$DEBUG_POD"
+    if [[ -z "$candidates" ]]; then
+        if [[ -n "$MARKER_PODS" ]]; then
+            candidates="$MARKER_PODS"
         else
-            evidence_error "failed to request cleanup for debug pod $NAMESPACE/$DEBUG_POD"
+            discover_marker_pods || return 1
+            candidates="$MARKER_PODS"
         fi
     fi
+    if [[ -z "$candidates" ]]; then
+        evidence_error "no debug pod could be identified for cleanup"
+        return 1
+    fi
+
+    local pod found=0 failed=0
+    while IFS= read -r pod; do
+        [[ -n "$pod" ]] || continue
+        if [[ ! "$pod" =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
+            evidence_error "refusing invalid debug pod name during cleanup"
+            failed=1
+            continue
+        fi
+        found=1
+        if ! kubectl_proven --request-timeout="$DEADLINE" \
+            delete pod "$pod" -n "$NAMESPACE" --wait=false \
+            >>"$EVIDENCE_ARTIFACTS_DIR/cleanup.raw.txt" 2>&1; then
+            evidence_error "failed to request cleanup for debug pod $NAMESPACE/$pod"
+            failed=1
+        fi
+    done < <(printf '%s\n' "$candidates" | awk 'NF && !seen[$0]++')
+
+    if [[ "$found" -eq 1 && "$failed" -eq 0 ]]; then
+        CLEANED="true"
+        return 0
+    fi
+    return 1
 }
 trap cleanup_debug_pod EXIT
 trap 'cleanup_debug_pod; exit 130' INT TERM
@@ -207,19 +261,38 @@ create_path="$EVIDENCE_ARTIFACTS_DIR/debug-create.raw.txt"
 create_status=$?
 chmod 600 "$create_path"
 
-DEBUG_POD="$(grep -Eo 'node-debugger-[a-z0-9.-]+' "$create_path" | head -n 1 || true)"
-if [[ -z "$DEBUG_POD" ]]; then
-    marker_path="$EVIDENCE_ARTIFACTS_DIR/debug-marker.raw.txt"
-    kubectl_proven get pods -n "$NAMESPACE" \
-        -o 'custom-columns=NAME:.metadata.name,RUN_IDS:.spec.containers[*].env[*].value' \
-        --no-headers \
-        >"$marker_path" 2>"$EVIDENCE_ARTIFACTS_DIR/debug-marker.error.txt" \
-        || evidence_die "unable to identify the created debug pod"
-    chmod 600 "$marker_path"
-    marker_pods="$(awk -v run="$RUN_ID" '{for (index = 2; index <= NF; index++) if ($index == run) print $1}' "$marker_path")"
-    [[ -n "$marker_pods" && "$marker_pods" != *$'\n'* ]] \
-        || evidence_die "debug pod identity is ambiguous"
-    DEBUG_POD="$marker_pods"
+parsed_pod="$(grep -Eo 'node-debugger-[a-z0-9.-]+' "$create_path" | head -n 1 || true)"
+if ! discover_marker_pods; then
+    DEBUG_POD="$parsed_pod"
+    if ! cleanup_debug_pod; then
+        evidence_error "debug pod cleanup could not be completed after marker discovery failed"
+    fi
+    evidence_die "unable to identify the created debug pod by run marker"
+fi
+
+marker_count="$(printf '%s\n' "$MARKER_PODS" | awk 'NF { count++ } END { print count + 0 }')"
+if [[ "$marker_count" -ne 1 ]]; then
+    if [[ -n "$parsed_pod" ]]; then
+        if [[ -n "$MARKER_PODS" ]]; then
+            MARKER_PODS="${MARKER_PODS}"$'\n'"${parsed_pod}"
+        else
+            MARKER_PODS="$parsed_pod"
+        fi
+    fi
+    if ! cleanup_debug_pod; then
+        evidence_error "debug pod cleanup could not be completed after ambiguous discovery"
+    fi
+    evidence_die "debug pod identity is unknown or ambiguous"
+fi
+
+DEBUG_POD="$MARKER_PODS"
+if [[ -n "$parsed_pod" && "$parsed_pod" != "$DEBUG_POD" ]]; then
+    MARKER_PODS="${MARKER_PODS}"$'\n'"${parsed_pod}"
+    DEBUG_POD=""
+    if ! cleanup_debug_pod; then
+        evidence_error "debug pod cleanup could not be completed after identity disagreement"
+    fi
+    evidence_die "debug pod output and run marker disagree"
 fi
 validate_kubernetes_name "debug pod name" "$DEBUG_POD"
 [[ "$create_status" -eq 0 ]] || evidence_die "IG debug-pod creation command failed"
