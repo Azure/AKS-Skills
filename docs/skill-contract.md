@@ -29,24 +29,25 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 
 - **`metadata`** follows the Agent Skills string-to-string contract. Host-specific nested metadata is not part of the portable contract.
 - **`description`** carries the routing surface. It must include `WHEN:` triggers **and** a `DO NOT USE FOR:` boundary that names the sibling skill to use instead (the parenthetical-redirect grammar). No two skills may share a description or have one subsume another.
-- **Budget:** the front-matter `description` must be 1024 characters or fewer to remain portable across Agent Skills-compatible hosts. Keep `SKILL.md` under 500 lines and push deep reference material (command catalogs, symptom maps, per-topic detail) into files inside the same skill — progressive disclosure, loaded only when needed. Do not flatten every file into every prompt.
+- **Budget:** the front-matter `description` must be 1024 characters or fewer to remain portable across Agent Skills-compatible hosts. As first-party authoring guidance, Anthropic recommends keeping the `SKILL.md` body **under 500 lines** and moving deep material into progressively disclosed files; CI does not add a separate 500/501-line gate. Push command catalogs, symptom maps, and per-topic detail into files inside the same skill, loaded only when needed. Do not flatten every file into every prompt.
 - **Runtime hints are additive, never conflicting:** the repo-root `plugin.json` + `.mcp.json` supplies SRE Agent / marketplace install without changing the portable skill front matter.
 
 ## 3. Content rules
 
 - **Durability.** A sentence that prescribes *how to think, write, or generally behave* — with no AKS/Azure/Kubernetes token, no tool/resource identifier, and no safety verb — is decaying coaching; drop it. Instructions that encode an **org policy**, a **tool contract**, or a **safety boundary** the model cannot infer are durable; keep them. (The coaching-phrase lint flags candidates as a warning; a human decides.)
-- **Long-reference navigation.** Every non-`SKILL.md` Markdown file longer than 100 lines must put a visible `Contents` or `Table of contents` section before its topic sections, with navigable links that resolve to real headings in the file. This follows Anthropic's current [Skill authoring best practice for longer reference files](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices#structure-longer-reference-files-with-table-of-contents).
+- **Long-reference navigation.** Anthropic's current [Skill authoring best practice for longer reference files](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices#structure-longer-reference-files-with-table-of-contents) requires reference files longer than 100 lines to put a `Contents` or `Table of contents` section at the top. AKS Skills additionally hardens that rule mechanically: the section must contain navigable links that resolve to real headings in the file.
 - **Read-only by default.** Any skill that can mutate a cluster MUST state the read-only guardrail: *do not restart, delete, cordon, drain, scale, upgrade, or reconfigure unless the user explicitly asks.*
 - **No host coupling in the body.** No "OpenClaw UI will render…", no `/home/<user>/...` paths, no host-specific assumptions.
 - **MCP product names and boundaries.** **Azure MCP Server** means `@azure/mcp`, which this repository configures through `.mcp.json`. The **AKS MCP server** means the separate `Azure/aks-mcp` product, which this repository does not configure or support. Never shorten Azure MCP Server to "AKS MCP" or "AKS-MCP." Azure MCP Server's AKS area is limited to cluster and node-pool metadata; AppLens, Azure Monitor, and Resource Health are separate areas. Select operations from host-advertised capabilities and schemas, and retain direct CLI/Kubernetes fallbacks.
 
-## 4. Executable command and script rules
+## 4. Executable shell command and script rules
 
-- Scripts have the executable bit set, are **shellcheck-clean** at warning level, and are POSIX where practical.
-- **No `eval`.** No unquoted interpolation of user input into a Markdown command, script, or privileged manifest.
+- Script-shaped files under `scripts/`, plus shell scripts anywhere in a registered skill bundle, have a valid shebang and executable bit. Shell scripts are **shellcheck-clean** at warning level and POSIX where practical.
+- The shell-command policy below applies to executable shell contexts in Markdown and shell scripts. Non-shell executables under `scripts/` still receive shebang/executable checks; this policy does not claim interpreter-independent `eval`, TTY, or image parsing.
+- **No shell `eval`.** No unquoted interpolation of user input into an executable Markdown shell command, shell script, or privileged manifest.
 - Every input that reaches a privileged pod is validated/allowlisted; filters are passed as argv/env, never as shell strings.
 - Container images executed by Markdown commands, applied Markdown/script heredocs, or scripts are **MCR-hosted and digest-pinned**. Docker Hub/public images and tag-only MCR images are not allowed in executable paths.
-- No interactive TTY flags (`-it`, `-ti`, `--interactive`, or `--tty`) in agent-run Markdown commands or scripts.
+- No interactive stdin or TTY flags (`-i`, `-t`, short-option clusters containing either flag, `--stdin`, `--interactive`, or `--tty`) in agent-run Markdown shell commands or shell scripts.
 - Commands that create debug or test pods retain an explicit user-approval gate.
 
 ## 5. Required tests
@@ -81,13 +82,13 @@ CI fails if a skill has no tests or if the configured skill context is invalid.
 - [ ] Description has `WHEN:` + `DO NOT USE FOR:`; no collision with an existing skill or with Azure Skills.
 - [ ] Durable content; coaching-lint warnings resolved or justified.
 - [ ] Read-only guardrail present if the skill can mutate.
-- [ ] Every shipped Markdown instruction and executable path was reviewed; command/script changes have no interactive TTY flags or `eval`, validate inputs, use digest-pinned MCR images, preserve debug/test pod approval gates, and remain shellcheck-clean where applicable.
+- [ ] Every shipped Markdown instruction and executable path was reviewed; shell command/script changes have no interactive stdin/TTY flags or shell `eval`, validate inputs, use digest-pinned MCR images, preserve debug/test pod approval gates, and remain shellcheck-clean where applicable.
 - [ ] Tests exist and are wired; claimed behavior is supported by behavioral evidence; token budget respected.
 - [ ] A named owner in `CODEOWNERS` approved.
 
 ## 7. What CI enforces automatically
 
-- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, long-reference navigation, bundle-wide Markdown and executable-script command safety, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing; `evals/bundle-policy.test.js` covers the command/TOC parsers without external dependencies, and `evals/lint-skills.test.js` includes that suite while keeping CRLF (Windows) checkouts linting identically.
+- `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, long-reference navigation, bundle-wide Markdown shell-command and recursively discovered shell-script safety, script shebang/executable checks, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing; `evals/bundle-policy.test.js` covers the command/TOC parsers without external dependencies, and `evals/lint-skills.test.js` includes that suite while keeping CRLF (Windows) checkouts linting identically.
 - `evals/skill-context.test.mjs` — ordered selective loading, path and symlink safety, configured path resolution, expansion guards, and unique case IDs.
 - `evals/network-script-security.test.mjs` — rendered capture-manifest least privilege and traffic-generator argument boundaries.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).

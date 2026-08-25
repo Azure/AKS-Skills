@@ -84,10 +84,18 @@ test('shell fences and bare command lines are executable contexts', () => {
 });
 
 for (const command of [
+  'kubectl exec -i pod -- true',
+  'kubectl exec -t pod -- true',
   'kubectl exec -i -t pod -- true',
   'kubectl exec -t -i pod -- true',
   'kubectl exec -itd pod -- true',
+  'kubectl exec --stdin pod -- true',
+  'kubectl exec --tty pod -- true',
+  'docker run -i busybox:latest',
+  'docker run -t busybox:latest',
   'docker run -itd busybox:latest',
+  'docker run --stdin busybox:latest',
+  'docker run --interactive busybox:latest',
   'docker run --interactive --tty busybox:latest',
 ]) {
   test(`TTY flags are rejected: ${command}`, () => {
@@ -98,10 +106,72 @@ for (const command of [
 test('non-TTY short flags are not substring matches', () => {
   assert.deepEqual(findingKinds('kubectl logs -t pod'), []);
   assert.deepEqual(findingKinds('kubectl get pods --sort-by=.metadata.name'), []);
+  assert.deepEqual(findingKinds('docker run -v /tmp:/data ' + PINNED_MCR), []);
 });
 
 test('eval is rejected in executable Markdown and script source', () => {
   assert.deepEqual(findingKinds('eval "$COMMAND"'), ['eval']);
+});
+
+test('outer commands remain visible when they contain substitutions', () => {
+  assert.deepEqual(findingKinds('eval "$(cat cmd)"'), ['eval']);
+  assert.deepEqual(
+    findingKinds('kubectl exec -it pod -- true $(echo x)'),
+    ['tty'],
+  );
+  assert.deepEqual(
+    findingKinds('kubectl debug node/$(echo x) -it --image=busybox:latest'),
+    ['tty', 'image'],
+  );
+  assert.deepEqual(
+    findingKinds('docker run -it -u $(id -u) busybox:latest'),
+    ['tty', 'image'],
+  );
+});
+
+test('nested substitutions are recursively inspected as command contexts', () => {
+  assert.deepEqual(findingKinds('echo $(eval "$COMMAND")'), ['eval']);
+  assert.deepEqual(
+    findingKinds('echo $(kubectl exec -i pod -- true)'),
+    ['tty'],
+  );
+  assert.deepEqual(
+    findingKinds('echo $(docker run busybox:latest)'),
+    ['image'],
+  );
+  assert.deepEqual(
+    findingKinds('echo $(docker run mcr.microsoft.com/cbl-mariner/base/core:2.0)'),
+    ['image'],
+  );
+});
+
+test('safe command substitutions preserve outer command parsing', () => {
+  assert.deepEqual(findingKinds('echo $(id -u)'), []);
+  assert.deepEqual(
+    findingKinds(`docker run -u $(id -u) ${PINNED_MCR}`),
+    [],
+  );
+  assert.deepEqual(
+    findingKinds(`kubectl debug node/$(hostname) --image=${PINNED_MCR} -- true`),
+    [],
+  );
+});
+
+test('command names in argument positions are passive', () => {
+  assert.deepEqual(findingKinds("grep -rn 'eval' scripts/"), []);
+  assert.deepEqual(findingKinds('echo docker run busybox:latest'), []);
+  assert.deepEqual(findingKinds('printf "%s\\n" kubectl exec -it pod'), []);
+});
+
+test('control operators establish new command positions', () => {
+  assert.deepEqual(
+    findingKinds('echo safe; docker run busybox:latest'),
+    ['image'],
+  );
+  assert.deepEqual(
+    findingKinds(`printf safe | env FOO=bar docker run ${PINNED_MCR}`),
+    [],
+  );
 });
 
 test('kubectl create and set image enforce executable image provenance', () => {
@@ -180,7 +250,7 @@ test('line reporting survives comments and backslash continuations', () => {
   const findings = inspectShellSource(source);
   assert.equal(findings.length, 1);
   assert.equal(findings[0].kind, 'tty');
-  assert.equal(findings[0].line, 5);
+  assert.equal(findings[0].line, 4);
 });
 
 test('current executable skill scripts satisfy shared command policy', () => {

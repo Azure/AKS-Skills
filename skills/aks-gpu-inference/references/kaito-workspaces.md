@@ -49,20 +49,29 @@ Test the Workspace Service through the [Microsoft Learn port-forward path](https
 
 ```bash
 kubectl get svc <workspace-service>
-kubectl port-forward svc/<workspace-service> 8000:80 >kaito-port-forward.log 2>&1 &
+# kubectl wait uses its documented 30-second default timeout.
+kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' endpoints/<workspace-service>
+# port-forward's documented pod-running timeout defaults to 1m0s.
+kubectl port-forward --pod-running-timeout=1m0s \
+  svc/<workspace-service> 8000:80 >kaito-port-forward.log 2>&1 &
 PORT_FORWARD_PID=$!
 trap 'kill "$PORT_FORWARD_PID" 2>/dev/null || true' EXIT
+PORT_FORWARD_READY_DEADLINE=$((SECONDS + 60))
 while ! grep -q 'Forwarding from' kaito-port-forward.log; do
   kill -0 "$PORT_FORWARD_PID" 2>/dev/null || { cat kaito-port-forward.log >&2; exit 1; }
+  [ "$SECONDS" -lt "$PORT_FORWARD_READY_DEADLINE" ] \
+    || { cat kaito-port-forward.log >&2; exit 1; }
   sleep 1
 done
 
 curl --fail --show-error --silent http://127.0.0.1:8000/v1/models \
-  | tee kaito-models.json
+  --output kaito-models.json
+cat kaito-models.json
 curl --fail --show-error --silent http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"<model>","messages":[{"role":"user","content":"hi"}],"max_tokens":10}' \
-  | tee kaito-completion.json
+  --output kaito-completion.json
+cat kaito-completion.json
 ```
 
 Limitations to remember: Windows and Azure Linux node OS SKUs are unsupported as KAITO Workspace nodes; AMD GPU SKUs are not valid `instanceType`s; the add-on runs in public Azure regions only. The add-on pins a specific KAITO version (docs have shown 0.3.1 / 0.4.4 / 0.6.0 across pages) — confirm the live pin, since it gates model availability.

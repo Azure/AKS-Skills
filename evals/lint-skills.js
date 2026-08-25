@@ -20,7 +20,7 @@
  * 12. internal file references in SKILL.md resolve to real files
  * 13. shipped guidance preserves Azure MCP host portability and product boundaries
  * 14. non-SKILL Markdown over 100 lines starts its topic sections with a TOC
- * 15. Markdown commands avoid interactive TTY flags and execute only digest-pinned MCR images
+ * 15. Markdown/shell commands avoid interactive stdin/TTY flags and execute only digest-pinned MCR images
  *
  * Usage:
  *   node lint-skills.js [skills-dir]
@@ -348,8 +348,7 @@ function flattenShellSegments(segments) {
   return { text, lineMap };
 }
 
-function tokenizeShellSegments(segments) {
-  const { text, lineMap } = flattenShellSegments(segments);
+function tokenizeMappedShell(text, lineMap) {
   const tokens = [];
   let value = '';
   let start = -1;
@@ -378,6 +377,18 @@ function tokenizeShellSegments(segments) {
     } else if (char === '"' || char === "'") {
       if (start === -1) start = index;
       quote = char;
+    } else if (/[;|&()]/.test(char)) {
+      pushToken(index);
+      const pair = text.slice(index, index + 2);
+      const operator = pair === '&&' || pair === '||' ? pair : char;
+      tokens.push({
+        value: operator,
+        line: lineMap[index],
+        start: index,
+        end: index + operator.length,
+        operator: true,
+      });
+      if (operator.length === 2) index++;
     } else if (/\s/.test(char)) {
       pushToken(index);
     } else {
@@ -391,9 +402,89 @@ function tokenizeShellSegments(segments) {
   return { tokens, text, lineMap };
 }
 
-function commandNameFromToken(value) {
-  const match = value.match(/(?:^|.*\$\()(?<command>eval|kubectl|docker|podman|nerdctl)$/);
-  return match ? match.groups.command : null;
+function tokenizeShellSegments(segments) {
+  const { text, lineMap } = flattenShellSegments(segments);
+  return tokenizeMappedShell(text, lineMap);
+}
+
+function maskCommandSubstitutions(text, lineMap) {
+  let masked = '';
+  const maskedLineMap = [];
+  const substitutions = [];
+  let outerQuote = null;
+  let outerEscaped = false;
+
+  for (let index = 0; index < text.length;) {
+    const outerChar = text[index];
+    const startsSubstitution = !outerEscaped
+      && outerQuote !== "'"
+      && outerChar === '$'
+      && text[index + 1] === '(';
+    if (!startsSubstitution) {
+      masked += outerChar;
+      maskedLineMap.push(lineMap[index]);
+      if (outerEscaped) {
+        outerEscaped = false;
+      } else if (outerChar === '\\' && outerQuote !== "'") {
+        outerEscaped = true;
+      } else if (outerQuote) {
+        if (outerChar === outerQuote) outerQuote = null;
+      } else if (outerChar === '"' || outerChar === "'") {
+        outerQuote = outerChar;
+      }
+      index++;
+      continue;
+    }
+
+    const start = index;
+    let cursor = index + 2;
+    let depth = 1;
+    let quote = null;
+    let escaped = false;
+    while (cursor < text.length && depth > 0) {
+      const char = text[cursor];
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\' && quote !== "'") {
+        escaped = true;
+      } else if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '(') {
+        depth++;
+      } else if (char === ')') {
+        depth--;
+      }
+      cursor++;
+    }
+
+    if (depth !== 0) {
+      return {
+        masked: null,
+        maskedLineMap: null,
+        substitutions,
+        malformedLine: lineMap[start],
+      };
+    }
+
+    const end = cursor - 1;
+    substitutions.push({
+      text: text.slice(start + 2, end),
+      lineMap: lineMap.slice(start + 2, end),
+    });
+    const placeholder = 'SUBSTITUTION';
+    masked += placeholder;
+    maskedLineMap.push(...Array(placeholder.length).fill(lineMap[start]));
+    index = cursor;
+  }
+
+  return {
+    masked,
+    maskedLineMap,
+    substitutions,
+    malformedLine: null,
+  };
 }
 
 function hasCommandInvocation(text) {
@@ -446,6 +537,10 @@ function parseShellUnits(content, startLine = 1) {
       heredocs.push({ delimiter, payload, terminated });
     }
 
+    if (heredocs.length > 0 && index < lines.length && /^\s*\)/.test(lines[index])) {
+      segments.push({ text: lines[index], line: startLine + index });
+      index++;
+    }
     units.push({ segments, heredocs });
   }
 
@@ -546,18 +641,41 @@ function resolveShellValue(value, assignments, seen = new Set()) {
 
 function commandSegments(tokens) {
   const segments = [];
-  for (let index = 0; index < tokens.length; index++) {
-    const command = commandNameFromToken(tokens[index].value);
-    if (!command) continue;
-    let end = tokens.length;
-    for (let cursor = index + 1; cursor < tokens.length; cursor++) {
-      if (/^(?:[|;]|&&|\|\|)$/.test(tokens[cursor].value)
-        || commandNameFromToken(tokens[cursor].value)) {
-        end = cursor;
-        break;
+  const clauses = [];
+  let start = 0;
+  for (let index = 0; index <= tokens.length; index++) {
+    if (index === tokens.length || tokens[index].operator) {
+      if (index > start) clauses.push(tokens.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  for (const clause of clauses) {
+    let index = 0;
+    while (index < clause.length
+      && /^(?:!|if|then|do|else|elif|while|until|\{)$/.test(clause[index].value)) {
+      index++;
+    }
+    while (index < clause.length
+      && /^[A-Za-z_][A-Za-z0-9_]*=/.test(clause[index].value)) {
+      index++;
+    }
+    while (index < clause.length && /^(?:sudo|command|env)$/.test(clause[index].value)) {
+      const wrapper = clause[index++].value;
+      while (index < clause.length && clause[index].value.startsWith('-')) {
+        const option = clause[index++].value;
+        if (wrapper === 'sudo' && /^(?:-u|-g|-h|-p|-r|-t|-C|-D|-T)$/.test(option)) index++;
+        if (wrapper === 'env' && /^(?:-u|--unset|-C|--chdir|-S|--split-string)$/.test(option)) index++;
+      }
+      while (index < clause.length
+        && /^[A-Za-z_][A-Za-z0-9_]*=/.test(clause[index].value)) {
+        index++;
       }
     }
-    segments.push({ command, tokens: tokens.slice(index, end) });
+
+    const commandToken = clause[index];
+    if (!commandToken || !EXECUTABLE_COMMANDS.has(commandToken.value)) continue;
+    segments.push({ command: commandToken.value, tokens: clause.slice(index) });
   }
   return segments;
 }
@@ -570,16 +688,11 @@ function findTtyViolation(segment) {
       && values.some(value => /^(?:exec|run)$/.test(value));
   if (!ttyCapable) return null;
 
-  let interactive = null;
-  let tty = null;
   for (const token of segment.tokens.slice(1)) {
-    if (/^--(?:interactive|tty)(?:=.*)?$/.test(token.value)) return token;
+    if (/^--(?:interactive|stdin|tty)(?:=.*)?$/.test(token.value)) return token;
     const short = token.value.match(/^-([A-Za-z]+)(?:=.*)?$/);
     if (!short) continue;
-    if (short[1].includes('i') && short[1].includes('t')) return token;
-    if (short[1] === 'i') interactive = token;
-    if (short[1] === 't') tty = token;
-    if (interactive && tty) return token;
+    if (/[it]/.test(short[1])) return token;
   }
   return null;
 }
@@ -683,25 +796,30 @@ function inspectShellSource(content, { startLine = 1 } = {}) {
     }
   }
 
-  for (const unit of units) {
-    const analysisSegments = unit.segments.map(segment => ({ ...segment }));
-    const substitution = analysisSegments[0].text.lastIndexOf('$(');
-    if (substitution !== -1) {
-      analysisSegments[0].text = analysisSegments[0].text.slice(substitution + 2);
-      const lastSegment = analysisSegments[analysisSegments.length - 1];
-      const closing = lastSegment.text.lastIndexOf(')');
-      if (closing !== -1) lastSegment.text = lastSegment.text.slice(0, closing);
+  function inspectMappedCommand(text, lineMap) {
+    const substitutionResult = maskCommandSubstitutions(text, lineMap);
+    if (substitutionResult.malformedLine !== null) {
+      findings.push({
+        line: substitutionResult.malformedLine,
+        kind: 'malformed-command',
+        message: 'has an unterminated command substitution; command safety cannot be verified',
+      });
+      return [];
     }
-    const parsed = tokenizeShellSegments(analysisSegments);
+
+    const parsed = tokenizeMappedShell(
+      substitutionResult.masked,
+      substitutionResult.maskedLineMap,
+    );
     if (!parsed.tokens) {
       if (hasCommandInvocation(parsed.text)) {
         findings.push({
-          line: unit.segments[0].line,
+          line: lineMap[0],
           kind: 'malformed-command',
           message: 'has malformed shell quoting; command safety cannot be verified',
         });
       }
-      continue;
+      return [];
     }
 
     const segments = commandSegments(parsed.tokens);
@@ -721,7 +839,7 @@ function inspectShellSource(content, { startLine = 1 } = {}) {
         findings.push({
           line: tty.line,
           kind: 'tty',
-          message: 'uses interactive and TTY flags in an agent-run command',
+          message: 'uses an interactive stdin or TTY flag in an agent-run command',
         });
       }
 
@@ -749,6 +867,16 @@ function inspectShellSource(content, { startLine = 1 } = {}) {
       }
     }
 
+    const nestedSegments = [];
+    for (const substitution of substitutionResult.substitutions) {
+      nestedSegments.push(...inspectMappedCommand(substitution.text, substitution.lineMap));
+    }
+    return [...segments, ...nestedSegments];
+  }
+
+  for (const unit of units) {
+    const { text, lineMap } = flattenShellSegments(unit.segments);
+    const segments = inspectMappedCommand(text, lineMap);
     const appliesYaml = segments.some((segment) => {
       if (segment.command !== 'kubectl') return false;
       return segment.tokens.some(token => /^(?:apply|create|replace)$/.test(token.value));
@@ -852,6 +980,11 @@ function checkDeclaredOrder(actualKeys, requiredOrder) {
 function isScriptShaped(filePath, firstLine) {
   const extension = path.extname(filePath).toLowerCase();
   return extension === '' || SCRIPT_EXTENSIONS.has(extension) || firstLine.startsWith('#!');
+}
+
+function isShellScript(filePath, firstLine) {
+  return path.extname(filePath).toLowerCase() === '.sh'
+    || /^#!.*\b(?:ba|z|da|k)?sh(?:\s|$)/.test(firstLine);
 }
 
 /**
@@ -981,14 +1114,12 @@ function lintSkills({
   }
 
   /**
-   * Check script-shaped files in a skill folder for a valid shebang and Git
-   * index mode 100755 (contract §4 "Executable bit set"). The established
-   * .sh/.py scope is extended to extensionless scripts and files with shebangs.
+   * Check script-shaped files under scripts/ and shell scripts anywhere in the
+   * registered skill bundle for a valid shebang and Git index mode 100755.
+   * Shared shell-command policy applies only where the interpreter is a shell.
    */
   function checkScripts(skillDir) {
     const scriptsDir = path.join(skillDir, 'scripts');
-    if (!fs.existsSync(scriptsDir)) return;
-
     const scripts = [];
     function walk(current) {
       for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
@@ -997,15 +1128,18 @@ function lintSkills({
           walk(entryPath);
         } else if (entry.isFile()) {
           const firstLine = readText(entryPath).split('\n')[0];
-          if (isScriptShaped(entryPath, firstLine)) {
-            scripts.push({ filePath: entryPath, firstLine });
+          const underScripts = entryPath === scriptsDir
+            || entryPath.startsWith(`${scriptsDir}${path.sep}`);
+          const shell = isShellScript(entryPath, firstLine);
+          if ((underScripts && isScriptShaped(entryPath, firstLine)) || shell) {
+            scripts.push({ filePath: entryPath, firstLine, shell });
           }
         }
       }
     }
-    walk(scriptsDir);
+    walk(skillDir);
 
-    for (const { filePath, firstLine } of scripts) {
+    for (const { filePath, firstLine, shell } of scripts) {
       if (!VALID_SHEBANG_RE.test(firstLine)) {
         addError(filePath, 'Script missing a valid shebang line (e.g. #!/bin/bash, #!/usr/bin/env python3) (contract §4)');
       }
@@ -1016,8 +1150,7 @@ function lintSkills({
         addError(filePath, 'Script is not executable (git mode must be 100755 — run `chmod +x` and re-stage) (contract §4)');
       }
 
-      if (path.extname(filePath).toLowerCase() === '.sh'
-        || /\b(?:ba|z|da|k)?sh\b/.test(firstLine)) {
+      if (shell) {
         for (const finding of inspectShellSource(readText(filePath))) {
           addError(filePath, `line ${finding.line} ${finding.message} (contract §4)`);
         }

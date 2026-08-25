@@ -764,8 +764,22 @@ test('executable shell scripts use the shared eval, TTY, and image policy', () =
 
     const { errors } = runLint(root);
     assertHasError(errors, /unsafe\.sh.*line 2 uses eval/);
-    assertHasError(errors, /unsafe\.sh.*line 3 uses interactive and TTY flags/);
+    assertHasError(errors, /unsafe\.sh.*line 3 uses an interactive stdin or TTY flag/);
     assertHasError(errors, /unsafe\.sh.*line 4 executes container image "busybox:1\.36"/);
+  });
+});
+
+test('shell scripts outside scripts directories use the shared command policy', () => {
+  withTempRoot((root) => {
+    const name = 'aks-fixture-skill';
+    setupValidScenario(root, name);
+    const scriptPath = path.join(root, 'skills', name, 'hooks', 'unsafe.sh');
+    fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+    fs.writeFileSync(scriptPath, '#!/bin/sh\neval "$COMMAND"\n');
+    stageWithMode(root, scriptPath, '100755');
+
+    const { errors } = runLint(root);
+    assertHasError(errors, /hooks\/unsafe\.sh.*line 2 uses eval/);
   });
 });
 
@@ -827,7 +841,7 @@ test('interactive TTY flags in nested skill Markdown commands are errors', () =>
       '```bash\nkubectl exec -it fixture-pod -- printenv\n```\n',
     );
     const { errors } = runLint(root);
-    assertHasError(errors, /interactive and TTY flags/);
+    assertHasError(errors, /interactive stdin or TTY flag/);
   });
 });
 
