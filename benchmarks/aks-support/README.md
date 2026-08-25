@@ -92,7 +92,9 @@ correctness, safety, or countability.
 Run identities bind hashes for benchmark, task, environment, verifier, model,
 scaffold, prompt, skill, tools, budget, and retry policy. Results are JSONL and
 append-only by result ID. Reports are regenerated only from result artifacts
-and the preregistered claim plan.
+and the preregistered claim plan. Claim assessments and rankings are partitioned
+by execution mode. Only countable results with an explicit paired comparison
+outcome can enter rankings; a missing outcome is not interpreted as neutral.
 
 The publication scanner requires an explicit package file list, recognizes only
 declared text formats, fails closed on unknown extensions, and rejects secrets,

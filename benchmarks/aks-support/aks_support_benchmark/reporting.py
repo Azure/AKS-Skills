@@ -41,24 +41,27 @@ def regenerate_report(
     ]
     result_hashes = [sha256_value(item) for item in results]
     countable = [item for item in results if item["countability"] == "countable"]
+    comparable = [item for item in countable if "comparison_outcome" in item]
     assessments: list[dict[str, Any]] = []
-    rankings_allowed = bool(countable) and bool(
+    rankings_allowed = bool(comparable) and bool(
         claim_plan["ranking_policy"].get("uncertainty_sufficient")
     )
     for claim in claim_plan["claims"]:
         claim_id = claim.get("claim_id")
-        matching = [
-            item
-            for item in countable
-            if item["claim_id"] == claim_id and item.get("comparison_outcome")
-        ]
-        assessments.append(
-            {
-                "claim_id": claim_id,
-                "status": "evaluated" if matching else "descriptive",
-                "countable_results": len(matching),
-            }
-        )
+        for mode in ("direct-model-context", "agent-folder"):
+            matching = [
+                item
+                for item in comparable
+                if item["claim_id"] == claim_id and item["mode"] == mode
+            ]
+            assessments.append(
+                {
+                    "claim_id": claim_id,
+                    "mode": mode,
+                    "status": "evaluated" if matching else "descriptive",
+                    "countable_results": len(matching),
+                }
+            )
     report = {
         "contract_version": CONTRACT_VERSION,
         "kind": "report",
@@ -66,17 +69,19 @@ def regenerate_report(
         "result_hashes": result_hashes,
         "claim_assessment": assessments,
         "status": "rankable" if rankings_allowed else "descriptive-preliminary",
-        "rankings": [] if not rankings_allowed else _rankings(countable),
+        "rankings": [] if not rankings_allowed else _rankings(comparable),
     }
     return validate_contract(report, "report")
 
 
 def _rankings(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    outcomes: dict[str, int] = {}
+    outcomes: dict[tuple[str, str], int] = {}
     for result in results:
-        outcome = result.get("comparison_outcome", "neutral")
-        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        if "comparison_outcome" not in result:
+            continue
+        key = (result["mode"], result["comparison_outcome"])
+        outcomes[key] = outcomes.get(key, 0) + 1
     return [
-        {"outcome": outcome, "count": count}
-        for outcome, count in sorted(outcomes.items())
+        {"mode": mode, "outcome": outcome, "count": count}
+        for (mode, outcome), count in sorted(outcomes.items())
     ]

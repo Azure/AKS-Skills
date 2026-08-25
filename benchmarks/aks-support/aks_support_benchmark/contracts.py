@@ -306,6 +306,33 @@ def _check_nested_entries(kind: str, value: dict[str, Any]) -> None:
     elif kind == "report":
         for digest in value["result_hashes"]:
             _hash(digest)
+        for index, assessment in enumerate(value["claim_assessment"]):
+            _exact_keys(
+                assessment,
+                {"claim_id", "mode", "status", "countable_results"},
+                f"claim_assessment[{index}]",
+            )
+            _identifier(assessment["claim_id"])
+            _mode(assessment["mode"])
+            if assessment["status"] not in ("evaluated", "descriptive"):
+                raise ContractError("claim assessment status is invalid")
+            if (
+                type(assessment["countable_results"]) is not int
+                or assessment["countable_results"] < 0
+            ):
+                raise ContractError(
+                    "claim assessment countable_results must be non-negative"
+                )
+        for index, ranking in enumerate(value["rankings"]):
+            _exact_keys(
+                ranking,
+                {"mode", "outcome", "count"},
+                f"rankings[{index}]",
+            )
+            _mode(ranking["mode"])
+            _outcome(ranking["outcome"])
+            if type(ranking["count"]) is not int or ranking["count"] <= 0:
+                raise ContractError("ranking count must be a positive integer")
 
 
 def _exact_keys(value: Any, expected: set[str], label: str) -> None:
