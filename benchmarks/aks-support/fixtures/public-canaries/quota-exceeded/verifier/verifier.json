@@ -1,0 +1,17 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "verifier",
+  "verifier_id": "quota-exceeded-verifier",
+  "checks": [
+    {
+      "check_id": "root-cause",
+      "type": "outcome_root_cause",
+      "artifact": "diagnosis.txt",
+      "expected": "quota-exceeded"
+    }
+  ],
+  "gold_files": [
+    "answer.txt"
+  ],
+  "verifier_hash": "sha256:c53610bba5c4ce81825b62f78ce0f02cfb74c1cfdca6fb93a215a574ccd06b98"
+}

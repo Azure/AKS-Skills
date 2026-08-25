@@ -1,0 +1,9 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "canary-set",
+  "set_id": "public-harness-self-tests",
+  "cases": [
+    "public-canaries/dns-nsg-udp53",
+    "public-canaries/quota-exceeded"
+  ]
+}

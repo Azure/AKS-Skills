@@ -1,0 +1,6 @@
+{
+  "operation": "create-node-pool",
+  "status": "failed",
+  "code": "InsufficientVCPUQuota",
+  "message": "Requested regional vCPU capacity exceeds the currently available quota."
+}

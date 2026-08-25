@@ -1,0 +1,11 @@
+{
+  "contract_version": "aks-support-benchmark/v1",
+  "kind": "adapter-config",
+  "adapter_id": "offline-recorded",
+  "adapter_type": "recorded",
+  "allowed_env": [],
+  "config": {
+    "network": false,
+    "model_claim": false
+  }
+}
