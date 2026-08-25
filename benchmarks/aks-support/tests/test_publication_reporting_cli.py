@@ -116,7 +116,7 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(direct["status"], "descriptive")
             self.assertEqual(direct["countable_results"], 0)
 
-    def test_mixed_modes_are_partitioned_in_assessments_and_rankings(self) -> None:
+    def test_mixed_modes_remain_partitioned_and_descriptive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.jsonl"
             append_result(path, result("direct", outcome="positive"))
@@ -129,18 +129,8 @@ class ReportingTest(unittest.TestCase):
 
             report = regenerate_report(path, plan, "mode-partitioned-report")
 
-            self.assertEqual(report["status"], "rankable")
-            self.assertEqual(
-                report["rankings"],
-                [
-                    {"mode": "agent-folder", "outcome": "negative", "count": 1},
-                    {
-                        "mode": "direct-model-context",
-                        "outcome": "positive",
-                        "count": 1,
-                    },
-                ],
-            )
+            self.assertEqual(report["status"], "descriptive-preliminary")
+            self.assertEqual(report["rankings"], [])
             assessments = {
                 item["mode"]: item for item in report["claim_assessment"]
             }
