@@ -4,20 +4,83 @@
   metadata:
     skill: aks-cost-optimization
     type: quality
+    case_id: cost-rightsizing-vpa
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-cost-optimization/SKILL.md"
+    skill_files:
+      - "azure-aks-rightsizing.md"
+      - "azure-aks-vpa.md"
     prompt: "My AKS bill is high and I think pods are over-provisioned. How do I safely rightsize?"
   assert:
     - type: g-eval
-      value: "Response bases rightsizing on observed usage (VPA recommendations / actual vs requested), not a blind percentage cut, and considers the autoscaler and spot pools for further savings"
+      value: "Response checks which historical data source exists before making a recommendation, evaluates every container including sidecars, and uses P95 history with the documented buffer rather than a blind percentage cut. It starts VPA in updateMode Off, waits for recommendations, and applies changes manually with rollback/validation rather than allowing automatic pod changes immediately."
+      threshold: 0.8
+
+- description: "Autoscaler tuning explains blockers and rollback"
+  metadata:
+    skill: aks-cost-optimization
+    type: quality
+    case_id: cost-autoscaler-scale-down
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-cost-optimization/SKILL.md"
+    skill_files:
+      - "azure-aks-autoscaler.md"
+    prompt: "Cluster Autoscaler is enabled but idle nodes persist. Give me the cost-focused checks, a conservative decision path, and how to undo profile tuning."
+  assert:
+    - type: g-eval
+      value: "Response verifies autoscaler state and utilization before tuning, checks blockers such as PDBs/system pods and node utilization, distinguishes workload profiles rather than applying one universal min/max, and includes the documented az aks update --cluster-autoscaler-profile reset path to restore defaults."
+      threshold: 0.8
+
+- description: "Spot recommendation preserves fallback capacity"
+  metadata:
+    skill: aks-cost-optimization
+    type: quality
+    case_id: cost-spot-fallback
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-cost-optimization/SKILL.md"
+    skill_files:
+      - "azure-aks-spot.md"
+    prompt: "Can I move a two-replica stateless API to AKS Spot without leaving it Pending after eviction?"
+  assert:
+    - type: g-eval
+      value: "Response keeps regular capacity as fallback, uses the AKS Spot taint toleration, and avoids a required nodeSelector/pinning that would prevent rescheduling to regular nodes. It calls out the 30-second eviction notice, termination grace below that window, and a PDB; it rejects Spot for stateful or single-replica critical workloads."
+      threshold: 0.8
+
+- description: "Cost visibility and anomaly workflow respects tier and data boundaries"
+  metadata:
+    skill: aks-cost-optimization
+    type: quality
+    case_id: cost-addon-and-anomaly
+  options:
+    disableVarExpansion: true
+  vars:
+    skill_path: "aks-cost-optimization/SKILL.md"
+    skill_files:
+      - "azure-aks-cost-addon.md"
+      - "azure-aks-anomalies.md"
+    prompt: "My Free-tier AKS cluster had a cost spike last Tuesday and I need namespace attribution. What should I enable and what evidence should I correlate?"
+  assert:
+    - type: g-eval
+      value: "Response states the AKS cost analysis add-on requires Standard or Premium tier and explains the tier change before enabling it. For the spike it anchors the exact timeframe, pulls cost data, checks available AKS metric definitions before querying node-count/scaling metrics, correlates HPA/CAS and top consumers, and suggests a budget alert rather than guessing the cause."
       threshold: 0.8
 
 - description: "Autoscaler cost tuning must not recommend disabling kube-system pod protection"
   metadata:
     skill: aks-cost-optimization
     type: quality
+    case_id: cost-autoscaler-system-pod-protection
+  options:
+    disableVarExpansion: true
   vars:
-    skill_path: "aks-cost-optimization/azure-aks-autoscaler.md"
+    skill_path: "aks-cost-optimization/SKILL.md"
+    skill_files:
+      - "azure-aks-autoscaler.md"
     prompt: "Give me the exact az aks update command to tune the cluster autoscaler profile for cost savings on my production cluster, and tell me whether it's safe to also let CAS evict system pods for more savings."
   assert:
     - type: javascript
@@ -32,8 +95,13 @@
   metadata:
     skill: aks-cost-optimization
     type: quality
+    case_id: cost-spot-pdb-reclamation
+  options:
+    disableVarExpansion: true
   vars:
-    skill_path: "aks-cost-optimization/azure-aks-spot.md"
+    skill_path: "aks-cost-optimization/SKILL.md"
+    skill_files:
+      - "azure-aks-spot.md"
     prompt: "If Azure reclaims my Spot node capacity, will the PodDisruptionBudget on my deployment prevent or limit that eviction? What should I actually rely on for resilience?"
   assert:
     - type: javascript

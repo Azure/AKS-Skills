@@ -1,18 +1,18 @@
 # Skill Evaluations
 
-Automated quality and routing checks for AKS skills. Runs on every PR that touches `skills/` or `evals/`.
+Deterministic validation and advisory model-backed evidence for AKS skills. Every PR runs the secret-free contracts and records its exact target; model-backed quality and routing run only through the protected `workflow_run` trust boundary. The separate manual Autogen workflow produces non-authoritative candidates for review.
 
 ## What it does
 
 - **Lint** — validates SKILL.md formatting (front matter, required fields, script shebangs, internal references). No API key needed.
-- **Quality eval** — sends test prompts to the model with the skill loaded, then grades the response with `icontains` and `g-eval` assertions.
-- **Trigger eval** — asks the model which skill should handle a query (router-provider), asserts with deterministic `equals`.
+- **Quality eval** — after explicit trust approval, sends each case to a provisioned generator with the root skill plus only its declared deep files, then grades with deterministic assertions and that matrix cell's distinct judge.
+- **Trigger eval** — after the same trust boundary, asks each provisioned generator which skill should handle a query and asserts with deterministic `equals`.
 - **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
-- **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the skill available, and grades the trajectory. Two tiers:
-  - `tier: smoke` — fast routing gate: did the agent invoke the right skill (`skill-invocation`) and finish without crashing (`output-not-matches`). No cluster, cheap.
-  - `tier: mock` — full investigation against a **fake-broken cluster**: `az`/`kubectl` are intercepted by shims that return canned fixtures, so the agent investigates a real fault with no live Azure resources. Grades the actual trajectory — required vs. disallowed tool calls (`tool-calls`), call budget (`tool-call-count`), and root-cause correctness via an LLM judge (`prompt` rubric).
+- **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the full AKS skill pool available, and grades the trajectory. Two tiers:
+  - `tier: smoke` — competitive routing check: did the agent invoke the required skill, avoid the colliding skill (`skill-invocation`), and finish without crashing (`output-not-matches`)? No cluster.
+  - `tier: mock` — investigation against a **canned cluster substrate**: `az`/`kubectl` are intercepted by shims that return fixtures, so the eval can grade required/disallowed tool calls and root-cause reasoning without live Azure resources. It proves trajectory behavior against those fixtures, not live AKS success.
 
-  Uses the GitHub Copilot CLI, not Azure OpenAI.
+  Uses the GitHub Copilot CLI, not Azure OpenAI. Agentic specs omit eval-level score thresholds so every configured grader must pass; a hard trajectory violation produces a non-zero process exit.
 
 ## Quick start
 
@@ -26,6 +26,8 @@ npm run lint
 # Requires LLM credentials
 export AZURE_OPENAI_API_KEY="your-key"
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+# Optional local judge deployment; defaults to EVAL_MODEL on the same endpoint.
+export EVAL_JUDGE_MODEL="judge-deployment"
 
 npm run eval              # quality tests → results.json
 npm run eval:trigger      # trigger/routing tests → routing-results.json
@@ -44,8 +46,8 @@ npm install -g @github/copilot   # one-time, cross-platform (macOS/Linux/Windows
 copilot                          # launch the CLI, then run /login inside it for one-time auth
 
 npm run lint:agentic                                                          # validate all eval.yaml specs (instant, no auth)
-npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml --tag tier=smoke  # one skill, routing tier only
-npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml                   # one skill, all tiers
+npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml --tag tier=smoke  # one spec, routing tier only
+npm run eval:agentic -- --eval-spec tests/aks-troubleshooting/eval.yaml                   # one spec, all tiers
 npm run eval:mock                                                             # all mock-tier investigations (all skills)
 ```
 
@@ -58,8 +60,27 @@ Pass the skill's spec path with `--eval-spec`; add `--tag tier=smoke` for the fa
 The mock tier proves the agent can *investigate*, not just route — without any live Azure resources. It works by intercepting the agent's shell calls:
 
 - `evals/mocks/bin/{az,kubectl}` are shims placed first on `PATH` (the `eval:mock` script prepends `$PWD/mocks/bin`). They forward to `evals/mocks/lib/dispatch.mjs`.
-- The dispatcher reads `.mocks/responses.json` from the scenario's working dir, matches the full command line against an ordered regex table, and returns the canned `stdout`/`stderr`/`exit`. Unmatched commands return empty with exit 0 — so the agent *can* wander, and that wandering stays visible in the trajectory.
+- The dispatcher reads `.mocks/responses.json` from the scenario's working dir, matches the full command line against an ordered regex table, and returns the canned `stdout`/`stderr`/`exit`. Missing or malformed fixtures and unmatched commands fail non-zero, so absent canned evidence cannot masquerade as a successful tool call.
 - Each scenario lives at `evals/scenarios/<skill>/<fault>/responses.json` and is mounted into the run via the stimulus's `environment.files` (`dest: .mocks/responses.json`). Fixtures encode one real fault plus healthy *distractors* so the agent must reach the true root cause instead of stopping at the first red herring.
+- Mock results must be described as canned-substrate trajectory evidence. Live packet-capture behavior requires `evals/tests/aks-network-capture/smoke-live-cluster.sh`.
+
+### Selective skill context
+
+`skill-provider.js` always loads the selected root `SKILL.md`. A quality case can request only the deep references needed for that behavior:
+
+```yaml
+metadata:
+  case_id: my-deep-case
+options:
+  disableVarExpansion: true
+vars:
+  skill_path: "my-skill/SKILL.md"
+  skill_files:
+    - "references/needed-causal-map.md"
+    - "references/needed-command-flow.md"
+```
+
+Files load root-first and then in declaration order. Missing files, directories, traversal/current-directory segments, cross-skill paths, duplicate declarations, symlink aliases, and symlink escapes fail closed. Omit `skill_files` to preserve the root-only default. `disableVarExpansion: true` prevents Promptfoo from treating the string array as variable permutations.
 
 ## Environment variables
 
@@ -71,6 +92,7 @@ The mock tier proves the agent can *investigate*, not just route — without any
 | `OPENAI_API_KEY` | Fallback | Used if Azure vars are not set. Optional when `OPENAI_BASE_URL` points at a keyless self-hosted server. |
 | `OPENAI_BASE_URL` | No | Point the `openai` backend at any OpenAI-compatible endpoint instead of `api.openai.com` — a self-hosted or local model server (llama.cpp / vLLM / Ollama) or a gateway. Default: `https://api.openai.com/v1`. Setting this is treated as explicit local/OpenAI-compatible intent during auto-detection: it selects the `openai` backend even if Azure credentials also happen to be present in the environment. |
 | `EVAL_MODEL` | No | Model/deployment name (default: `gpt-5` for `azure`/`api.openai.com`). Set this for a custom `OPENAI_BASE_URL` server such as vLLM that requires a `model` field in the request body — servers that infer the model from what they have loaded (e.g. some llama.cpp/Ollama setups) can omit it. |
+| `EVAL_JUDGE_MODEL` | No | Optional judge deployment/model on the same endpoint. Falls back to `EVAL_MODEL` for the local single-endpoint flow. |
 
 *Either Azure OpenAI or OpenAI credentials must be provided, unless `EVAL_PROVIDER=openai` with `OPENAI_BASE_URL` set to a keyless endpoint.
 
@@ -90,7 +112,11 @@ npm run eval:trigger    # routing
 
 Local runs are a development signal, not a CI gate — like the GitHub Models backend, results aren't directly comparable to the frontier CI pool.
 
-The judge and the model under test share one endpoint per run today, so a local run is graded by a model on that same endpoint. Grading a small local model with a separate frontier judge in a single run (a cross-endpoint model-tier matrix) is a natural next step, not yet wired.
+The judge and model under test share one endpoint per local run; `EVAL_JUDGE_MODEL` can select a distinct model on that endpoint. Cross-endpoint judging is not wired.
+
+### Trusted CI model configuration
+
+Trusted CI fixes `EVAL_PROVIDER=foundry`, `EVAL_PROTOCOL=openai`, and `EVAL_REQUIRE_FOUNDRY=1`. Its native matrix evaluates the provisioned `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra` deployments with a distinct judge in every cell and `fail-fast: false`. Model scores are advisory; exact-target resolution, environment approval, OIDC configuration, checkout, and matrix execution remain fail-closed.
 
 Agentic evals don't use these variables — they authenticate via the GitHub Copilot CLI (`copilot /login`).
 
@@ -118,8 +144,13 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
   metadata:
     skill: <your-skill-name>
     type: quality
+    case_id: <globally-unique-case-id>
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "<your-skill-name>/SKILL.md"
+    skill_files:
+      - "references/<only-the-file-needed-for-this-case>.md"
     prompt: "A detailed user scenario"
   assert:
     - type: g-eval
@@ -128,7 +159,8 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
 ```
 
 3. Add quality tests to `promptfooconfig.yaml` under `tests:`. Trigger tests are auto-discovered via glob (`file://tests/*/trigger-tests.yaml`).
-4. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the skill and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
+4. If the case needs supporting content, declare only those skill-relative paths under `skill_files`, keep `disableVarExpansion: true`, and assign a unique `case_id`.
+5. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the full competing skill pool and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
 
 ```yaml
 # eval.yaml — does the agent invoke the skill and respond well?
@@ -136,25 +168,24 @@ name: <your-skill-name>-agentic-eval
 environment:
   skills:
     - ../../../skills/<your-skill-name>
+    - ../../../skills/<colliding-skill-name>
 defaults:
   runs: 1
   timeout: "5m"
   executor: copilot-sdk
   model: claude-sonnet-4.6
-scoring:
-  threshold: 0.8
 stimuli:
   - name: "Routing: <scenario>"
     prompt: "A user question that should route to this skill"
-    tags: { tier: smoke, area: routing }
+    tags: { tier: smoke }
     graders:
       - type: skill-invocation
-        config: { required: [<your-skill-name>] }
-    constraints:
-      expect_skills: [<your-skill-name>]
+        config:
+          required: [<your-skill-name>]
+          disallowed: [<colliding-skill-name>]
 ```
 
-For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade the trajectory with `tool-calls` (required + disallowed), `tool-call-count`, and a `prompt` rubric. See `tests/aks-troubleshooting/eval.yaml` for a complete example.
+For a `tier: mock` investigation, also add a fixture at `evals/scenarios/<your-skill-name>/<fault>/responses.json` (an ordered list of `{ match, stdout, stderr, exit }` regex entries — one real fault plus healthy distractors), mount it via the stimulus `environment.files` (`dest: .mocks/responses.json`), and grade both skill invocation and required/disallowed tool calls. The accepted mock contract uses `timeout: "5m"`, `constraints.max_turns: 15`, and a `tool-call-count` grader with `max: 30`; retain those guards unless a human reviewer changes the contract. See `tests/aks-troubleshooting/eval.yaml` for complete examples.
 
 ## Autogen — draft eval coverage from a SKILL.md
 
@@ -173,7 +204,7 @@ Run the **Autogen Evals** workflow from the Actions tab (`workflow_dispatch`), p
 
 The workflow only **reads** the repo (`contents: read`) — it never writes or opens a PR. Download the artifact, review it, drop the YAML into `evals/tests/<skill>/`, rename the `.autogen.yaml` files to the curated `quality-tests.yaml` / `trigger-tests.yaml` (merging with any hand-written cases), apply the wiring, and open the PR yourself.
 
-The gate makes real LLM calls per candidate, so this is **opt-in and manual by design** — it is not a background watcher. It reuses the same `AZURE_OPENAI_*` secrets as `skill-eval.yml`. Set `dry_run: true` to exercise the pipeline with no LLM spend (emits fixed samples).
+The gate makes real LLM calls per candidate, so this is **opt-in and manual by design** — it is not a background watcher. This workflow uses its own `AZURE_OPENAI_*` repository secrets; the pull-request `Skill Evaluation` workflow remains secret-free, and the Autogen artifact is not an authoritative trusted-eval result. Set `dry_run: true` to exercise the pipeline with no LLM spend (emits fixed samples).
 
 ### Local run
 
@@ -203,10 +234,10 @@ Then review, rename the `.autogen.yaml` files into the curated `quality-tests.ya
 
 | Config | What it tests | Provider | Assertions | Gate |
 |--------|---------------|----------|------------|------|
-| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (loads SKILL.md) | `icontains`, `g-eval` | No (advisory — retries 2x, reports only) |
-| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | No (advisory — reports only) |
+| `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (root plus case-declared deep files) | `icontains`, `g-eval` | Advisory after trusted approval |
+| `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | Advisory after trusted approval |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
-| `tests/<skill>/eval.yaml` | Agentic — real agent routes to skill (smoke) + investigates a fake-broken cluster (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `tool-call-count`, `prompt`, `output-matches` | No (run manually) |
+| `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `prompt`, `output-matches` | Manual; failed graders exit non-zero |
 
 ## Assertion types
 
@@ -233,15 +264,13 @@ Compare g-eval scores between skill-loaded and baseline to quantify skill value.
 
 `holmesgpt-eval/scripts/fetch_fixtures.sh` fetches the fixtures pinned to an upstream commit. The pin is a supply-chain control, not just reproducibility: fixture cases contain `before_test`/`after_test` shell blocks that the harness executes. To move the pin, review the upstream diff and update `REF` in the script.
 
-## CI/CD
+## CI/CD trust boundary
 
-The GitHub Actions workflow (`.github/workflows/skill-eval.yml`) runs automatically on PRs:
+`.github/workflows/skill-eval.yml` is the untrusted pull-request workflow. It receives no model or Azure credential, runs deterministic lint/provider/dispatcher/agentic contracts, and uploads only a run-scoped record of the exact PR number, head SHA/ref/repository, base SHA/ref/repository, and upstream run identity.
 
-1. **Lint** — fast-fails if SKILL.md format is invalid (a hard gate, alongside shellcheck and the injection test)
-2. **Quality eval** — runs quality tests with skill loaded (advisory — retries failing tests up to 2x, reports but does not block merge)
-3. **Trigger eval** — runs routing tests via router-provider (advisory — reports but does not block merge)
-4. **Baseline comparison** — quality tests without skill, reports score delta
-5. **PR comment** — posts results table with g-eval scores and baseline delta
+The default-branch `.github/workflows/trusted-skill-eval.yml` reacts through `workflow_run`. It first anchors a failed `Trusted Skill Evaluation` check to the platform-supplied head SHA, downloads only that upstream run's target record, and verifies it against the current open PR before any untrusted checkout. Model-sensitive changes then enter the reviewer-protected `trusted-skill-eval` environment, authenticate with Azure OIDC, check out the exact verified SHA, and run the three-cell Sol/Luna/Terra matrix with distinct judges and `fail-fast: false`.
+
+Quality and routing outcomes are advisory and remain visible per matrix cell. Missing target evidence, identity mismatches, superseded PR heads, OIDC/configuration failures, checkout failures, and incomplete matrix execution leave the exact-SHA check failed closed. The trusted `workflow_run` path becomes executable only after this workflow exists on the default branch.
 
 ## Filtering evals
 
