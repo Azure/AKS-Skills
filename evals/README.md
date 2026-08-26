@@ -266,9 +266,9 @@ Compare g-eval scores between skill-loaded and baseline to quantify skill value.
 
 ## CI/CD trust boundary
 
-`.github/workflows/skill-eval.yml` is the untrusted pull-request workflow. It receives no model or Azure credential, runs deterministic lint/provider/dispatcher/agentic contracts, and uploads only a run-scoped record of the exact PR number, head SHA/ref/repository, base SHA/ref/repository, and upstream run identity.
+`.github/workflows/skill-eval.yml` is the untrusted pull-request workflow. It receives no model or Azure credential, runs deterministic lint/dispatcher/agentic contracts, and uploads only a run-scoped record of the exact PR number, head SHA/ref/repository, base SHA/ref/repository, and upstream run identity.
 
-The default-branch `.github/workflows/trusted-skill-eval.yml` reacts through `workflow_run`. It first anchors a failed `Trusted Skill Evaluation` check to the platform-supplied head SHA, downloads only that upstream run's target record, and verifies it against the current open PR before any untrusted checkout. Model-sensitive changes then enter the reviewer-protected `trusted-skill-eval` environment, authenticate with Azure OIDC, check out the exact verified SHA, and run the three-cell Sol/Luna/Terra matrix with distinct judges and `fail-fast: false`.
+The default-branch `.github/workflows/trusted-skill-eval.yml` reacts through `workflow_run`. It first anchors a failed `Trusted Skill Evaluation` check to the platform-supplied head SHA, downloads only that upstream run's target record, and verifies it against the current open PR before any untrusted checkout. The validated PR then enters the reviewer-protected `trusted-skill-eval` environment, authenticates with Azure OIDC, checks out the exact verified SHA, and runs the three-cell Sol/Luna/Terra matrix with distinct judges and `fail-fast: false`.
 
 Quality and routing outcomes are advisory and remain visible per matrix cell. Missing target evidence, identity mismatches, superseded PR heads, OIDC/configuration failures, checkout failures, and incomplete matrix execution leave the exact-SHA check failed closed. The trusted `workflow_run` path becomes executable only after this workflow exists on the default branch.
 

@@ -2,13 +2,13 @@
 
 ## Target-Bound Pod Evidence
 
-Use the shipped collector instead of streaming raw logs into model context. It verifies the kube context against the named AKS resource before any Kubernetes API read, captures current and previous logs across all containers, and keeps raw evidence in a caller-selected empty directory.
+Use the shipped collector instead of streaming raw logs into model context. It verifies the kube context against the named AKS resource before any Kubernetes API read, captures current and previous logs across all containers, and keeps the raw log files in a caller-selected artifact directory.
 
 ```bash
 AKS_SUBSCRIPTION_ID=<subscription-id> \
   scripts/pod-deep-dive.sh \
   <namespace> <pod-name> <resource-group> <cluster-name> <kube-context> \
-  <new-artifacts-directory>
+  <artifacts-directory>
 ```
 
 The model-visible projection redacts credential-shaped values and is capped at 50 lines per current/previous log stream. Inspect expanded raw evidence only outside model context.

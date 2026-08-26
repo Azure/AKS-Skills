@@ -68,7 +68,24 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
-        run: node evals/scripts/record-validation-target.mjs --output "$RUNNER_TEMP/validation-target/target.json"
+        run: |
+          mkdir -p "$RUNNER_TEMP/validation-target"
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson pullRequest "$PR_NUMBER" \
+            --arg headSha "$PR_HEAD_SHA" \
+            --arg headRef "$PR_HEAD_REF" \
+            --arg headRepository "$PR_HEAD_REPOSITORY" \
+            --arg baseSha "$PR_BASE_SHA" \
+            --arg baseRef "$PR_BASE_REF" \
+            --arg baseRepository "$PR_BASE_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            '{schemaVersion: 1, repository: $repository, pullRequest: $pullRequest,
+              head: {sha: $headSha, ref: $headRef, repository: $headRepository},
+              base: {sha: $baseSha, ref: $baseRef, repository: $baseRepository},
+              workflow: {runId: $runId, runAttempt: $runAttempt}}' \
+            > "$RUNNER_TEMP/validation-target/target.json"
 
       - name: Upload immutable validation target
         if: github.event_name == 'pull_request'

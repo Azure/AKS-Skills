@@ -23,13 +23,8 @@
   metadata:
     skill: aks-gpu-inference
     type: quality
-    case_id: gpu-kaito-workspace
-  options:
-    disableVarExpansion: true
   vars:
     skill_path: "aks-gpu-inference/SKILL.md"
-    skill_files:
-      - "references/kaito-workspaces.md"
     prompt: "My KAITO Workspace never becomes ready. How do I troubleshoot, and what do I clean up afterward?"
   assert:
     - type: g-eval
@@ -40,14 +35,8 @@
   metadata:
     skill: aks-gpu-inference
     type: quality
-    case_id: gpu-oom-cost-scaling
-  options:
-    disableVarExpansion: true
   vars:
     skill_path: "aks-gpu-inference/SKILL.md"
-    skill_files:
-      - "references/gpu-observability.md"
-      - "references/gpu-cost-and-scaling.md"
     prompt: "My inference pod gets OOMKilled while loading model weights on a T4. What's going on?"
   assert:
     - type: g-eval

@@ -27,7 +27,7 @@ The snapshot verifies the kube endpoint before any Kubernetes API read. Use the 
 AKS_SUBSCRIPTION_ID=<subscription-id> \
   scripts/pod-deep-dive.sh \
   <namespace> <pod-name> <resource-group> <cluster-name> <kube-context> \
-  <new-artifacts-directory>
+  <artifacts-directory>
 ```
 
 ## Connectivity Flow

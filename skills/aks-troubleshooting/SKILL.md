@@ -42,7 +42,7 @@ Root-cause live AKS incidents with a read-only, evidence-first investigation. Th
 Both shipped scripts are POSIX `sh` and read-only. They require an explicit resource group, cluster, and kube context, then verify that the context endpoint matches the named AKS resource before any Kubernetes API read. Set `AKS_SUBSCRIPTION_ID` to pin Azure reads to a subscription.
 
 - `scripts/cluster-snapshot.sh <resource-group> <cluster> <kube-context>` — target-bound cluster overview (nodes, recent events, pressure, and node-pool state).
-- `scripts/pod-deep-dive.sh <namespace> <pod> <resource-group> <cluster> <kube-context> <new-artifacts-dir>` — target-bound pod evidence. Raw describe, logs, events, and usage stay in the artifact directory; stdout contains redacted projections and no more than 50 lines from each current/previous log stream.
+- `scripts/pod-deep-dive.sh <namespace> <pod> <resource-group> <cluster> <kube-context> <artifacts-dir>` — target-bound pod evidence. Raw current/previous logs stay in the artifact directory; stdout contains redacted projections and no more than 50 lines from each stream.
 
 ## AKS-specific gotchas
 
