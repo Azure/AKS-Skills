@@ -6,9 +6,9 @@ name: Autogen Evals
 # Does NOT open a PR and does NOT modify the repo.
 #
 # Cost note: the baseline gate makes real LLM calls per candidate (skill-vs-baseline +
-# judge), so this is opt-in and manual by design — it is not a watcher. Reuses the
-# same AZURE_OPENAI_* secrets as skill-eval.yml. Set `dry_run: true` to exercise the
-# plumbing (scaffold + render + artifact) with no LLM spend.
+# judge), so this is opt-in and manual by design — it is not a watcher. This
+# workflow uses its own AZURE_OPENAI_* repository secrets; Skill Evaluation is
+# secret-free. Set `dry_run: true` to exercise the plumbing with no LLM spend.
 
 on:
   workflow_dispatch:
@@ -41,10 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
 
@@ -115,7 +115,7 @@ jobs:
             --report "$OUTDIR/gate-report.json" $DRY
 
       - name: Upload candidate evals
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: autogen-${{ inputs.skill }}-${{ github.run_id }}
           path: autogen-out/${{ inputs.skill }}/
