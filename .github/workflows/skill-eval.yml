@@ -3,11 +3,6 @@ name: Skill Evaluation
 on:
   pull_request:
   workflow_dispatch:
-    inputs:
-      skill:
-        description: 'Specific skill to validate (leave empty for all)'
-        required: false
-        type: string
 
 permissions:
   contents: read
