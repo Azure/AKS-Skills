@@ -70,4 +70,5 @@ CI fails if a skill has no tests (the coverage gate).
 
 - `evals/lint-skills.js` — front matter, `name == folder`, reference resolution, coverage gate, coaching-phrase warnings, and Azure MCP product/portability rules across README, docs, skills, and plugin manifests. Line endings are normalized before parsing, and a self-test (`evals/lint-skills.test.js`) keeps CRLF (Windows) checkouts linting identically.
 - `.github/workflows/scripts.yml` — shellcheck, no `eval`, no unpinned/Docker Hub images, injection regression test (no secrets, so it runs on fork PRs too).
-- `.github/workflows/skill-eval.yml` — routing + quality evals (requires Azure OpenAI secrets).
+- `.github/workflows/skill-eval.yml` — secret-free lint, dispatcher, and agentic-contract checks plus exact pull-request target recording.
+- `.github/workflows/trusted-skill-eval.yml` — resolves the recorded target through `workflow_run`, uses protected Azure OIDC, evaluates the exact SHA, and publishes the exact-SHA advisory check.

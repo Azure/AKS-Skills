@@ -104,4 +104,3 @@ class SkillProvider {
 }
 
 module.exports = SkillProvider;
-module.exports.loadSkillContext = loadSkillContext;
