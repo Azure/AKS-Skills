@@ -25,7 +25,7 @@ import {
 import { execSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const EVALS_DIR = resolve(SCRIPT_DIR, '..');
