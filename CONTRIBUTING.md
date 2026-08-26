@@ -20,7 +20,7 @@ Scripts get extra scrutiny because they run against customer clusters:
 - No `eval`; validate/allowlist all inputs; pass user data as argv/env, never shell strings.
 - Digest-pinned MCR images only; no Docker Hub `:latest`; no interactive flags in agent-run paths.
 - Must be shellcheck-clean (warning level) and carry the executable bit.
-- Ship a regression test for the behavior you're securing.
+- Ship a behavioral regression that executes the behavior being secured, not an inventory, prose, manifest, or workflow-shape assertion.
 
 ## Running the checks locally
 
