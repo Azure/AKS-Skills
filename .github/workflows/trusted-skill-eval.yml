@@ -113,6 +113,8 @@ jobs:
     if: needs.resolve.outputs.requires_model_eval == 'true'
     strategy:
       fail-fast: false
+      # Serial cells avoid the measured cross-cell throttling on shared judges.
+      max-parallel: 1
       matrix:
         include:
           - id: gpt-5-6-sol
