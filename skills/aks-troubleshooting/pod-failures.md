@@ -1,18 +1,17 @@
 # Pod Failures & Application Issues
 
-## Common Pod Diagnostic Commands
+## Target-Bound Pod Evidence
+
+Use the shipped collector instead of streaming raw logs into model context. It verifies the kube context against the named AKS resource before any Kubernetes API read, captures current and previous logs across all containers, and keeps raw evidence in a caller-selected empty directory.
 
 ```bash
-# List unhealthy pods across all namespaces
-kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
-# All pods wide view
-kubectl get pods -A -o wide
-# Detailed pod status - events section is critical
-kubectl describe pod <pod-name> -n <namespace>
-# Pod logs (current and previous crash)
-kubectl logs <pod-name> -n <namespace>
-kubectl logs <pod-name> -n <namespace> --previous
+AKS_SUBSCRIPTION_ID=<subscription-id> \
+  scripts/pod-deep-dive.sh \
+  <namespace> <pod-name> <resource-group> <cluster-name> <kube-context> \
+  <new-artifacts-directory>
 ```
+
+The model-visible projection redacts credential-shaped values and is capped at 50 lines per current/previous log stream. Inspect expanded raw evidence only outside model context.
 
 ---
 
@@ -25,10 +24,9 @@ Pod starts, crashes, restarts with exponential backoff (10s, 20s, 40s... up to 5
 ```bash
 kubectl describe pod <pod-name> -n <namespace>
 # Check: Exit Code, Reason, Last State, Events
-
-kubectl logs <pod-name> -n <namespace> --previous
-# Shows stdout/stderr from the last crashed container
 ```
+
+Use the `Previous Logs` section from `pod-deep-dive.sh`; it preserves the last crashed container output without exposing the raw stream.
 
 **Decision tree:**
 

@@ -12,15 +12,14 @@ When a user asks a broad question like "what happened in my AKS cluster?" or "ch
 6. System pods health
 7. Activity log
 
+Gather Azure-side resource health, recent operations, and node-pool state first. Then run the target-bound snapshot rather than an ambient-context Kubernetes command chain:
+
 ```bash
-az aks show -g <rg> -n <cluster> --query "provisioningState"
-kubectl get events -A --sort-by='.lastTimestamp' | head -40
-kubectl get nodes -o wide
-kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
-kubectl get pods -A -o wide
-kubectl get pods -n kube-system -o wide
-az monitor activity-log list -g <rg> --max-events 20 -o table
+AKS_SUBSCRIPTION_ID=<subscription-id> \
+  scripts/cluster-snapshot.sh <resource-group> <cluster-name> <kube-context>
 ```
+
+The script stops before Kubernetes API reads unless the kube context endpoint matches the named AKS resource. Continue with affected-namespace pod detail and logs only after the cluster, node, `kube-system`, and event evidence is complete.
 
 ---
 
@@ -34,9 +33,9 @@ az aks get-credentials -g <rg> -n <cluster>
 az aks nodepool list -g <rg> --cluster-name <cluster> -o table
 ```
 
-### AppLens (MCP) for AKS
+### Azure MCP AppLens area for AKS
 
-For AI-powered diagnostics:
+AppLens is a separate Azure MCP Server area, not part of its AKS cluster/node-pool metadata area. For AI-powered diagnostics:
 
 ```text
 <host-assigned Azure MCP AppLens tool>

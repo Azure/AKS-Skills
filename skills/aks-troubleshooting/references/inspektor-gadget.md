@@ -2,21 +2,32 @@
 
 Use Inspektor Gadget for real-time, low-level node/pod diagnostics when `kubectl` is insufficient.
 
-## IG Version
+## Approved Image
 
-`<ig-version>` = `v0.51.0` — substitute this exact tag (with `v` prefix) wherever `<ig-version>` appears. Bump this line only.
+Use the official `v0.51.0` multi-architecture image at this reviewed digest:
+
+```text
+mcr.microsoft.com/oss/v2/inspektor-gadget/ig:v0.51.0@sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4
+```
+
+Do not replace the digest with a tag-only reference. Re-review the upstream release and platform manifests before changing either the version or digest.
 
 ## Base Command Pattern
 
+The incident owner must explicitly approve privileged debug-pod creation and choose a finite outer deadline before this command is run:
+
 ```bash
-kubectl debug --profile=sysadmin node/<node-name> --attach --quiet \
-  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig:<ig-version> \
-  -- ig run <gadget>:<ig-version> -o json --timeout <seconds> [filters...]
+IG_IMAGE='mcr.microsoft.com/oss/v2/inspektor-gadget/ig:v0.51.0@sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4'
+timeout <approved-deadline> \
+  kubectl --context <kube-context> debug --profile=sysadmin \
+  node/<node-name> --attach --quiet --image="$IG_IMAGE" -- \
+  ig run <gadget>:v0.51.0 -o json --timeout <gadget-seconds> [filters...] \
+  > <raw-artifact>.json
 ```
 
-Always set `--timeout` after `--` to cap runtime. Use `--timeout 5` for snapshot/top, `--timeout 30` for trace/profile.
+Use both bounds: the outer deadline caps the whole `kubectl debug` operation, and the inner IG timeout caps the gadget. Use `--timeout 5` for snapshot/top and `--timeout 30` for trace/profile. Record the generated debug-pod name and delete that exact pod within the same approved operation.
 
-> **Note:** IG uses `kubectl debug --profile=sysadmin` (privileged debug pod). Only run with explicit user approval and appropriate RBAC.
+> **Note:** The gadget observes read-only state, but creating and deleting a `--profile=sysadmin` debug pod are privileged cluster mutations. Approval and appropriate RBAC are mandatory.
 
 **Required:** Resolve the node name first:
 
@@ -57,17 +68,20 @@ kubectl get pod <pod-name> -n <namespace> -o jsonpath='{.spec.nodeName}'
 
 #### tcpdump gadget
 
-Outputs raw pcap-ng data. Pipe to `tcpdump` for readable output:
+Keep raw pcap-ng outside model context:
 
 ```bash
-kubectl debug --profile=sysadmin node/<node-name> --attach --quiet \
-  --image=mcr.microsoft.com/oss/v2/inspektor-gadget/ig:<ig-version> \
-  -- ig run tcpdump:<ig-version> -o pcap-ng --k8s-namespace <ns> --k8s-podname <pod> \
-     --timeout 30 --pf "port 80" \
-  | tcpdump -nvr -
+IG_IMAGE='mcr.microsoft.com/oss/v2/inspektor-gadget/ig:v0.51.0@sha256:6610863f6d8cae28800f9331756434639bca44be065719cbcfe76e34c91dffa4'
+timeout <approved-deadline> \
+  kubectl --context <kube-context> debug --profile=sysadmin \
+  node/<node-name> --attach --quiet --image="$IG_IMAGE" -- \
+  ig run tcpdump:v0.51.0 -o pcap-ng \
+  --k8s-namespace <ns> --k8s-podname <pod> \
+  --timeout 30 --pf "port 80" \
+  > <raw-artifact>.pcapng
 ```
 
-Use `--pf "<expr>"` for tcpdump filters (e.g., `port 80`, `host 10.0.0.1`). Output must be `-o pcap-ng` (not `-o json`).
+Use `--pf "<expr>"` for a narrow tcpdump filter (for example, `port 80` or `host 10.0.0.1`). Output must be `-o pcap-ng` (not `-o json`). Inspect the artifact with an approved offline packet-analysis tool rather than pasting packet payloads into model context.
 
 ### Process & Workload
 
@@ -129,7 +143,9 @@ Use `--pf "<expr>"` for tcpdump filters (e.g., `port 80`, `host 10.0.0.1`). Outp
 
 ## Guardrails
 
-- IG gadgets are **read-only** — they do not modify cluster or application state.
-- Resolve the correct node name before running any IG command.
-- Always set `--timeout` to cap runtime. Prefer snapshot/top for quick checks; trace/profile for behavior over time.
-- For reproduction: launch a trace gadget first, then reproduce the problem. The debug pod persists after the gadget exits, so run `kubectl logs <debug-pod>` to retrieve the captured output afterward.
+- Prove the named AKS resource and kube context match before resolving the node or running IG.
+- Require explicit approval for privileged debug-pod creation and deletion.
+- Use only the digest-pinned image above, an outer deadline, and the gadget timeout.
+- Scope every run to the symptom, namespace, pod, and supported filter set; do not use an unbounded catch-all trace.
+- Keep raw JSON/pcap output outside model context and expose only a bounded, redacted finding summary.
+- Confirm deletion of the exact generated debug pod on success, failure, interruption, or timeout.

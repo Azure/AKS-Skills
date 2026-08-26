@@ -17,7 +17,7 @@ Root-cause live AKS incidents with a read-only, evidence-first investigation. Th
 
 **Evidence before conclusion.** Do not state a root cause without quoting the evidence that supports it. "Pod is Pending" and "node is NotReady" are symptoms, not causes — trace them to the specific selector, taint, exhausted resource, or Azure-side condition.
 
-**Tool preference.** Inspect the host's available tools for Azure MCP capabilities that advertise AKS, AppLens, Azure Monitor, or Resource Health operations. Use each matching capability under its host-assigned name, preferring the smallest operation that fits the read. Never treat a specific prefix or spelling as an availability check, and do not invent a name-mapping layer. Fall back to raw `az aks` and `kubectl` only when the host exposes no matching capability or the discovered MCP surface cannot perform the check. Default the MCP access mode to `readonly`. See [references/aks-mcp.md](references/aks-mcp.md).
+**Tool preference.** Inspect the host's available tools and advertised schemas. Azure MCP Server's AKS area can supply cluster and node-pool metadata. AppLens, Azure Monitor, and Resource Health are separate Azure MCP areas; use each only when its host-advertised schema fits the read. Never treat a specific prefix or spelling as an availability check, and do not invent a name-mapping layer. Use the portable `az` and `kubectl` flows for checks outside those surfaces or whenever the matching capability is unavailable. See [references/azure-mcp.md](references/azure-mcp.md).
 
 **Evidence order.** Gather Azure-side state first (cluster state, resource health, recent operations, node-pool state, detector/monitoring output), then Kubernetes-side state (reachability, nodes, `kube-system`, events, the affected namespace, pod detail, logs). This ordering catches platform-level causes — a failed upgrade operation, a stopped cluster, a quota block — before you spend time inside the cluster.
 
@@ -39,10 +39,10 @@ Root-cause live AKS incidents with a read-only, evidence-first investigation. Th
 
 ## Scripts
 
-Both are POSIX `sh`, read-only, and safe to run at the start of any investigation. Invoke with `sh <script>` or `./<script>`.
+Both shipped scripts are POSIX `sh` and read-only. They require an explicit resource group, cluster, and kube context, then verify that the context endpoint matches the named AKS resource before any Kubernetes API read. Set `AKS_SUBSCRIPTION_ID` to pin Azure reads to a subscription.
 
-- `scripts/cluster-snapshot.sh` — quick cluster-health overview (nodes, system pods, recent events, node-pool state).
-- `scripts/pod-deep-dive.sh <namespace> <pod>` — full diagnostic dump for one pod: describe, events, current and previous logs across all containers, resource usage.
+- `scripts/cluster-snapshot.sh <resource-group> <cluster> <kube-context>` — target-bound cluster overview (nodes, recent events, pressure, and node-pool state).
+- `scripts/pod-deep-dive.sh <namespace> <pod> <resource-group> <cluster> <kube-context> <new-artifacts-dir>` — target-bound pod evidence. Raw describe, logs, events, and usage stay in the artifact directory; stdout contains redacted projections and no more than 50 lines from each current/previous log stream.
 
 ## AKS-specific gotchas
 
@@ -63,14 +63,14 @@ The highest-signal failure patterns that are specific to AKS — a frontier mode
 
 ## Log discipline
 
-- Always fetch `kubectl logs --previous` alongside current logs — after a restart the current stream may be empty.
-- Do not truncate logs with `--tail` or `| tail`; the causal error is often early.
-- For multi-container pods, use `--all-containers` (or name each `--container`) so sidecar and init-container logs are not missed.
+- Use `pod-deep-dive.sh` so current and previous streams are collected together, raw output stays outside model context, and visible log evidence is bounded and redacted.
+- The 50-line visible projection is an investigation starting point. If earlier evidence is necessary, keep the expanded raw collection in the artifact directory and expose only a separately reviewed bounded/redacted slice.
+- Preserve container prefixes and all-container collection so sidecar evidence remains attributable.
 - Get current UTC time with `date -u` before using `--since-time`.
 
 ## Deep diagnostics
 
-When standard checks do not reveal a root cause, use **Inspektor Gadget** for real-time, low-level node and pod observability (DNS traces, TCP traces, process and file-access snapshots). See [references/inspektor-gadget.md](references/inspektor-gadget.md) for the gadget catalog and symptom-to-gadget mapping. Inspektor Gadget runs a privileged debug pod — get explicit user approval before invoking it. Additional MCP-driven investigation modes are in [references/structured-input-modes.md](references/structured-input-modes.md) and [references/command-flows.md](references/command-flows.md).
+When standard checks do not reveal a root cause, use **Inspektor Gadget** for real-time, low-level node and pod observability (DNS traces, TCP traces, process and file-access snapshots). The [Inspektor Gadget reference](references/inspektor-gadget.md) pins the approved MCR image by digest and requires both explicit privileged-debug approval and finite runtime bounds. Additional MCP-driven investigation modes are in [references/structured-input-modes.md](references/structured-input-modes.md) and [references/command-flows.md](references/command-flows.md).
 
 ## Report
 
