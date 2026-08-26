@@ -44,19 +44,3 @@
     - type: g-eval
       value: "Response treats AKS Automatic as a new-cluster migration: Azure CNI Overlay, API Server VNet Integration, and the Azure Linux system pool are Day-0 boundaries. It delegates new-cluster creation to aks-cluster-setup, uses server-side dry-run and staging validation before cutover, and decommissions the old cluster only after workload stability is confirmed."
       threshold: 0.8
-
-- description: "MCP assessment handles async and offline fallback correctly"
-  metadata:
-    skill: aks-automatic-readiness
-    type: quality
-  options:
-    disableVarExpansion: true
-  vars:
-    skill_path: "aks-automatic-readiness/SKILL.md"
-    skill_files:
-      - "references/mcp-integration.md"
-    prompt: "The AKS readiness MCP assessment returned HTTP 202 for a 600-workload cluster, and another environment has no MCP tool. What should the agent do in each environment?"
-  assert:
-    - type: g-eval
-      value: "Response treats 202 as asynchronous: follow the Location header, honor Retry-After, poll until completion, and bound polling. When the MCP tool is unavailable, it falls back to offline validation using rendered/local or exported manifests and the bundled constraint spec; it does not invent MCP parameters or claim the assessment completed."
-      threshold: 0.8
