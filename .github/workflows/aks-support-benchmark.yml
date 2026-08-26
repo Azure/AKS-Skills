@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Calibration reconstructs the frozen source commit from Git objects.
+          fetch-depth: 0
 
       - name: Run unit tests
         run: python3 -m unittest discover -s benchmarks/aks-support/tests -p 'test_*.py'
