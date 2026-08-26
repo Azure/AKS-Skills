@@ -27,9 +27,10 @@ description: "<one lead sentence: what it does>. WHEN: <trigger phrases and quot
 ---
 ```
 
+- **`metadata`** follows the Agent Skills string-to-string contract. Host-specific nested metadata is not part of the portable contract.
 - **`description`** carries the routing surface. It must include `WHEN:` triggers **and** a `DO NOT USE FOR:` boundary that names the sibling skill to use instead (the parenthetical-redirect grammar). No two skills may share a description or have one subsume another.
-- **Budget:** the front-matter `description` must fit host routing budgets — keep it under ~500 tokens (~2000 characters), since some hosts truncate long descriptions at routing time. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into `references/` — progressive disclosure, loaded only when the skill is active.
-- **Runtime hints are additive, never conflicting:** `metadata.openclaw.requires.anyBins` (openclaw gating, harmless elsewhere); the repo-root `plugin.json` + `.mcp.json` for SRE Agent / marketplace install.
+- **Budget:** the front-matter `description` must be 1024 characters or fewer to remain portable across Agent Skills-compatible hosts. Keep the `SKILL.md` body focused and push deep reference material (command catalogs, symptom maps, per-topic detail) into `references/` — progressive disclosure, loaded only when the skill is active.
+- **Runtime hints are additive, never conflicting:** the repo-root `plugin.json` + `.mcp.json` supplies SRE Agent / marketplace install without changing the portable skill front matter.
 
 ## 3. Content rules
 
