@@ -61,6 +61,9 @@ function runEvaluation(evaluation, resultsDir) {
       "--no-cache",
       "--no-share",
       "--no-write",
+      // Exact-head runs throttled at Promptfoo's default of four concurrent calls.
+      "--max-concurrency",
+      "1",
       "-o",
       resultPath,
     ],
