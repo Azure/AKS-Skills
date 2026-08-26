@@ -69,6 +69,14 @@ const REMOVED_READINESS_API_PATTERNS = [
     pattern: /\b(?:clusterConfiguration|totalWorkloads|overallStatus|suggestedPatch|remediationGuide)\b/,
   },
 ];
+const SKILL_RCE_PATTERNS = [
+  ['curl-pipe-shell', /\bcurl\b[^|\n]*\|\s*(?:sh|bash|zsh|fish)\b/i],
+  ['wget-pipe-shell', /\bwget\b[^|\n]*\|\s*(?:sh|bash|zsh|fish)\b/i],
+  ['eval-command-output', /\beval\s+["']?\$\(/],
+  ['download-invoke-expression', /\b(?:Invoke-Expression|iex)\s*[(`'"\s].*[Dd]ownload/i],
+  ['base64-decode-execute', /base64\s+(?:-d|--decode)[^|\n]*\|\s*(?:sh|bash|node|python)\b/i],
+];
+const SKILL_RCE_ALLOW_RE = /<!--\s*skill-lint:\s*allow\s+.+?\s*-->/i;
 
 /**
  * Read a text file with line endings normalized to LF. Windows checkouts
@@ -250,6 +258,13 @@ function checkAzureMcpGuidanceContract(skillsDir, addError) {
           filePath,
           `line ${index + 1} uses "AKS MCP" without naming the separate Azure/aks-mcp product; call @azure/mcp "Azure MCP Server"`,
         );
+      }
+      if (filePath.startsWith(`${skillsDir}${path.sep}`) && !SKILL_RCE_ALLOW_RE.test(line)) {
+        for (const [name, pattern] of SKILL_RCE_PATTERNS) {
+          if (pattern.test(line)) {
+            addError(filePath, `line ${index + 1} contains high-risk skill content [${name}]`);
+          }
+        }
       }
     }
 

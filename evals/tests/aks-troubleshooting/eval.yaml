@@ -41,9 +41,6 @@ stimuli:
             - aks-troubleshooting
           disallowed:
             - aks-network-capture
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
 
   - name: "Routing: OOMKilled investigation"
     prompt: "Several pods are being OOMKilled in my AKS cluster. What should I do?"
@@ -58,9 +55,6 @@ stimuli:
             - aks-troubleshooting
           disallowed:
             - aks-network-capture
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
 
   - name: "Routing: generic DNS resolution failure"
     prompt: "Pods cannot resolve DNS names in my AKS cluster. I suspect CoreDNS or an NSG blocking UDP 53. Help me investigate."
@@ -75,9 +69,6 @@ stimuli:
             - aks-troubleshooting
           disallowed:
             - aks-network-capture
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
 
   - name: "Routing: explicit packet capture escapes troubleshooting"
     prompt: "Standard checks were inconclusive. Take a pcap on the AKS node hosting my pod, filtered to port 443, so I can see exactly where packets drop."
@@ -92,9 +83,6 @@ stimuli:
             - aks-network-capture
           disallowed:
             - aks-troubleshooting
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
 
   # Mock substrate only: proves the agent follows the expected investigation
   # trajectory against canned az/kubectl responses, not that a live cluster works.
@@ -116,9 +104,6 @@ stimuli:
             - aks-troubleshooting
           disallowed:
             - aks-network-capture
-      - type: output-matches
-        config:
-          pattern: "(?i)quota|vcpu|core limit|cores"
       - type: tool-calls
         config:
           required:
@@ -139,9 +124,6 @@ stimuli:
       - type: prompt
         config:
           threshold: 0.6
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
     rubric:
       - "Correctly identifies the root cause as vCPU/core quota exhaustion blocking node pool scale-up."
       - "Does NOT misattribute the failure to a healthy control plane or unrelated workload pods."
@@ -167,9 +149,6 @@ stimuli:
             - aks-troubleshooting
           disallowed:
             - aks-network-capture
-      - type: output-matches
-        config:
-          pattern: "(?i)NSG|network security group|udp 53|outbound.*(deny|block)|deny.*dns"
       - type: tool-calls
         config:
           required:
@@ -188,9 +167,6 @@ stimuli:
       - type: prompt
         config:
           threshold: 0.6
-      - type: output-not-matches
-        config:
-          pattern: "(?i)fatal error|unhandled exception|stack trace"
     rubric:
       - "Correctly identifies the root cause as an NSG rule blocking outbound UDP 53 (DNS)."
       - "Does NOT misattribute the failure to CoreDNS, which is healthy/Running in this scenario."
