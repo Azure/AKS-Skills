@@ -41,6 +41,9 @@ stimuli:
             - aks-network-capture
           disallowed:
             - aks-troubleshooting
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"
 
   - name: "Routing: generic egress failure stays with troubleshooting"
     prompt: "Pods in my AKS cluster cannot reach external services and egress seems blocked. Help me investigate."
@@ -55,3 +58,6 @@ stimuli:
             - aks-troubleshooting
           disallowed:
             - aks-network-capture
+      - type: output-not-matches
+        config:
+          pattern: "(?i)fatal error|unhandled exception|stack trace"

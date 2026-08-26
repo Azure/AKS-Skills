@@ -9,8 +9,8 @@ Deterministic validation and advisory model-backed evidence for AKS skills. Ever
 - **Trigger eval** — after the same trust boundary, asks each provisioned generator which skill should handle a query and asserts with deterministic `equals`.
 - **Baseline** — runs quality tests without the skill loaded to measure skill value-add (reporting only, not a gate).
 - **Agentic eval** — runs the real GitHub Copilot agent against scenario prompts with the full AKS skill pool available, and grades the trajectory. Two tiers:
-  - `tier: smoke` — competitive routing check: did the agent invoke the required skill and avoid the colliding skill (`skill-invocation`)? No cluster.
-  - `tier: mock` — investigation against a **canned cluster substrate**: `az`/`kubectl` are intercepted by shims that return fixtures, so the eval can grade required/disallowed tool calls and root-cause reasoning without live Azure resources. It proves trajectory behavior against those fixtures, not live AKS success.
+  - `tier: smoke` — competitive routing check: did the agent invoke the required skill, avoid the colliding skill (`skill-invocation`), and finish without crashing (`output-not-matches`)? No cluster.
+  - `tier: mock` — investigation against a **canned cluster substrate**: `az`/`kubectl` are intercepted by shims that return fixtures, so the eval can grade required/disallowed tool calls, deterministic root-cause output (`output-matches`), and rubric reasoning without live Azure resources. It proves trajectory behavior against those fixtures, not live AKS success.
 
   Uses the GitHub Copilot CLI, not Azure OpenAI. Agentic specs omit eval-level score thresholds so every configured grader must pass; a hard trajectory violation produces a non-zero process exit.
 
@@ -70,7 +70,6 @@ The mock tier proves the agent can *investigate*, not just route — without any
 
 ```yaml
 metadata:
-  case_id: my-deep-case
 options:
   disableVarExpansion: true
 vars:
@@ -144,7 +143,6 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
   metadata:
     skill: <your-skill-name>
     type: quality
-    case_id: <globally-unique-case-id>
   options:
     disableVarExpansion: true
   vars:
@@ -159,7 +157,7 @@ Agentic evals don't use these variables — they authenticate via the GitHub Cop
 ```
 
 3. Add quality tests to `promptfooconfig.yaml` under `tests:`. Trigger tests are auto-discovered via glob (`file://tests/*/trigger-tests.yaml`).
-4. If the case needs supporting content, declare only those skill-relative paths under `skill_files`, keep `disableVarExpansion: true`, and assign a unique `case_id`.
+4. If the case needs supporting content, declare only those skill-relative paths under `skill_files` and keep `disableVarExpansion: true`.
 5. (Optional) Add an agentic spec at `evals/tests/<your-skill-name>/eval.yaml`. It is auto-discovered — no config edits. Point `environment.skills` at the full competing skill pool and follow the routing (`tier: smoke`) + investigation (`tier: mock`) shape used by the existing specs:
 
 ```yaml
@@ -237,7 +235,7 @@ Then review, rename the `.autogen.yaml` files into the curated `quality-tests.ya
 | `promptfooconfig.yaml` | Quality — response depth/accuracy | skill-provider (root plus case-declared deep files) | `icontains`, `g-eval` | Advisory after trusted approval |
 | `promptfoo-routing.yaml` | Trigger — skill selection | router-provider (presents all skills) | `equals` | Advisory after trusted approval |
 | `promptfoo-baseline.yaml` | Baseline — model without skill | baseline-provider (no SKILL.md) | `g-eval` | No (report only) |
-| `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `tool-call-count`, `prompt` | Manual; failed graders exit non-zero |
+| `tests/<skill>/eval.yaml` | Agentic — competitive routing (smoke) + canned-substrate investigation (mock) | Vally `copilot-sdk` executor | `skill-invocation`, `tool-calls`, `tool-call-count`, `output-matches`, `output-not-matches`, `prompt` | Manual; failed graders exit non-zero |
 
 ## Assertion types
 

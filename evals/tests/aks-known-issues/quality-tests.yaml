@@ -13,7 +13,6 @@
   metadata:
     skill: aks-known-issues
     type: quality
-    case_id: known-issue-ephemeral-os-disk
   options:
     disableVarExpansion: true
   vars:
@@ -32,8 +31,12 @@
   metadata:
     skill: aks-known-issues
     type: quality
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-known-issues/SKILL.md"
+    skill_files:
+      - "references/error-code-map.md"
     prompt: "Cluster creation fails with LinkedAuthorizationFailed and mentions a linked network resource. Help me resolve it."
   assert:
     - type: icontains
@@ -46,8 +49,12 @@
   metadata:
     skill: aks-known-issues
     type: quality
+  options:
+    disableVarExpansion: true
   vars:
     skill_path: "aks-known-issues/SKILL.md"
+    skill_files:
+      - "references/error-code-map.md"
     prompt: "Node pool image update rejected: 'NodeImageVersion is not accepted, can only be current version or latest'. This pool was created from a snapshot. How do I fix it?"
   assert:
     - type: icontains
