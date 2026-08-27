@@ -74,6 +74,29 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npx promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json --no-progress-bar || true
 
+      # The `|| true` above keeps assertion failures reportable, but it also hides
+      # process-level failures: a crashed suite writes no artifact, yet the report
+      # would still render "no eval artifacts found" and get pushed as ready. Require
+      # each suite's result file to exist, parse, and be nonempty before publishing.
+      - name: Verify eval artifacts
+        working-directory: evals
+        run: |
+          node -e '
+            const fs = require("fs");
+            const files = ["results.json", "routing-results.json", "baseline-results.json"];
+            let bad = false;
+            for (const f of files) {
+              if (!fs.existsSync(f)) { console.error(`missing: ${f}`); bad = true; continue; }
+              let json;
+              try { json = JSON.parse(fs.readFileSync(f, "utf8")); }
+              catch (e) { console.error(`unparseable: ${f} (${e.message})`); bad = true; continue; }
+              const rows = json && json.results && json.results.results;
+              if (!Array.isArray(rows) || rows.length === 0) { console.error(`no results: ${f}`); bad = true; continue; }
+              console.log(`ok: ${f} (${rows.length} results)`);
+            }
+            if (bad) { console.error("A suite failed to produce a valid result artifact; refusing to publish."); process.exit(1); }
+          '
+
       - name: Generate report
         working-directory: evals
         env:
