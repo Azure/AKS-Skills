@@ -25,15 +25,60 @@
     - type: equals
       value: "aks-troubleshooting"
 
-- description: "DNS resolution failure should route to aks-troubleshooting (not the capture skill)"
+# These public canaries pair each AKS case with a source-shaped non-AKS near
+# miss so the full router pool exercises both the intended route and "none".
+
+- description: "Public canary quota-exceeded should route to aks-troubleshooting"
   metadata:
     skill: aks-troubleshooting
     type: trigger
+    case_id: public-canary-quota-exceeded
+    set: public-canary
+    source_url: "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/quota-exceeded-during-creation-upgrade"
   vars:
-    prompt: "Pods can't resolve DNS names, internal and external lookups both failing"
+    prompt: "An existing non-GPU AKS user node pool failed to scale. The failed Azure operation says the requested regional vCPU capacity exceeds the available quota. Investigate without changing resources."
   assert:
     - type: equals
       value: "aks-troubleshooting"
+
+- description: "Public canary quota-exceeded non-AKS near miss should route to none"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+    case_id: public-canary-quota-exceeded
+    set: public-canary
+    source_url: "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/quota-exceeded-during-creation-upgrade"
+  vars:
+    prompt: "A standalone Azure virtual machine scale set, unrelated to AKS or Kubernetes, failed because the requested regional vCPU capacity exceeds the available quota."
+  assert:
+    - type: equals
+      value: "none"
+
+- description: "Public canary dns-nsg-udp53 should route to aks-troubleshooting"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+    case_id: public-canary-dns-nsg-udp53
+    set: public-canary
+    source_url: "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/traffic-between-node-pools-is-blocked"
+  vars:
+    prompt: "Pods in an AKS cluster cannot resolve names between node pools. UDP 53 from pool-a to pool-b is denied while TCP 443 is allowed. Investigate; I am not asking for packet capture."
+  assert:
+    - type: equals
+      value: "aks-troubleshooting"
+
+- description: "Public canary dns-nsg-udp53 non-AKS near miss should route to none"
+  metadata:
+    skill: aks-troubleshooting
+    type: trigger
+    case_id: public-canary-dns-nsg-udp53
+    set: public-canary
+    source_url: "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/traffic-between-node-pools-is-blocked"
+  vars:
+    prompt: "Pods in a self-managed Kubernetes cluster outside Azure and AKS cannot resolve names between node pools. UDP 53 is denied while TCP 443 is allowed."
+  assert:
+    - type: equals
+      value: "none"
 
 - description: "Non-Kubernetes VM resize should route to no skill"
   metadata:

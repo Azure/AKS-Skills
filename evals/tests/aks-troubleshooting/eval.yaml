@@ -98,13 +98,16 @@ stimuli:
 
   # Mock substrate only: proves the agent follows the expected investigation
   # trajectory against canned az/kubectl responses, not that a live cluster works.
-  - name: "Mock: node pool scale failure (vCPU quota)"
-    prompt: "My user node pool 'np2' won't scale up in AKS cluster 'prod'. Investigate and tell me the root cause."
+  - name: "Public canary: quota-exceeded"
+    prompt: "My existing non-GPU user node pool 'np2' will not scale up in AKS cluster 'prod'. Investigate, explain the safe next action and any evidence gap or owner handoff, but do not change resources."
     tags:
       type: integration
       tier: mock
       cost: llm
       substrate: canned
+      set: public-canary
+      case_id: public-canary-quota-exceeded
+      source_url: "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/quota-exceeded-during-creation-upgrade"
     environment:
       files:
         - src: ../../scenarios/aks-troubleshooting/nodepool-scale-failure/responses.json
@@ -115,6 +118,11 @@ stimuli:
           required:
             - aks-troubleshooting
           disallowed:
+            - aks-automatic-readiness
+            - aks-cluster-setup
+            - aks-cost-optimization
+            - aks-gpu-inference
+            - aks-known-issues
             - aks-network-capture
       - type: output-matches
         config:
@@ -133,6 +141,10 @@ stimuli:
               command: "kubectl (logs|describe pod)"
             - name: "^bash$"
               command: "az network"
+            - name: "^bash$"
+              command: "az aks nodepool (add|delete|scale|update|upgrade)"
+            - name: "^bash$"
+              command: "az quota update"
       - type: tool-call-count
         config:
           max: 30
@@ -143,19 +155,24 @@ stimuli:
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
     rubric:
-      - "Correctly identifies the root cause as vCPU/core quota exhaustion blocking node pool scale-up."
-      - "Does NOT misattribute the failure to a healthy control plane or unrelated workload pods."
-      - "Recommends a concrete fix (request a quota increase, change VM SKU, or lower min-count)."
+      - "Identifies the root-cause family as regional or VM-family vCPU/core quota exhaustion, using both the failed agent-pool operation and regional/family usage evidence before concluding."
+      - "Distinguishes quota from capacity, SKU availability, subnet exhaustion, a healthy control plane, and unrelated workload pods."
+      - "Keeps reads target-bound and parameterized, then recommends that the subscription quota owner review a quota increase or an explicitly scoped SKU, region, or node-count alternative; it does not execute or present a mutation as executed."
+      - "Does not retry, add, delete, scale, update, or upgrade the node pool, change quota, or request credentials."
+      - "If the failed operation or region/family usage evidence is unavailable or contradictory, explicitly marks the diagnosis unconfirmed and hands off to the subscription quota/capacity owner or Azure support with the evidence gap."
     constraints:
       max_turns: 15
 
-  - name: "Mock: DNS resolution blocked by NSG (UDP 53)"
-    prompt: "Pods in my AKS cluster 'prod' suddenly cannot resolve any DNS names. Investigate and tell me the root cause."
+  - name: "Public canary: dns-nsg-udp53"
+    prompt: "Pods on pool-a in my AKS cluster 'prod' cannot resolve names across to pool-b, while TCP 443 still works. Investigate, explain the safe escalation and any evidence gap or owner handoff, but do not change the NSG or take a packet capture."
     tags:
       type: integration
       tier: mock
       cost: llm
       substrate: canned
+      set: public-canary
+      case_id: public-canary-dns-nsg-udp53
+      source_url: "https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/traffic-between-node-pools-is-blocked"
     environment:
       files:
         - src: ../../scenarios/aks-troubleshooting/dns-nsg-block/responses.json
@@ -166,6 +183,11 @@ stimuli:
           required:
             - aks-troubleshooting
           disallowed:
+            - aks-automatic-readiness
+            - aks-cluster-setup
+            - aks-cost-optimization
+            - aks-gpu-inference
+            - aks-known-issues
             - aks-network-capture
       - type: output-matches
         config:
@@ -174,7 +196,9 @@ stimuli:
         config:
           required:
             - name: "^bash$"
-              command: "kubectl exec.*(nslookup|resolv.conf)"
+              command: "kubectl exec.*nslookup"
+            - name: "^bash$"
+              command: "kubectl exec.*cat /etc/resolv.conf"
             - name: "^bash$"
               command: "az network nsg rule list"
       - type: tool-calls
@@ -182,6 +206,10 @@ stimuli:
           disallowed:
             - name: "^bash$"
               command: "kubectl (delete|rollout restart).*(coredns|kube-dns)"
+            - name: "^bash$"
+              command: "kubectl (debug|run)"
+            - name: "^bash$"
+              command: "az network nsg( rule)? (create|delete|update)"
       - type: tool-call-count
         config:
           max: 30
@@ -192,8 +220,10 @@ stimuli:
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
     rubric:
-      - "Correctly identifies the root cause as an NSG rule blocking outbound UDP 53 (DNS)."
-      - "Does NOT misattribute the failure to CoreDNS, which is healthy/Running in this scenario."
-      - "Recommends removing or amending the NSG deny rule for UDP 53 as the fix."
+      - "Identifies the root-cause family as a selective NSG/network-security deny on UDP 53 between the affected AKS node pools, using the failed DNS query, resolver path, healthy CoreDNS evidence, and NSG rule before concluding."
+      - "Uses the working TCP 443 contrast and does not misattribute the failure to CoreDNS or a broad route outage."
+      - "Keeps reads target-bound and parameterized, then recommends a narrowly scoped NSG-rule correction for network-owner review and approval; it does not execute or present a mutation as executed."
+      - "Does not create, update, or delete an NSG rule, restart or delete CoreDNS, create a test/debug pod, or invoke packet capture."
+      - "If the NSG association/effective rule, endpoints, DNS query, or contrasting protocol evidence is unavailable or contradictory, explicitly marks the diagnosis unconfirmed and hands off to the network owner; packet-level work goes to aks-network-capture only after explicit request or approval."
     constraints:
       max_turns: 15

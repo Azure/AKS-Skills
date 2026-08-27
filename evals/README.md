@@ -64,6 +64,15 @@ The mock tier proves the agent can *investigate*, not just route — without any
 - Each scenario lives at `evals/scenarios/<skill>/<fault>/responses.json` and is mounted into the run via the stimulus's `environment.files` (`dest: .mocks/responses.json`). Fixtures encode one real fault plus healthy *distractors* so the agent must reach the true root cause instead of stopping at the first red herring.
 - Mock results must be described as canned-substrate trajectory evidence. Live packet-capture behavior requires `evals/tests/aks-network-capture/smoke-live-cluster.sh`.
 
+#### Public AKS support canaries
+
+The two `public-canary` cases reuse the routing, quality, and full-skill Vally paths above:
+
+- `quota-exceeded` — [AKS creation or upgrade fails because of a quota error](https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/quota-exceeded-during-creation-upgrade)
+- `dns-nsg-udp53` — [Traffic between AKS node pools is blocked by a custom NSG](https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/traffic-between-node-pools-is-blocked)
+
+They contain only public Microsoft Learn-derived prompts and evidence plus canned, non-customer responses. They are CI substrate only: they are not representative of support-case distribution and do not establish model quality, runtime quality, or skill lift. Do not add private support, Portal, IcM, or Ask AKS data; customer or employee identities; private endpoints; raw internal traces; TSGs; telemetry; credentials; or internal file paths.
+
 ### Selective skill context
 
 `skill-provider.js` always loads the selected root `SKILL.md`. A quality case can request only the deep references needed for that behavior:
