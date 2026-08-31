@@ -177,6 +177,22 @@ The gate makes real LLM calls per candidate, so this is **opt-in and manual by d
 
 ### Local run
 
+For a downloaded or customized skill, use the personalized runner:
+
+```bash
+cd evals
+npm ci
+npm run eval:personalized -- \
+  --skill /path/to/custom-skill/SKILL.md \
+  --focus "Exercise the capability or command I changed"
+```
+
+It runs the skill-vs-bare-model quality gate and checks generated personalized
+routing cases against the full repository skill inventory. Add `--dry-run` to
+exercise generation and routing-plan assembly without LLM calls.
+
+For direct access to the two underlying generation stages:
+
 ```bash
 cd evals/autogen                        # zero npm deps — node built-ins only
 export AZURE_OPENAI_API_KEY="your-key"

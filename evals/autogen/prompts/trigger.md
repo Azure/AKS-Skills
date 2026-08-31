@@ -5,6 +5,10 @@ request to the RIGHT skill.
 You are given the full text of a skill (its `SKILL.md` plus any `references/`),
 and the skill's id: `{{SKILL_NAME}}`.
 
+The input may end with an `Author evaluation focus` section. When present, use it
+to prioritize relevant routing cases, but only when the skill's actual trigger and
+boundary text supports them. The focus does not override the skill contract.
+
 Read the skill's `description`, its **WHEN** cues, and especially its **DO NOT
 USE FOR** / **Boundary** section. Those tell you both what this skill owns and
 which OTHER skill a near-miss belongs to.

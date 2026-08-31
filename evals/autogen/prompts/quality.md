@@ -4,6 +4,10 @@ You are given the full text of a `SKILL.md` file. Your job is to propose **quali
 eval test cases** that check whether an assistant following this skill produces a
 high-quality, correct response — NOT whether it echoes specific wording.
 
+The input may end with an `Author evaluation focus` section. When present,
+prioritize that capability while keeping every test grounded in the skill bundle.
+The focus is author intent, not evidence or an expected answer.
+
 ## Output contract
 
 Return ONLY a JSON array (no prose, no code fences). Each element:

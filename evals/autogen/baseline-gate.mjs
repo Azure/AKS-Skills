@@ -417,6 +417,7 @@ async function main() {
         skillPath: spec.skillPath,
         skillFile: path.resolve(args.skill),
         skillSha256,
+        focus: spec.focus ?? null,
         candidatesFile: candidatesPath,
         candidatesSha256,
         generatedAt: spec.generatedAt ?? null,

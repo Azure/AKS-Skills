@@ -27,6 +27,10 @@ on:
         required: false
         default: '8'
         type: string
+      focus:
+        description: 'Optional capability or change to emphasize in generated evals'
+        required: false
+        type: string
       dry_run:
         description: 'Skip LLM calls (emit fixed samples) to test plumbing only'
         required: false
@@ -82,14 +86,16 @@ jobs:
           SKILL: ${{ inputs.skill }}
           MIN: ${{ inputs.min }}
           MAX: ${{ inputs.max }}
+          FOCUS: ${{ inputs.focus }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           DRY=''; [ "$DRY_RUN" = 'true' ] && DRY='--dry-run'
+          FOCUS_ARGS=(); [ -n "$FOCUS" ] && FOCUS_ARGS=(--focus "$FOCUS")
           node scaffold-eval.mjs \
             --skill "../../$SKILL_MD" --skill-path "$SKILL_PATH" --system "$SKILL" \
             --min "$MIN" --max "$MAX" \
-            --out "/tmp/$SKILL.candidates.json" $DRY
+            --out "/tmp/$SKILL.candidates.json" "${FOCUS_ARGS[@]}" $DRY
 
       - name: Gate + render candidate tests
         working-directory: evals/autogen

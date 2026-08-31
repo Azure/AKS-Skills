@@ -11,6 +11,7 @@
     "eval:trigger": "promptfoo eval -c promptfoo-routing.yaml -o routing-results.json",
     "eval:baseline": "promptfoo eval -c promptfoo-baseline.yaml -o baseline-results.json",
     "eval:all": "npm run eval; npm run eval:trigger",
+    "eval:personalized": "node autogen/run.mjs",
     "eval:view": "promptfoo view",
     "lint:agentic": "vally lint --eval-spec tests",
     "eval:agentic": "vally eval --workers 2",

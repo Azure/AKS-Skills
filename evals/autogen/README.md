@@ -25,6 +25,37 @@ lab or the author's environment. **Zero npm dependencies** — Node built-ins on
 scaffold-eval.mjs  →  <skill>.candidates.json  →  baseline-gate.mjs  →  *.autogen.yaml (+ wiring.md)
 ```
 
+## Personalized local evaluation
+
+Evaluate a downloaded or customized skill against the bare AKS baseline and the
+repository's full skill inventory:
+
+```bash
+cd evals
+npm ci
+npm run eval:personalized -- \
+	--skill /path/to/custom-skill/SKILL.md \
+	--focus "Exercise the capability or command I changed"
+```
+
+`--focus` is optional author intent. It prioritizes relevant quality and routing
+candidates, but it does not supply an expected answer or bypass grounding and the
+baseline gate. The routing run replaces the stock skill description with the
+customized skill having the same frontmatter `name`, then runs the generated
+personalized cases while making every repository skill available to the router.
+
+Use `--skills-root` when evaluating against a different skill inventory,
+`--no-routing` for quality-only generation, and `--dry-run` to validate plumbing
+without model calls. Outputs are written under `autogen-out/<skill>/` by default:
+
+- `quality-tests.autogen.yaml` and `trigger-tests.autogen.yaml`
+- `gate-report.json` with skill/baseline scores, answers, and margins
+- `routing-results.json` for a real routing run
+- `personalized-summary.json` with quality and routing totals
+
+The local command uses the dependencies installed by `npm ci`; the underlying
+generator scripts remain portable Node tooling.
+
 ## Credentials (runtime env)
 
 | Variable | Notes |

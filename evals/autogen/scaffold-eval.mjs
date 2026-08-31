@@ -11,6 +11,8 @@
 //     --skill ../AKS-Skills/skills/aks-troubleshooting/SKILL.md \
 //     --skill-path aks-troubleshooting/SKILL.md \
 //     --system aks-troubleshooting \
+//     [--skills-root ../AKS-Skills/skills] \
+//     [--focus "Exercise the custom DNS diagnostic command"] \
 //     --out out/aks-troubleshooting.candidates.json \
 //     [--min 4] [--max 8] [--no-triggers] [--dry-run]
 //
@@ -54,8 +56,13 @@ function dedupeBy(items, keyFn) {
 // The registered skill IDs are the subdirectory names of the skills/ root that
 // holds this skill (skills/<id>/SKILL.md). Boundary route targets must be one of
 // these (plus the router's "none"); anything else is a hallucinated route.
-export function registeredSkillIds(skillFile) {
-  const root = path.resolve(path.dirname(skillFile), "..");
+export function registeredSkillIds(skillFile, skillsRoot) {
+  const root = skillsRoot
+    ? path.resolve(skillsRoot)
+    : path.resolve(path.dirname(skillFile), "..");
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    throw new Error(`skills root is not a directory: ${root}`);
+  }
   const ids = new Set(["none"]);
   for (const d of fs.readdirSync(root, { withFileTypes: true })) {
     // A directory only counts as a registered skill if it actually contains a
@@ -185,7 +192,14 @@ async function main() {
   const skillFile = path.resolve(args.skill);
   const bundle = loadSkillBundle(skillFile);
   const skillName = bundle.name || args.system;
-  const knownSkills = registeredSkillIds(skillFile);
+  const knownSkills = registeredSkillIds(skillFile, args["skills-root"]);
+  const focus = typeof args.focus === "string" ? args.focus.trim() : "";
+  if (focus.length > 2000) {
+    throw new Error(`--focus must be 2000 characters or fewer (got ${focus.length})`);
+  }
+  const generationInput = focus
+    ? `${bundle.text}\n\n---\n\n# Author evaluation focus\n\n${focus}`
+    : bundle.text;
   console.log(
     `bundle: ${bundle.files.length} file(s) loaded ` +
       `(SKILL.md + ${bundle.files.length - 1} reference file(s))`
@@ -204,7 +218,7 @@ async function main() {
       .readFileSync(path.join(__dirname, "prompts", "quality.md"), "utf8")
       .replaceAll("{{MIN}}", String(min))
       .replaceAll("{{MAX}}", String(max));
-    const { text } = await chat({ system: template, user: bundle.text });
+    const { text } = await chat({ system: template, user: generationInput });
     raw = parseJsonLoose(text);
 
     if (args["no-triggers"]) {
@@ -213,7 +227,7 @@ async function main() {
       const triggerTemplate = fs
         .readFileSync(path.join(__dirname, "prompts", "trigger.md"), "utf8")
         .replaceAll("{{SKILL_NAME}}", skillName);
-      const tResp = await chat({ system: triggerTemplate, user: bundle.text });
+      const tResp = await chat({ system: triggerTemplate, user: generationInput });
       triggers = validateTriggers(parseJsonLoose(tResp.text), skillName, knownSkills);
     }
   }
@@ -237,6 +251,7 @@ async function main() {
     provenance: "autogen",
     generator: SCAFFOLD,
     generatedAt: new Date().toISOString(),
+    focus: focus || null,
     context: {
       repoCommit: repoCommit(),
       files: bundle.files,
