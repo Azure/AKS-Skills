@@ -41,10 +41,6 @@ stimuli:
       - type: output-not-matches
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
-    constraints:
-      expect_skills:
-        - aks-network-capture
-
   # ── Routing: egress blocked ──
   - name: "Routing: egress traffic blocked"
     prompt: "Pods in my AKS cluster can't reach external services and egress seems blocked. What should I do?"
@@ -61,10 +57,6 @@ stimuli:
       - type: output-not-matches
         config:
           pattern: "(?i)fatal error|unhandled exception|stack trace"
-    constraints:
-      expect_skills:
-        - aks-network-capture
-
   # ── Mock: DNS failure caused by an NSG blocking UDP 53 ──
   # Runs the agent against a fake-broken cluster (shimmed az/kubectl). Ground
   # truth = NSG deny rule on outbound UDP 53; CoreDNS pods are a healthy distractor.
@@ -82,6 +74,10 @@ stimuli:
         - src: ../../scenarios/aks-network-capture/dns-nsg-block/responses.json
           dest: .mocks/responses.json
     graders:
+      - type: skill-invocation
+        config:
+          required:
+            - aks-network-capture
       # Outcome (deterministic): named the real cause
       - type: output-matches
         config:
@@ -117,6 +113,4 @@ stimuli:
       - "Does NOT misattribute the failure to CoreDNS, which is healthy/Running in this scenario."
       - "Recommends removing or amending the NSG deny rule for UDP 53 as the fix."
     constraints:
-      expect_skills:
-        - aks-network-capture
       max_turns: 15
