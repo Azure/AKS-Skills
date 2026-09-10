@@ -18,10 +18,10 @@
     "report": "node scripts/generate-report.mjs"
   },
   "devDependencies": {
-    "@microsoft/vally": "^0.6.0",
-    "@microsoft/vally-cli": "^0.6.0",
-    "js-yaml": "^4.3.2",
-    "promptfoo": "^0.121.20"
+    "@microsoft/vally": "^0.15.0",
+    "@microsoft/vally-cli": "^0.15.0",
+    "js-yaml": "^5.4.1",
+    "promptfoo": "^0.122.2"
   },
   "overrides": {
     "adm-zip": "0.6.0",
