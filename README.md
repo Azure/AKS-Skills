@@ -1,5 +1,27 @@
 # AKS Skills
 
+> [!IMPORTANT]
+> **This repository is deprecated and will be archived.** AKS Skills now ships from [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure) through the [`azure-skills` marketplace](https://github.com/microsoft/azure-skills). This repository no longer receives updates.
+>
+> | Skill here | New home |
+> | --- | --- |
+> | `aks-troubleshooting`, `aks-known-issues`, `aks-network-capture`, `aks-gpu-inference` | Optional `aks-skills` plugin: `aks-skills@azure-skills` |
+> | `aks-cluster-setup`, `aks-automatic-readiness` | Base `azure` plugin: the `azure-kubernetes` skill (includes AKS Automatic readiness) |
+> | `aks-cost-optimization` | `azure-cost` plugin: `cost-optimization` and `cost-analysis` |
+>
+> **To switch** in GitHub Copilot CLI or Claude Code:
+>
+> ```text
+> /plugin uninstall aks@aks-skills
+> /plugin marketplace remove aks-skills
+> /plugin marketplace add microsoft/azure-skills
+> /plugin install aks-skills@azure-skills
+> ```
+>
+> Azure SRE Agent: add the `microsoft/azure-skills` marketplace and select the `aks-skills` plugin. Folder-based hosts: use [`microsoft/skills/.github/plugins/aks-skills/skills`](https://github.com/microsoft/skills/tree/main/.github/plugins/aks-skills/skills).
+>
+> Report issues and contribute at [microsoft/GitHub-Copilot-for-Azure](https://github.com/microsoft/GitHub-Copilot-for-Azure/issues).
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Agent Skills](https://img.shields.io/badge/format-Agent%20Skills-5b9bff.svg)](https://agentskills.io)
 [![Azure Kubernetes Service](https://img.shields.io/badge/Azure-Kubernetes%20Service-0078d4.svg)](https://learn.microsoft.com/azure/aks/)
